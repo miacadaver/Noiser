@@ -1,0 +1,2504 @@
+﻿using Seeker.Chatroom;
+using Seeker.Services;
+using Seeker.Extensions.SearchResponseExtensions;
+using Seeker.Helpers;
+using Seeker.Search;
+using Android.Animation;
+using Android.Content;
+using Android.Graphics;
+using Android.OS;
+using Android.Views;
+using Android.Widget;
+using AndroidX.Core.Content;
+using AndroidX.Fragment.App;
+using AndroidX.RecyclerView.Widget;
+using Google.Android.Material.Button;
+using Google.Android.Material.BottomNavigation;
+using Google.Android.Material.BottomSheet;
+using Google.Android.Material.FloatingActionButton;
+using Java.Lang;
+using Soulseek;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+
+using Common;
+using Common.Search;
+using Android.Graphics.Drawables;
+namespace Seeker
+{
+    public partial class SearchFragment : Fragment
+    {
+        public static event EventHandler<EventArgs> SearchHistoryCleared;
+
+        public static void RaiseSearchHistoryCleared()
+        {
+            SearchHistoryCleared?.Invoke(null, EventArgs.Empty);
+        }
+
+        public View rootView = null;
+        private ViewFlipper searchEmptyStateFlipper = null;
+        private TextView noResultsSubtitle = null;
+        private TextView allFilteredTitle = null;
+        private TextView searchFailedReason = null;
+        private View linearProgressIndicator = null;
+        private TextView searchLoadingQueryText = null;
+        private TextView searchLoadingTitle = null;
+        private System.Diagnostics.Stopwatch searchStopwatch;
+        private Handler spinnerTimerHandler;
+        private Java.Lang.Runnable spinnerTimerTick;
+        private bool spinnerTimerRunning;
+        private View wishlistBanner;
+        private TextView wishlistBannerText;
+        private Handler wishlistBannerHandler;
+        private Java.Lang.Runnable wishlistBannerTick;
+        private Context context;
+        public static bool ExpandAllResults { get => PreferencesState.ExpandAllResults; set => PreferencesState.ExpandAllResults = value; }
+        public static IMenu ActionBarMenu = null;
+        public static int LastSearchResponseCount = -1;
+
+        public override void OnStart()
+        {
+            SearchFragment.Instance = this;
+            Logger.Debug("SearchFragmentOnStart");
+            base.OnStart();
+        }
+
+        public override void OnResume()
+        {
+            base.OnResume();
+            Logger.Debug("Search Fragment On Resume");
+            //you had a pending intent that could not get handled til now.
+            if (MainActivity.goToSearchTab != int.MaxValue)
+            {
+                Logger.Debug("Search Fragment On Resume for wishlist");
+                this.GoToTab(MainActivity.goToSearchTab, false, true);
+                MainActivity.goToSearchTab = int.MaxValue;
+            }
+            RefreshWishlistBanner();
+            SearchHistoryCleared += OnSearchHistoryCleared;
+            RefreshSearchHistoryDropdown();
+        }
+
+        private static void ClearFilterStringAndCached(bool force = false)
+        {
+            if (!PreferencesState.FilterSticky || force)
+            {
+                // Clear()
+                SearchTabHelper.TextFilter.Reset();
+                PreferencesState.FilterStickyString = string.Empty;
+
+                PreferencesState.FilterFormat = FormatFilterType.Any;
+                PreferencesState.FilterMinBitrateKbs = 0;
+                PreferencesManager.SaveFilterControlsState();
+            }
+        }
+
+        private void ResetFilterControlsUI(bool force)
+        {
+            if (!PreferencesState.FilterSticky || force)
+            {
+                EditText filterText = rootView.FindViewById<EditText>(Resource.Id.filterText);
+                if (filterText.Text != string.Empty)
+                {
+                    //else you trigger the event.
+                    filterText.Text = string.Empty;
+                    UpdateDrawableState(filterText, true);
+                }
+
+                var formatToggle = rootView?.FindViewById<MaterialButtonToggleGroup>(Resource.Id.formatToggleGroup);
+                formatToggle?.Check(Resource.Id.formatAny);
+
+                var bitrateToggle = rootView?.FindViewById<MaterialButtonToggleGroup>(Resource.Id.bitrateToggleGroup);
+                bitrateToggle?.Check(Resource.Id.bitrateAny);
+            }
+        }
+
+        /// <summary>
+        /// Keeps a horizontally-scrolling child RecyclerView's drags from being intercepted by an
+        /// enclosing ViewPager2 (which would change tabs). Requests disallow-intercept on touch down.
+        /// </summary>
+        private sealed class DisallowParentHorizontalInterceptListener : Java.Lang.Object, RecyclerView.IOnItemTouchListener
+        {
+            public bool OnInterceptTouchEvent(RecyclerView rv, MotionEvent e)
+            {
+                if (e.Action == MotionEventActions.Down)
+                {
+                    rv.Parent?.RequestDisallowInterceptTouchEvent(true);
+                }
+                return false;
+            }
+
+            public void OnTouchEvent(RecyclerView rv, MotionEvent e)
+            {
+            }
+
+            public void OnRequestDisallowInterceptTouchEvent(bool disallowIntercept)
+            {
+            }
+        }
+
+        public override void OnCreateOptionsMenu(IMenu menu, MenuInflater inflater)
+        {
+            inflater.Inflate(Resource.Menu.search_menu, menu);
+            var searchIcon = new CrossFadeDrawable(
+                ContextCompat.GetDrawable(Context, Resource.Drawable.baseline_search_white_24),
+                ContextCompat.GetDrawable(Context, Resource.Drawable.baseline_close_white_24));
+            searchIcon.ShowSecond(SearchTabHelper.CurrentlySearching, 0);
+            menu.FindItem(Resource.Id.action_search).SetIcon(searchIcon);
+            if (SearchTabHelper.SearchTarget == SearchTarget.Wishlist)
+            {
+                menu.FindItem(Resource.Id.action_add_to_wishlist).SetVisible(false);
+            }
+            else
+            {
+                menu.FindItem(Resource.Id.action_add_to_wishlist).SetVisible(true);
+            }
+
+            ActionBarMenu = menu;
+            base.OnCreateOptionsMenu(menu, inflater);
+        }
+
+        public override void OnPrepareOptionsMenu(IMenu menu)
+        {
+            var toggleItem = menu.FindItem(Resource.Id.action_toggle_expand_all);
+            if (toggleItem != null)
+            {
+                bool isExpandable = PreferencesState.SearchResultStyle.HasFlag(SearchResultStyleEnum.Expandable);
+                toggleItem.SetVisible(isExpandable);
+                if (isExpandable)
+                {
+                    toggleItem.SetTitle(ExpandAllResults
+                        ? Resource.String.collapse_all
+                        : Resource.String.expand_all);
+                }
+            }
+            //var groupedItem = menu.FindItem(Resource.Id.action_toggle_grouped_chips);
+            //if (groupedItem != null)
+            //{
+            //    groupedItem.SetChecked(PreferencesState.SmartFilterStyle == SmartFilterStyle.Grouped);
+            //}
+            base.OnPrepareOptionsMenu(menu);
+        }
+
+        public static void SetCustomViewTabNumberInner(View container)
+        {
+            TextView numberText = container?.FindViewById<TextView>(Resource.Id.search_tabs_number);
+            if (numberText != null)
+            {
+                int numTabs = SearchTabHelper.SearchTabCollection.Keys.Count;
+                string text = numTabs >= 100 ? "99+" : numTabs.ToString();
+                numberText.Text = text;
+            }
+            else
+            {
+                // this should not happen anymore
+                Logger.Debug("SetCustomViewTabNumberInner numberText is null");
+            }
+        }
+
+        public void SetCustomViewTabNumberImageViewState()
+        {
+            SetCustomViewTabNumberInner(GetActionBarCustomView()?.FindViewById<FrameLayout>(Resource.Id.search_tabs));
+        }
+
+        /// <summary>
+        /// The app bar custom view (custom_menu_layout: the search box + the tab count icon).
+        /// </summary>
+        private View GetActionBarCustomView()
+        {
+            if (this.Activity is AndroidX.AppCompat.App.AppCompatActivity appCompat)
+            {
+                return appCompat.SupportActionBar?.CustomView;
+            }
+            return SeekerState.MainActivityRef?.SupportActionBar?.CustomView;
+        }
+
+        private void SetFilterState()
+        {
+            EditText filter = rootView.FindViewById<EditText>(Resource.Id.filterText);
+            if (PreferencesState.FilterSticky)
+            {
+                filter.Text = PreferencesState.FilterStickyString;
+            }
+            else
+            {
+                filter.Text = SearchTabHelper.TextFilter.FilterString;
+            }
+            UpdateDrawableState(filter, true);
+        }
+
+        /// <summary>
+        /// UI thread only, sets drawable, empty search state, header state
+        /// </summary>
+        public static void SetSearchingState(int tabId, bool searching)
+        {
+            SearchTab tab = SearchTabHelper.SearchTabCollection[tabId];
+            bool changed = tab.CurrentlySearching != searching;
+            tab.CurrentlySearching = searching;
+            if (tabId != SearchTabHelper.CurrentTab)
+            {
+                return;
+            }
+            SearchFragment fragment = SearchFragment.Instance;
+            if (fragment == null)
+            {
+                return;
+            }
+            if (changed)
+            {
+                Logger.Debug("search icon: " + (searching ? "search -> close" : "close -> search"));
+                fragment.GetTransitionDrawable()?.ShowSecond(searching, SearchToCloseDuration);
+            }
+            RefreshSearchStateUi();
+        }
+
+        /// <summary>
+        /// Re-renders the parts of the current tab that depend on searching state and result counts.
+        /// </summary>
+        private static void RefreshSearchStateUi()
+        {
+            SearchFragment.Instance?.UpdateEmptyState();
+            SearchFragment.Instance?.NotifySearchHeaderChanged();
+        }
+
+        private void SetTransitionDrawableState()
+        {
+            GetTransitionDrawable()?.ShowSecond(SearchTabHelper.CurrentlySearching, 0);
+        }
+
+        public void GoToTab(int tabToGoTo, bool force, bool fromIntent = false)
+        {
+            if (!force && tabToGoTo == SearchTabHelper.CurrentTab)
+            {
+                return;
+            }
+
+            if (!SearchTabHelper.SearchTabCollection.ContainsKey(tabToGoTo))
+            {
+                SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.search_tab_error), ToastLength.Long);
+                return;
+            }
+
+            int previousTab = SearchTabHelper.CurrentTab;
+            SearchTabHelper.CurrentTab = tabToGoTo;
+
+            if (previousTab != tabToGoTo)
+            {
+                SearchTabHelper.ClearUnseenForTab(previousTab, SeekerState.ActiveActivityRef);
+            }
+
+            if (SeekerState.MainActivityRef == null)
+            {
+                Logger.Firebase("mainActivityRef is null GoToTab");
+            }
+
+            // if not yet loaded, render the UI with no results now, and then on 
+            //   finish loading, re-render with complete results.
+            Task loadTask = null;
+            if (tabToGoTo < 0 && !SearchTabHelper.SearchTabCollection[tabToGoTo].IsLoaded())
+            {
+                loadTask = SearchTabHelper.EnsureLoadedAsync(tabToGoTo, SeekerState.ActiveActivityRef);
+            }
+
+            SeekerState.MainActivityRef?.RunOnUiThread(() => RenderTabUi(tabToGoTo, fromIntent));
+
+            if (loadTask != null && !loadTask.IsCompleted)
+            {
+                loadTask.ContinueWith(_ =>
+                {
+                    SeekerState.MainActivityRef?.RunOnUiThread(() =>
+                    {
+                        if (SearchTabHelper.CurrentTab == tabToGoTo)
+                        {
+                            RenderTabUi(tabToGoTo, fromIntent);
+                        }
+                    });
+                }, TaskScheduler.Default);
+            }
+        }
+
+        private void RenderTabUi(int tabToGoTo, bool fromIntent)
+        {
+            var searchTab = SearchTabHelper.SearchTabCollection[tabToGoTo];
+
+            RenderActionBarCustomView(GetActionBarCustomView(), searchTab.LastSearchTerm);
+            if (!fromIntent)
+            {
+                SetTransitionDrawableState();
+            }
+            SetFilterState();
+
+            bool isLoaded = searchTab.IsLoaded();
+            var responsesForRender = isLoaded ? searchTab.SearchResponses : new List<SearchResponse>();
+
+            if (isLoaded && (searchTab.TextFilter.IsFiltered || AreChipsFiltering() || AreFilterControlsActive()))
+            {
+                if (searchTab.LastSearchResponseCount != responsesForRender.Count)
+                {
+                    Logger.Debug("filtering...");
+                    UpdateFilteredResponses(searchTab);
+                }
+                recyclerViewSearch.SetAdapter(CreateSearchAdapter(searchTab, searchTab.UI_SearchResponses));
+            }
+            else
+            {
+                searchTab.UI_SearchResponses = responsesForRender.ToList();
+                recyclerViewSearch.SetAdapter(CreateSearchAdapter(searchTab, searchTab.UI_SearchResponses));
+            }
+
+            SearchFragment.Instance.RefreshUIChipAdapterFromData();
+            searchTab.LastSearchResponseCount = responsesForRender.Count;
+
+            if (!fromIntent)
+            {
+                GetTransitionDrawable()?.InvalidateSelf();
+            }
+            this.Activity?.InvalidateOptionsMenu();
+
+            if (!fromIntent)
+            {
+                SetTransitionDrawableState();
+            }
+            UpdateEmptyState();
+            RefreshWishlistBanner();
+            RefreshSearchResultsHeader(searchResultsHeaderView);
+        }
+
+
+
+
+        public override bool OnOptionsItemSelected(IMenuItem item)
+        {
+
+            switch (item.ItemId)
+            {
+                case Resource.Id.action_search_target:
+                    if (SearchTabHelper.SearchTarget == SearchTarget.Wishlist)
+                    {
+                        SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.wishlist_tab_target), ToastLength.Long);
+                        return true;
+                    }
+                    ShowChangeTargetDialog();
+                    return true;
+                case Resource.Id.action_sort_results_by:
+                    ShowChangeSortOrderDialog();
+                    return true;
+                case Resource.Id.action_search:
+                    if (SearchTabHelper.CurrentlySearching) //that means the user hit the "X" button
+                    {
+                        CancelSearch();
+                    }
+                    else
+                    {
+                        SubmitSearch(GetSearchBoxText());
+                    }
+                    return true;
+                case Resource.Id.action_change_result_style:
+                    ShowChangeResultStyleBottomDialog();
+                    return true;
+                case Resource.Id.action_toggle_expand_all:
+                    ExpandAllResults = !ExpandAllResults;
+                    this.Activity?.InvalidateOptionsMenu();
+                    SearchResultStyleChanged();
+                    return true;
+                //case Resource.Id.action_toggle_grouped_chips:
+                //    PreferencesState.SmartFilterStyle =
+                //        PreferencesState.SmartFilterStyle == SmartFilterStyle.Grouped
+                //            ? SmartFilterStyle.Flat
+                //            : SmartFilterStyle.Grouped;
+                //    PreferencesManager.SaveSmartFilterStyle();
+                //    SwapChipAdapter();
+                //    this.Activity?.InvalidateOptionsMenu();
+                //    return true;
+                case Resource.Id.action_add_to_wishlist:
+                    AddSearchToWishlist();
+                    return true;
+            }
+            return base.OnOptionsItemSelected(item);
+        }
+
+        private static AutoCompleteTextView GetSearchBox()
+        {
+            return SeekerState.MainActivityRef?.SupportActionBar?.CustomView?.FindViewById<AutoCompleteTextView>(Resource.Id.searchHere);
+        }
+
+        private static string GetSearchBoxText()
+        {
+            AutoCompleteTextView searchBox = GetSearchBox();
+            return searchBox == null ? SearchingText : searchBox.Text;
+        }
+
+        /// <summary>
+        /// Entrypoint for user-initiated search (toolbar button, IME action,hardware ENTER or intent search dialog)
+        /// </summary>
+        private void SubmitSearch(string searchText)
+        {
+            Logger.Debug("Searching: " + searchText);
+            int tabId = SearchTabHelper.CurrentTab;
+            SearchTab tab = SearchTabHelper.SearchTabCollection[tabId];
+            if (tab.DiskLoadInProgress)
+            {
+                tab.DiskLoadTask.ContinueWith(_ => SeekerApplication.RunOnUIThread(() => SubmitSearch(searchText)), TaskScheduler.Default);
+                return;
+            }
+
+            // precheck
+            if (string.IsNullOrWhiteSpace(searchText))
+            {
+                SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.no_search_text), ToastLength.Short);
+                return;
+            }
+            if (!TryBuildSearchScope(out SearchScope scope))
+            {
+                return;
+            }
+
+            tab.LastSearchError = string.Empty;
+
+            // Important: Swap token in before cancelling
+            CancellationTokenSource superseded = tab.CancellationTokenSource;
+            tab.CancellationTokenSource = new CancellationTokenSource();
+            superseded?.Cancel();
+
+            AutoCompleteTextView searchBox = GetSearchBox();
+            searchBox?.DismissDropDown();
+            searchBox?.ClearFocus(); // gets rid of the blinking cursor
+            UiHelpers.HideSoftKeyboard(rootView);
+
+            SetSearchingState(tabId, true);
+            SearchAPI(tab.CancellationTokenSource.Token, searchText, tabId, scope);
+        }
+
+        /// <summary>
+        /// Builds search scope or false if invalid
+        /// </summary>
+        private static bool TryBuildSearchScope(out SearchScope scope)
+        {
+            scope = null;
+            switch (SearchTabHelper.SearchTarget)
+            {
+                case SearchTarget.UserList:
+                    var userlist = CommonState.UserList;
+                    if (userlist == null || userlist.Count == 0)
+                    {
+                        SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.user_list_empty), ToastLength.Short);
+                        return false;
+                    }
+                    scope = new SearchScope(SearchScopeType.User, CommonState.UserList.Select(item => item.Username).ToArray());
+                    return true;
+                case SearchTarget.ChosenUser:
+                    if (string.IsNullOrEmpty(SearchTabHelper.SearchTargetChosenUser))
+                    {
+                        SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.no_user), ToastLength.Short);
+                        return false;
+                    }
+                    scope = new SearchScope(SearchScopeType.User, new string[] { SearchTabHelper.SearchTargetChosenUser });
+                    return true;
+                case SearchTarget.Room:
+                    if (string.IsNullOrEmpty(SearchTabHelper.SearchTargetChosenRoom))
+                    {
+                        SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.no_room), ToastLength.Short);
+                        return false;
+                    }
+                    scope = new SearchScope(SearchScopeType.Room, new string[] { SearchTabHelper.SearchTargetChosenRoom });
+                    return true;
+                default:
+                    // AllUsers, and Wishlist - a manual search run from a wishlist tab is a plain network search.
+                    scope = new SearchScope(SearchScopeType.Network);
+                    return true;
+            }
+        }
+
+        /// <summary>
+        /// The toolbar X: stop the current tab's search and keep whatever results it has so far.
+        /// </summary>
+        private void CancelSearch()
+        {
+            SearchTabHelper.CancellationTokenSource?.Cancel();
+            SetSearchingState(SearchTabHelper.CurrentTab, false);
+        }
+
+        public void AddSearchToWishlist()
+        {
+            //here we "fork" the current search, adding it to the wishlist
+            if (SearchTabHelper.LastSearchTerm == string.Empty || SearchTabHelper.LastSearchTerm == null)
+            {
+                SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.perform_search_first), ToastLength.Long);
+                return;
+            }
+            SearchTabHelper.AddWishlistSearchTabFromCurrent();
+            SeekerApplication.Toaster.ShowToast(string.Format(SeekerApplication.GetString(Resource.String.added_to_wishlist), SearchTabHelper.LastSearchTerm), ToastLength.Long);
+            this.SetCustomViewTabNumberImageViewState();
+        }
+
+        public static SearchFragment GetSearchFragment()
+        {
+            foreach (Fragment frag in SeekerState.MainActivityRef.SupportFragmentManager.Fragments)
+            {
+                if (frag is SearchFragment sfrag)
+                {
+                    return sfrag;
+                }
+            }
+            return null;
+        }
+
+        public void ShowSearchTabsDialog()
+        {
+            SearchTabDialog searchTabDialog = new SearchTabDialog();
+            if (!this.IsAdded || this.Activity == null) //then child fragment manager will likely be null
+            {
+                Logger.InfoFirebase("ShowSearchTabsDialog, fragment no longer attached...");
+
+                searchTabDialog.Show(SeekerState.MainActivityRef.SupportFragmentManager, "search tab dialog");
+                //I tested this many times (outside of this clause).  Works very well.x
+                //But I dont know if not attached fragment will just cause other issues later on... yes it will as for example adding a new search tab, there are methods that rely on this.Activity and this.rootView etc.
+                return;
+            }
+            searchTabDialog.Show(this.ChildFragmentManager, "search tab dialog");
+        }
+
+        public static void UpdateDrawableState(EditText actv, bool purple = false)
+        {
+            if (actv.Text == string.Empty || actv.Text == null)
+            {
+                actv.SetCompoundDrawables(null, null, null, null);
+            }
+            else
+            {
+                var cancel = ContextCompat.GetDrawable(SeekerState.MainActivityRef, Resource.Drawable.ic_cancel_black_24dp);
+                cancel.SetBounds(0, 0, cancel.IntrinsicWidth, cancel.IntrinsicHeight);
+                if (purple)
+                {
+                    //https://developer.android.com/reference/android/graphics/PorterDuff.Mode
+                    cancel.SetColorFilter(UiHelpers.GetColorFromAttribute(SeekerState.ActiveActivityRef, Resource.Attribute.mainTextColor), PorterDuff.Mode.SrcAtop);
+                }
+                actv.SetCompoundDrawables(null, null, cancel, null);
+            }
+        }
+
+
+        public static void ConfigureSupportCustomView(View customView)
+        {
+            Logger.Debug("ConfigureSupportCustomView");
+            AutoCompleteTextView actv = customView.FindViewById<AutoCompleteTextView>(Resource.Id.searchHere);
+            FrameLayout iv = customView.FindViewById<FrameLayout>(Resource.Id.search_tabs);
+
+            iv.Click -= Iv_Click;
+            iv.Click += Iv_Click;
+            actv.Touch -= Actv_Touch;
+            actv.Touch += Actv_Touch;
+            actv.EditorAction -= Search_EditorActionHELPER;
+            actv.EditorAction += Search_EditorActionHELPER;
+            actv.KeyPress -= Actv_KeyPressHELPER;
+            actv.KeyPress += Actv_KeyPressHELPER;
+            actv.FocusChange -= UiHelpers.OnFocusAdjustNothing;
+            actv.FocusChange += UiHelpers.OnFocusAdjustNothing;
+            actv.TextChanged -= Actv_TextChanged;
+            actv.TextChanged += Actv_TextChanged;
+
+            actv.Adapter = new ArrayAdapter<string>(SeekerState.ActiveActivityRef, Resource.Layout.search_dropdown_item, PreferencesState.SearchHistory);
+
+            RenderActionBarCustomView(customView, SearchingText);
+        }
+
+        /// <summary>
+        /// Renders every app bar custom view widget - search text, hint, its clear button, and the tab
+        /// count badge - from the current tab's state. 
+        /// </summary>
+        public static void RenderActionBarCustomView(View customView, string searchText)
+        {
+            SearchingText = searchText ?? string.Empty;
+
+            AutoCompleteTextView actv = customView?.FindViewById<AutoCompleteTextView>(Resource.Id.searchHere);
+            if (actv != null)
+            {
+                try
+                {
+                    actv.Text = SearchingText;
+                    UpdateDrawableState(actv);
+                }
+                catch (System.ArgumentException e)
+                {
+                    Logger.Firebase("ArugmentException Value does not fall within range: " + SearchingText + " " + e.Message);
+                }
+                catch (System.Exception e)
+                {
+                    Logger.Firebase("catchException Value does not fall within range: " + SearchingText + " " + e.Message);
+                }
+                SetSearchHintTarget(SearchTabHelper.SearchTarget, actv);
+            }
+
+            SetCustomViewTabNumberInner(customView?.FindViewById<FrameLayout>(Resource.Id.search_tabs));
+        }
+
+        private static void Actv_Touch(object sender, View.TouchEventArgs e)
+        {
+            EditText editText = sender as EditText;
+            e.Handled = false;
+            if (e.Event.GetX() >= (editText.Width - editText.TotalPaddingRight))
+            {
+                if (e.Event.Action == MotionEventActions.Up)
+                {
+                    editText.Text = string.Empty;
+                    UpdateDrawableState(editText);
+                }
+            }
+        }
+
+        private static string SearchingText = string.Empty;
+
+        private static void Actv_TextChanged(object sender, Android.Text.TextChangedEventArgs e)
+        {
+            //if it went from non empty to empty, or vice versa
+            if (SearchingText == string.Empty && e.Text.ToString() != string.Empty)
+            {
+                UpdateDrawableState(sender as EditText);
+            }
+            else if (SearchingText != string.Empty && e.Text.ToString() == string.Empty)
+            {
+                UpdateDrawableState(sender as EditText);
+            }
+            SearchingText = e.Text.ToString();
+        }
+
+        public void RefreshWishlistBanner()
+        {
+            if (wishlistBanner == null || wishlistBannerText == null)
+            {
+                return;
+            }
+
+            if (!SearchTabHelper.SearchTabCollection.TryGetValue(SearchTabHelper.CurrentTab, out var tab) || tab.SearchTarget != SearchTarget.Wishlist)
+            {
+                wishlistBanner.Visibility = ViewStates.Gone;
+                StopWishlistBannerTicker();
+                return;
+            }
+
+            wishlistBanner.Visibility = ViewStates.Visible;
+            wishlistBannerText.Text = FormatWishlistNextRunText(tab);
+            StartWishlistBannerTicker();
+        }
+
+        private string FormatWishlistNextRunText(SearchTab tab)
+        {
+            if (WishlistUtil.IsFull(tab))
+            {
+                return SeekerApplication.GetString(Resource.String.wishlist_max_results_reached);
+            }
+            int intervalMs = WishlistController.SearchIntervalMilliseconds;
+            if (intervalMs <= 0 || tab.LastRanTime == DateTime.MinValue)
+            {
+                return "Next Run Unknown";
+            }
+
+            var nextRunTime = WishlistUtil.GetNextRunTime(WishlistController.LastWishlistTimerRun, intervalMs, SearchTabHelper.SearchTabCollection, tab);
+            TimeSpan remaining = nextRunTime.Subtract(DateTime.UtcNow);
+            if (remaining.TotalSeconds <= 10)
+            {
+                return SeekerApplication.GetString(Resource.String.wishlist_next_run_imminent);
+            }
+
+            int totalMinutes = (int)System.Math.Ceiling(remaining.TotalMinutes);
+            int hours = totalMinutes / 60;
+            int minutes = totalMinutes % 60;
+            if (hours > 0)
+            {
+                return string.Format(SeekerApplication.GetString(Resource.String.wishlist_next_run_hours_minutes), hours, minutes);
+            }
+            return string.Format(SeekerApplication.GetString(Resource.String.wishlist_next_run_minutes), totalMinutes);
+        }
+
+        private void StartWishlistBannerTicker()
+        {
+            if (wishlistBannerHandler == null)
+            {
+                wishlistBannerHandler = new Handler(Looper.MainLooper);
+            }
+            if (wishlistBannerTick == null)
+            {
+                wishlistBannerTick = new Java.Lang.Runnable(() =>
+                {
+                    if (wishlistBanner == null || wishlistBanner.Visibility != ViewStates.Visible)
+                    {
+                        return;
+                    }
+                    if (SearchTabHelper.SearchTabCollection.TryGetValue(SearchTabHelper.CurrentTab, out var tab) && tab.SearchTarget == SearchTarget.Wishlist)
+                    {
+                        wishlistBannerText.Text = FormatWishlistNextRunText(tab);
+                        wishlistBannerHandler.PostDelayed(wishlistBannerTick, 60_000);
+                    }
+                });
+            }
+            wishlistBannerHandler.RemoveCallbacks(wishlistBannerTick);
+            wishlistBannerHandler.PostDelayed(wishlistBannerTick, 60_000);
+        }
+
+        private void StopWishlistBannerTicker()
+        {
+            if (wishlistBannerHandler != null && wishlistBannerTick != null)
+            {
+                wishlistBannerHandler.RemoveCallbacks(wishlistBannerTick);
+            }
+        }
+
+        private enum SearchEmptyState
+        {
+            None = -1,
+            Loading = 0,
+            NoResults = 1,
+            AllFiltered = 2,
+            NoSearches = 3,
+            Failed = 4,
+        }
+
+        public void UpdateEmptyState()
+        {
+            if (searchEmptyStateFlipper == null)
+            {
+                return;
+            }
+
+            var currentTab = SearchTabHelper.SearchTabCollection[SearchTabHelper.CurrentTab];
+            bool searching = SearchTabHelper.CurrentlySearching;
+            bool emptyTerm = string.IsNullOrEmpty(SearchTabHelper.LastSearchTerm);
+            bool failed = !string.IsNullOrEmpty(currentTab.LastSearchError);
+            int total = SearchTabHelper.SearchResponses?.Count ?? 0;
+            int shown = SearchTabHelper.UI_SearchResponses?.Count ?? 0;
+
+            SearchEmptyState state;
+            if ((searching && shown == 0) || currentTab.DiskLoadInProgress)
+            {
+                state = SearchEmptyState.Loading;
+            }
+            else if (!searching && failed && total == 0)
+            {
+                state = SearchEmptyState.Failed;
+            }
+            else if (!searching && emptyTerm)
+            {
+                state = SearchEmptyState.NoSearches;
+            }
+            else if (!searching && !emptyTerm && total == 0)
+            {
+                state = SearchEmptyState.NoResults;
+            }
+            else if (!searching && total > 0 && shown == 0)
+            {
+                state = SearchEmptyState.AllFiltered;
+            }
+            else
+            {
+                state = SearchEmptyState.None;
+            }
+
+            if (state == SearchEmptyState.Loading)
+            {
+                if (currentTab.DiskLoadInProgress)
+                {
+                    if (spinnerTimerRunning)
+                    {
+                        StopSpinnerTimer();
+                    }
+                    if (searchLoadingTitle != null)
+                    {
+                        searchLoadingTitle.Text = SeekerApplication.GetString(Resource.String.loading_wishlist_label);
+                    }
+                    if (searchLoadingQueryText != null)
+                    {
+                        string term = SearchTabHelper.LastSearchTerm ?? string.Empty;
+                        searchLoadingQueryText.Text = $"\"{term}\"";
+                    }
+                }
+                else
+                {
+                    if (!spinnerTimerRunning)
+                    {
+                        StartSpinnerTimer();
+                    }
+                    RenderSpinnerText();
+                }
+            }
+            else if (spinnerTimerRunning)
+            {
+                StopSpinnerTimer();
+            }
+
+            if (state == SearchEmptyState.NoResults && noResultsSubtitle != null)
+            {
+                noResultsSubtitle.Text = string.Format(
+                    SeekerApplication.GetString(Resource.String.no_results_subtitle),
+                    SearchTabHelper.LastSearchTerm ?? string.Empty);
+            }
+            else if (state == SearchEmptyState.AllFiltered && allFilteredTitle != null)
+            {
+                allFilteredTitle.Text = string.Format(
+                    SeekerApplication.GetString(Resource.String.results_hidden_title),
+                    total);
+            }
+            else if (state == SearchEmptyState.Failed && searchFailedReason != null)
+            {
+                searchFailedReason.Text = currentTab.LastSearchError;
+            }
+
+            if (state == SearchEmptyState.None)
+            {
+                searchEmptyStateFlipper.Visibility = ViewStates.Gone;
+            }
+            else
+            {
+                if (searchEmptyStateFlipper.DisplayedChild != (int)state)
+                {
+                    searchEmptyStateFlipper.DisplayedChild = (int)state;
+                }
+                searchEmptyStateFlipper.Visibility = ViewStates.Visible;
+            }
+
+            if (searching && state != SearchEmptyState.Loading)
+            {
+                linearProgressIndicator.Visibility = ViewStates.Visible;
+            }
+            else
+            {
+                linearProgressIndicator.Visibility = ViewStates.Gone;
+            }
+        }
+
+        private void StartSpinnerTimer()
+        {
+            if (searchStopwatch == null)
+            {
+                searchStopwatch = new System.Diagnostics.Stopwatch();
+            }
+            searchStopwatch.Restart();
+            if (spinnerTimerHandler == null)
+            {
+                spinnerTimerHandler = new Handler(Looper.MainLooper);
+            }
+            if (spinnerTimerTick == null)
+            {
+                spinnerTimerTick = new Java.Lang.Runnable(() =>
+                {
+                    if (!spinnerTimerRunning)
+                    {
+                        return;
+                    }
+                    RenderSpinnerText();
+                    spinnerTimerHandler.PostDelayed(spinnerTimerTick, 50);
+                });
+            }
+            spinnerTimerRunning = true;
+            spinnerTimerHandler.PostDelayed(spinnerTimerTick, 50);
+        }
+
+        private void StopSpinnerTimer()
+        {
+            spinnerTimerRunning = false;
+            if (spinnerTimerHandler != null && spinnerTimerTick != null)
+            {
+                spinnerTimerHandler.RemoveCallbacks(spinnerTimerTick);
+            }
+            searchStopwatch?.Stop();
+        }
+
+        private void RenderSpinnerText()
+        {
+            if (searchLoadingQueryText == null)
+            {
+                return;
+            }
+            if (searchLoadingTitle != null)
+            {
+                searchLoadingTitle.Text = SeekerApplication.GetString(Resource.String.searching_label);
+            }
+            string term = SearchTabHelper.LastSearchTerm ?? string.Empty;
+            double sec = searchStopwatch?.Elapsed.TotalSeconds ?? 0;
+            searchLoadingQueryText.Text = $"\"{term}\" · {sec:0.0}s";
+        }
+
+        public void SearchResultStyleChanged()
+        {
+            this.Activity?.InvalidateOptionsMenu();
+            RecyclerView rv = rootView.FindViewById<RecyclerView>(Resource.Id.recyclerViewSearches); //TODO //TODO //TODO
+
+            if (SearchTabHelper.TextFilter.IsFiltered || AreChipsFiltering() || AreFilterControlsActive())
+            {
+                rv.SetAdapter(CreateSearchAdapter(SearchTabHelper.CurrentSearchTab, SearchTabHelper.UI_SearchResponses));
+            }
+            else
+            {
+                SearchTabHelper.UI_SearchResponses = SearchTabHelper.SearchResponses.ToList();
+                rv.SetAdapter(CreateSearchAdapter(SearchTabHelper.CurrentSearchTab, SearchTabHelper.UI_SearchResponses));
+            }
+        }
+
+
+
+        private static void Iv_Click(object sender, EventArgs e)
+        {
+            if (!SearchFragment.Instance.IsAdded)
+            {
+                SearchFragment f = GetSearchFragment(); //is there an attached fragment?? i.e. is our instance just a stale one..
+                if (f == null)
+                {
+                    Logger.InfoFirebase("search fragment not on activities fragment manager");
+                }
+                else if (!f.IsAdded)
+                {
+                    Logger.InfoFirebase("search fragment from activities fragment manager is not added");
+                }
+                else
+                {
+                    Logger.InfoFirebase("search fragment from activities fragment manager is good, though not setting it");
+                    //SearchFragment.Instance = f; 
+                }
+                Logger.Firebase("SearchFragment.Instance.IsAdded == false, currently searching: " + SearchTabHelper.CurrentlySearching);
+            }
+            SearchFragment.Instance.ShowSearchTabsDialog();
+        }
+
+        public static void ShowChangeResultStyleBottomDialog()
+        {
+            BottomSheetDialogFragmentMenu bsdf = new BottomSheetDialogFragmentMenu();
+            bsdf.HasOptionsMenu = true;
+            bsdf.ShowNow(SeekerState.MainActivityRef.SupportFragmentManager, "options");
+        }
+
+        public static volatile SearchFragment Instance = null;
+        public RecyclerView recyclerViewChips;
+        public RecyclerView.Adapter recyclerChipsAdapter;
+
+        private static RecyclerView.Adapter CreateChipsAdapter(List<ChipDataItem> items)
+        {
+            if (PreferencesState.SmartFilterStyle == SmartFilterStyle.Grouped)
+            {
+                return new GroupedChipsItemRecyclerAdapter(items);
+            }
+            return new ChipsItemRecyclerAdapter(items);
+        }
+
+        /// <summary>
+        /// Rebuilds the chip row adapter for the current tab using the current SmartFilterStyle
+        /// preference and attaches it to recyclerViewChips. Call whenever the preference toggles.
+        /// </summary>
+        public void SwapChipAdapter()
+        {
+            if (recyclerViewChips == null)
+            {
+                return;
+            }
+            RefreshUIChipAdapterFromData();
+        }
+
+        public override View OnCreateView(LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState)
+        {
+            Instance = this;
+            HasOptionsMenu = true;
+            Logger.Debug("SearchFragmentOnCreateView");
+            Logger.Debug("SearchFragmentOnCreateView - SearchResponses.Count=" + SearchTabHelper.SearchResponses.Count);
+            this.rootView = inflater.Inflate(Resource.Layout.searches, container, false);
+
+            context = this.Context;
+
+            recyclerViewChips = rootView.FindViewById<RecyclerView>(Resource.Id.recyclerViewChips);
+            recyclerViewChips.Visibility = ViewStates.Visible;
+
+            var manager = new LinearLayoutManager(this.Context, LinearLayoutManager.Horizontal, false);
+            recyclerViewChips.SetItemAnimator(null);
+            recyclerViewChips.SetLayoutManager(manager);
+            //ViewPager2 (unlike the old ViewPager) steals horizontal drags from nested horizontal
+            //scrollers, so a swipe on the chip row would flip tabs. Keep the gesture on the chips.
+            recyclerViewChips.AddOnItemTouchListener(new DisallowParentHorizontalInterceptListener());
+            RefreshUIChipAdapterFromData();
+
+            View bottomSheetView = rootView.FindViewById<View>(Resource.Id.bottomSheet);
+            BottomSheetBehavior bsb = BottomSheetBehavior.From(bottomSheetView);
+            bsb.Hideable = true;
+            bsb.PeekHeight = 320;
+            bsb.State = BottomSheetBehavior.StateHidden;
+
+            CheckBox filterSticky = rootView.FindViewById<CheckBox>(Resource.Id.stickyFilterCheckbox);
+            filterSticky.Checked = PreferencesState.FilterSticky;
+            filterSticky.CheckedChange += FilterSticky_CheckedChange;
+
+            //bsb.SetBottomSheetCallback(new MyCallback());
+            View b = rootView.FindViewById<View>(Resource.Id.bsbutton);
+            (b as FloatingActionButton).SetImageResource(Resource.Drawable.ic_filter_list_white_24dp);
+            View v = rootView.FindViewById<View>(Resource.Id.focusableLayout);
+            v.Focusable = true;
+            //SetFocusable(int) was added in API26. bool was there since API1
+            if (OperatingSystem.IsAndroidVersionAtLeast(26))
+            {
+                v.SetFocusable(ViewFocusability.Focusable);
+            }
+            else
+            {
+                //v.SetFocusable(true); no bool method in xamarin...
+            }
+
+            v.FocusableInTouchMode = true;
+            b.Click += B_Click;
+
+            recyclerViewSearch = rootView.FindViewById<RecyclerView>(Resource.Id.recyclerViewSearches);
+            recycleLayoutManager = new LinearLayoutManager(Activity);
+            recyclerViewSearch.SetItemAnimator(null); //todo
+            recyclerViewSearch.SetLayoutManager(recycleLayoutManager);
+            if (SearchTabHelper.TextFilter.IsFiltered || AreChipsFiltering() || AreFilterControlsActive())
+            {
+                recyclerViewSearch.SetAdapter(CreateSearchAdapter(SearchTabHelper.CurrentSearchTab, SearchTabHelper.UI_SearchResponses));
+            }
+            else
+            {
+                SearchTabHelper.UI_SearchResponses = SearchTabHelper.SearchResponses.ToList();
+                recyclerViewSearch.SetAdapter(CreateSearchAdapter(SearchTabHelper.CurrentSearchTab, SearchTabHelper.UI_SearchResponses));
+            }
+
+            searchResultsHeaderView = rootView.FindViewById<View>(Resource.Id.searchResultsHeader);
+            RefreshSearchResultsHeader(searchResultsHeaderView);
+
+            searchEmptyStateFlipper = rootView.FindViewById<ViewFlipper>(Resource.Id.searchEmptyStateFlipper);
+            linearProgressIndicator = rootView.FindViewById<View>(Resource.Id.linearProgressIndicator);
+            searchLoadingQueryText = rootView.FindViewById<TextView>(Resource.Id.searchLoadingQueryText);
+            searchLoadingTitle = rootView.FindViewById<TextView>(Resource.Id.searchLoadingTitle);
+            noResultsSubtitle = rootView.FindViewById<TextView>(Resource.Id.noResultsSubtitle);
+            allFilteredTitle = rootView.FindViewById<TextView>(Resource.Id.allFilteredTitle);
+            searchFailedReason = rootView.FindViewById<TextView>(Resource.Id.searchFailedReason);
+            wishlistBanner = rootView.FindViewById<View>(Resource.Id.wishlistBanner);
+            wishlistBannerText = rootView.FindViewById<TextView>(Resource.Id.wishlistHeaderText);
+            UpdateEmptyState();
+            RefreshWishlistBanner();
+
+            Logger.Debug("SearchFragmentOnCreateViewEnd - SearchResponses.Count=" + SearchTabHelper.SearchResponses.Count);
+
+            EditText filterText = rootView.FindViewById<EditText>(Resource.Id.filterText);
+            filterText.TextChanged += FilterText_TextChanged;
+            filterText.FocusChange += UiHelpers.OnFocusAdjustResize;
+            filterText.EditorAction += FilterText_EditorAction;
+            filterText.Touch += FilterText_Touch;
+            if (PreferencesState.FilterSticky)
+            {
+                filterText.Text = PreferencesState.FilterStickyString;
+            }
+            UpdateDrawableState(filterText, true);
+
+            Button showHideSmartFilters = rootView.FindViewById<Button>(Resource.Id.toggleSmartFilters);
+            showHideSmartFilters.Text = PreferencesState.ShowSmartFilters ? this.GetString(Resource.String.HideSmartFilters) : this.GetString(Resource.String.ShowSmartFilters);
+            showHideSmartFilters.Click += ShowHideSmartFilters_Click;
+
+            SetupFilterControls();
+
+            return rootView;
+        }
+
+        private void SetupFilterControls()
+        {
+            var bgTint = GetSegmentedButtonBgTint(this.Context);
+            var textTint = GetSegmentedButtonTextTint(this.Context);
+
+            var formatToggle = rootView.FindViewById<MaterialButtonToggleGroup>(Resource.Id.formatToggleGroup);
+            ApplyToggleGroupTint(formatToggle, bgTint, textTint);
+            formatToggle.Check(GetFormatButtonId(PreferencesState.FilterFormat));
+            formatToggle.ButtonChecked += FormatToggle_ButtonChecked;
+
+            var bitrateToggle = rootView.FindViewById<MaterialButtonToggleGroup>(Resource.Id.bitrateToggleGroup);
+            ApplyToggleGroupTint(bitrateToggle, bgTint, textTint);
+            for (int i = 0; i < bitrateToggle.ChildCount; i++)
+            {
+                var btn = (MaterialButton)bitrateToggle.GetChildAt(i);
+                btn.SetPadding(0, btn.PaddingTop, 0, btn.PaddingBottom);
+            }
+            bitrateToggle.Check(GetBitrateButtonId(PreferencesState.FilterMinBitrateKbs));
+            bitrateToggle.ButtonChecked += BitrateToggle_ButtonChecked;
+        }
+
+        private static Android.Content.Res.ColorStateList GetSegmentedButtonBgTint(Android.Content.Context ctx)
+        {
+            var typedValue = new Android.Util.TypedValue();
+            ctx.Theme.ResolveAttribute(Resource.Attribute.mainPurple, typedValue, true);
+            int accentColor = typedValue.Data;
+
+            ctx.Theme.ResolveAttribute(Resource.Attribute.dialog_background, typedValue, true);
+            int uncheckedColor = typedValue.Data;
+
+            var states = new int[][]
+            {
+                new int[] { Android.Resource.Attribute.StateChecked },
+                new int[] { -Android.Resource.Attribute.StateChecked }
+            };
+            var colors = new int[] { accentColor, uncheckedColor };
+            return new Android.Content.Res.ColorStateList(states, colors);
+        }
+
+        private static Android.Content.Res.ColorStateList GetSegmentedButtonTextTint(Android.Content.Context ctx)
+        {
+            var typedValue = new Android.Util.TypedValue();
+            ctx.Theme.ResolveAttribute(Resource.Attribute.normalTextColor, typedValue, true);
+            int uncheckedColor = typedValue.Data;
+
+            var states = new int[][]
+            {
+                new int[] { Android.Resource.Attribute.StateChecked },
+                new int[] { -Android.Resource.Attribute.StateChecked }
+            };
+            var colors = new int[] { Android.Graphics.Color.White, uncheckedColor };
+            return new Android.Content.Res.ColorStateList(states, colors);
+        }
+
+        private static void ApplyToggleGroupTint(MaterialButtonToggleGroup group, Android.Content.Res.ColorStateList bgTint, Android.Content.Res.ColorStateList textTint)
+        {
+            for (int i = 0; i < group.ChildCount; i++)
+            {
+                var btn = (MaterialButton)group.GetChildAt(i);
+                btn.BackgroundTintList = bgTint;
+                btn.SetTextColor(textTint);
+            }
+        }
+
+        private void FormatToggle_ButtonChecked(object sender, MaterialButtonToggleGroup.ButtonCheckedEventArgs e)
+        {
+            if (!e.P2)
+            {
+                return;
+            }
+            switch (e.P1)
+            {
+                case Resource.Id.formatLossless:
+                    PreferencesState.FilterFormat = FormatFilterType.Lossless;
+                    break;
+                case Resource.Id.formatLossy:
+                    PreferencesState.FilterFormat = FormatFilterType.Lossy;
+                    break;
+                default:
+                    PreferencesState.FilterFormat = FormatFilterType.Any;
+                    break;
+            }
+            PreferencesManager.SaveFilterControlsState();
+            ApplyFilterControls();
+        }
+
+        private void BitrateToggle_ButtonChecked(object sender, MaterialButtonToggleGroup.ButtonCheckedEventArgs e)
+        {
+            if (!e.P2)
+            {
+                return;
+            }
+            switch (e.P1)
+            {
+                case Resource.Id.bitrate320:
+                    PreferencesState.FilterMinBitrateKbs = 320;
+                    break;
+                case Resource.Id.bitrate256:
+                    PreferencesState.FilterMinBitrateKbs = 256;
+                    break;
+                case Resource.Id.bitrate192:
+                    PreferencesState.FilterMinBitrateKbs = 192;
+                    break;
+                case Resource.Id.bitrate128:
+                    PreferencesState.FilterMinBitrateKbs = 128;
+                    break;
+                default:
+                    PreferencesState.FilterMinBitrateKbs = 0;
+                    break;
+            }
+            PreferencesManager.SaveFilterControlsState();
+            ApplyFilterControls();
+        }
+
+        private void ApplyFilterControls()
+        {
+            if (AreFilterControlsActive() || AreChipsFiltering() || SearchTabHelper.TextFilter.IsFiltered)
+            {
+                UpdateFilteredResponses(SearchTabHelper.SearchTabCollection[SearchTabHelper.CurrentTab]);
+                ResetAdapterAndBaseline();
+            }
+            else
+            {
+                SearchTabHelper.UI_SearchResponses.Clear();
+                SearchTabHelper.UI_SearchResponses.AddRange(SearchTabHelper.SearchResponses);
+                ResetAdapterAndBaseline();
+            }
+            NotifySearchHeaderChanged();
+        }
+
+        private static int GetFormatButtonId(FormatFilterType format)
+        {
+            switch (format)
+            {
+                case FormatFilterType.Lossless: return Resource.Id.formatLossless;
+                case FormatFilterType.Lossy: return Resource.Id.formatLossy;
+                default: return Resource.Id.formatAny;
+            }
+        }
+
+        private static int GetBitrateButtonId(int bitrateKbs)
+        {
+            switch (bitrateKbs)
+            {
+                case 320: return Resource.Id.bitrate320;
+                case 256: return Resource.Id.bitrate256;
+                case 192: return Resource.Id.bitrate192;
+                case 128: return Resource.Id.bitrate128;
+                default: return Resource.Id.bitrateAny;
+            }
+        }
+
+        private void ShowHideSmartFilters_Click(object sender, EventArgs e)
+        {
+            PreferencesState.ShowSmartFilters = !PreferencesState.ShowSmartFilters;
+            Button showHideSmartFilters = rootView.FindViewById<Button>(Resource.Id.toggleSmartFilters);
+            showHideSmartFilters.Text = PreferencesState.ShowSmartFilters ? this.GetString(Resource.String.HideSmartFilters) : this.GetString(Resource.String.ShowSmartFilters);
+            var searchTab = SearchTabHelper.SearchTabCollection[SearchTabHelper.CurrentTab];
+            if (PreferencesState.ShowSmartFilters)
+            {
+                if (SearchTabHelper.CurrentlySearching)
+                {
+                    return; //it will update on complete search
+                }
+                if ((searchTab.SearchResponses?.Count ?? 0) != 0)
+                {
+                    List<ChipDataItem> chipDataItems = ChipsHelper.CalculateChipItems(searchTab.SearchResponses, searchTab.LastSearchTerm, PreferencesState.SmartFilterOptions, PreferencesState.HideLockedResultsInSearch);
+                    searchTab.ChipDataItems = chipDataItems;
+                    SeekerState.MainActivityRef.RunOnUiThread(new Action(() =>
+                    {
+                        SearchFragment.Instance.RefreshUIChipAdapterFromData();
+                    }));
+                }
+            }
+            else
+            {
+                searchTab.ChipDataItems = null;
+                searchTab.ChipsFilter = null; //in case there was previously a filter
+                SearchFragment.Instance.RefreshOnChipChanged();
+                SearchFragment.Instance.RefreshUIChipAdapterFromData();
+            }
+        }
+
+        private void RefreshUIChipAdapterFromData()
+        {
+            recyclerChipsAdapter = CreateChipsAdapter(SearchTabHelper.SearchTabCollection[SearchTabHelper.CurrentTab].ChipDataItems);
+            recyclerViewChips.SetAdapter(recyclerChipsAdapter);
+        }
+
+        private void FilterText_Touch(object sender, View.TouchEventArgs e)
+        {
+            EditText editText = sender as EditText;
+            e.Handled = false;
+            if (e.Event.GetX() >= (editText.Width - editText.TotalPaddingRight))
+            {
+                if (e.Event.Action == MotionEventActions.Up)
+                {
+                    editText.Text = string.Empty;
+                    UpdateDrawableState(editText, true);
+
+                    ClearFilterStringAndCached(true);
+                    ResetFilterControlsUI(true);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Are chips filtering out results..
+        /// </summary>
+        /// <returns></returns>
+        internal static bool AreChipsFiltering()
+        {
+            if (!PreferencesState.ShowSmartFilters || (SearchTabHelper.SearchTabCollection[SearchTabHelper.CurrentTab].ChipDataItems?.Count ?? 0) == 0)
+            {
+                return false;
+            }
+            else
+            {
+                return SearchTabHelper.SearchTabCollection[SearchTabHelper.CurrentTab].ChipDataItems.Any(i => i.IsChecked);
+            }
+        }
+
+        internal static bool AreFilterControlsActive()
+        {
+            return PreferencesState.FilterFormat != FormatFilterType.Any
+                || PreferencesState.FilterMinBitrateKbs > 0;
+        }
+
+        private void B_Click(object sender, EventArgs e)
+        {
+            View bottomSheetView = rootView.FindViewById<View>(Resource.Id.bottomSheet);
+            BottomSheetBehavior bsb = BottomSheetBehavior.From(bottomSheetView);
+            if (bsb.State != BottomSheetBehavior.StateExpanded && bsb.State != BottomSheetBehavior.StateCollapsed)
+            {
+                bsb.State = BottomSheetBehavior.StateExpanded;
+            }
+            else
+            {
+                EditText test = rootView.FindViewById<EditText>(Resource.Id.filterText);
+                Logger.Debug(this.Resources.Configuration.HardKeyboardHidden.ToString()); //on pixel2 it is YES. on emulator with HW Keyboard = true it is NO
+
+                if (test.IsFocused && (this.Resources.Configuration.HardKeyboardHidden == Android.Content.Res.HardKeyboardHidden.Yes)) //it can still be focused without the keyboard up...
+                {
+                    try
+                    {
+
+                        //SeekerState.MainActivityRef.DispatchKeyEvent(new KeyEvent(new KeyEventActions(),Keycode.Enter));
+                        Android.Views.InputMethods.InputMethodManager imm = (Android.Views.InputMethods.InputMethodManager)Context.GetSystemService(Context.InputMethodService);
+                        imm.HideSoftInputFromWindow(rootView.WindowToken, 0);
+                        test.ClearFocus();
+                        rootView.FindViewById<View>(Resource.Id.focusableLayout).RequestFocus();
+                    }
+                    catch
+                    {
+                        //not worth throwing over
+                    }
+                    return;
+                }
+                else if (test.IsFocused && (this.Resources.Configuration.HardKeyboardHidden == Android.Content.Res.HardKeyboardHidden.No))
+                {
+
+                    //we still want to change focus as otherwise one can still type into it...
+                    test.ClearFocus();
+                    rootView.FindViewById<View>(Resource.Id.focusableLayout).RequestFocus();
+                }
+                bsb.State = BottomSheetBehavior.StateHidden;
+            }
+        }
+
+        private void FilterSticky_CheckedChange(object sender, CompoundButton.CheckedChangeEventArgs e)
+        {
+            PreferencesState.FilterSticky = e.IsChecked;
+            if (PreferencesState.FilterSticky)
+            {
+                PreferencesState.FilterStickyString = SearchTabHelper.TextFilter.FilterString;
+            }
+        }
+
+        private static void Search_EditorActionHELPER(object sender, TextView.EditorActionEventArgs e)
+        {
+            SearchFragment.Instance.Search_EditorAction(sender, e);
+        }
+
+        private void Search_EditorAction(object sender, TextView.EditorActionEventArgs e)
+        {
+            if (e.ActionId == Android.Views.InputMethods.ImeAction.Done ||
+                e.ActionId == Android.Views.InputMethods.ImeAction.Go ||
+                e.ActionId == Android.Views.InputMethods.ImeAction.Next ||
+                e.ActionId == Android.Views.InputMethods.ImeAction.Search)
+            {
+                Logger.Debug("IME ACTION: " + e.ActionId.ToString());
+                SubmitSearch(GetSearchBoxText());
+            }
+        }
+
+        private void ChooseUserInput_TextChanged(object sender, Android.Text.TextChangedEventArgs e)
+        {
+            SearchTabHelper.SearchTargetChosenUser = e.Text.ToString();
+        }
+
+        private void AllUsers_Click(object sender, EventArgs e)
+        {
+            SearchTabHelper.SearchTarget = SearchTarget.AllUsers;
+            targetRoomInputLayout.Visibility = ViewStates.Gone;
+            chooseUserInputLayout.Visibility = ViewStates.Gone;
+            SetSearchHintTarget(SearchTarget.AllUsers);
+        }
+
+        private void ChosenUser_Click(object sender, EventArgs e)
+        {
+            SearchTabHelper.SearchTarget = SearchTarget.ChosenUser;
+            targetRoomInputLayout.Visibility = ViewStates.Gone;
+            chooseUserInputLayout.Visibility = ViewStates.Visible;
+            SetSearchHintTarget(SearchTarget.ChosenUser);
+        }
+
+        private void UserList_Click(object sender, EventArgs e)
+        {
+            SearchTabHelper.SearchTarget = SearchTarget.UserList;
+            targetRoomInputLayout.Visibility = ViewStates.Gone;
+            chooseUserInputLayout.Visibility = ViewStates.Gone;
+            SetSearchHintTarget(SearchTarget.UserList);
+        }
+
+        public static void SetSearchHintTarget(SearchTarget target, AutoCompleteTextView actv = null)
+        {
+            if (actv == null)
+            {
+                actv = SeekerState.MainActivityRef?.SupportActionBar?.CustomView?.FindViewById<AutoCompleteTextView>(Resource.Id.searchHere);
+            }
+            if (actv != null)
+            {
+                switch (target)
+                {
+                    case SearchTarget.AllUsers:
+                        actv.Hint = SeekerApplication.ApplicationContext.GetString(Resource.String.search_here);
+                        break;
+                    case SearchTarget.UserList:
+                        actv.Hint = SeekerApplication.ApplicationContext.GetString(Resource.String.saerch_user_list);
+                        break;
+                    case SearchTarget.Room:
+                        actv.Hint = string.Format(SeekerApplication.ApplicationContext.GetString(Resource.String.search_room_), SearchTabHelper.SearchTargetChosenRoom);
+                        break;
+                    case SearchTarget.ChosenUser:
+                        actv.Hint = string.Format(SeekerApplication.ApplicationContext.GetString(Resource.String.search_user_), SearchTabHelper.SearchTargetChosenUser);
+                        break;
+                    case SearchTarget.Wishlist:
+                        actv.Hint = SeekerApplication.ApplicationContext.GetString(Resource.String.wishlist_search);
+                        break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// The search/close app bar icon, built in <see cref="OnCreateOptionsMenu"/>. Null before the menu exists.
+        /// </summary>
+        public CrossFadeDrawable GetTransitionDrawable()
+        {
+            CrossFadeDrawable icon = ActionBarMenu?.FindItem(Resource.Id.action_search)?.Icon as CrossFadeDrawable;
+            //tested this and it works well
+            if (icon == null)
+            {
+                if (this.Activity == null)
+                {
+                    Logger.InfoFirebase("GetTransitionDrawable activity is null");
+                    SearchFragment f = GetSearchFragment();
+                    if (f == null)
+                    {
+                        Logger.InfoFirebase("GetTransitionDrawable no search fragment attached to activity");
+                    }
+                    else if (!f.IsAdded)
+                    {
+                        Logger.InfoFirebase("GetTransitionDrawable attached but not added");
+                    }
+                    else if (f.Activity == null)
+                    {
+                        Logger.InfoFirebase("GetTransitionDrawable f.Activity activity is null");
+                    }
+                    else
+                    {
+                        Logger.InfoFirebase("we should be using the fragment manager one...");
+                    }
+                }
+                //when coming from an intent its actually (toolbar.Menu.FindItem(Resource.Id.action_search)) that is null.  so the menu is there, just no action_search menu item.
+                AndroidX.AppCompat.Widget.Toolbar toolbar = (this.Activity as AndroidX.AppCompat.App.AppCompatActivity)?.FindViewById<AndroidX.AppCompat.Widget.Toolbar>(Resource.Id.toolbar);
+                return toolbar?.Menu?.FindItem(Resource.Id.action_search)?.Icon as CrossFadeDrawable;
+            }
+            else
+            {
+                return icon;
+            }
+        }
+
+
+
+
+        public void ShowChangeSortOrderDialog()
+        {
+            Context toUse = this.Activity != null ? this.Activity : SeekerState.MainActivityRef;
+            var builder = new Google.Android.Material.Dialog.MaterialAlertDialogBuilder(toUse);
+            builder.SetTitle(Resource.String.sort_results_by);
+            View viewInflated = LayoutInflater.From(toUse).Inflate(Resource.Layout.changeresultsortorder, this.rootView as ViewGroup, false); //TODO replace rootView with ActiveActivity.GetContent()
+
+            AndroidX.AppCompat.Widget.AppCompatRadioButton sortAvailability = viewInflated.FindViewById<AndroidX.AppCompat.Widget.AppCompatRadioButton>(Resource.Id.availability);
+            AndroidX.AppCompat.Widget.AppCompatRadioButton sortSpeed = viewInflated.FindViewById<AndroidX.AppCompat.Widget.AppCompatRadioButton>(Resource.Id.speed);
+            AndroidX.AppCompat.Widget.AppCompatRadioButton sortFolderNameAlpha = viewInflated.FindViewById<AndroidX.AppCompat.Widget.AppCompatRadioButton>(Resource.Id.folderNameAlpha);
+            AndroidX.AppCompat.Widget.AppCompatRadioButton sortBitrate = viewInflated.FindViewById<AndroidX.AppCompat.Widget.AppCompatRadioButton>(Resource.Id.bitRate);
+            CheckBox checkBoxSetAsDefault = viewInflated.FindViewById<CheckBox>(Resource.Id.setAsDefault);
+            switch (SearchTabHelper.SortHelperSorting)
+            {
+                case SearchResultSorting.Available:
+                    sortAvailability.Checked = true;
+                    break;
+                case SearchResultSorting.Fastest:
+                    sortSpeed.Checked = true;
+                    break;
+                case SearchResultSorting.FolderAlphabetical:
+                    sortFolderNameAlpha.Checked = true;
+                    break;
+                case SearchResultSorting.BitRate:
+                    sortBitrate.Checked = true;
+                    break;
+            }
+
+            sortAvailability.Click += SortAvailabilityClick;
+            sortSpeed.Click += SortSpeedClick;
+            sortFolderNameAlpha.Click += SortFoldernameAlphaClick;
+            sortBitrate.Click += SortBitrate_Click;
+
+            builder.SetView(viewInflated);
+
+            EventHandler<DialogClickEventArgs> positiveButtonEventHandler = new EventHandler<DialogClickEventArgs>((object sender, DialogClickEventArgs cancelArgs) =>
+            {
+                //if cancelled via back button we dont go here
+
+                if (checkBoxSetAsDefault.Checked)
+                {
+                    var old = PreferencesState.DefaultSearchResultSortAlgorithm;
+                    PreferencesState.DefaultSearchResultSortAlgorithm = SearchTabHelper.SortHelperSorting; //whatever one we just changed it to.
+                    if (old != PreferencesState.DefaultSearchResultSortAlgorithm)
+                    {
+                        PreferencesManager.SaveDefaultSearchResultSortAlgorithm();
+                    }
+                }
+                if (sender is AndroidX.AppCompat.App.AlertDialog aDiag)
+                {
+                    aDiag.Dismiss();
+                }
+                else
+                {
+                    dialogInstance.Dismiss();
+                }
+            });
+
+            builder.SetPositiveButton(Resource.String.okay, positiveButtonEventHandler);
+            dialogInstance = builder.Create();
+            dialogInstance.Show();
+        }
+
+        private void SortBitrate_Click(object sender, EventArgs e)
+        {
+            UpdateSortAvailability(SearchResultSorting.BitRate);
+        }
+
+        private void SortAvailabilityClick(object sender, EventArgs e)
+        {
+            UpdateSortAvailability(SearchResultSorting.Available);
+        }
+
+        private void SortSpeedClick(object sender, EventArgs e)
+        {
+            UpdateSortAvailability(SearchResultSorting.Fastest);
+        }
+
+        private void SortFoldernameAlphaClick(object sender, EventArgs e)
+        {
+            UpdateSortAvailability(SearchResultSorting.FolderAlphabetical);
+        }
+
+        private void UpdateSortAvailability(SearchResultSorting searchResultSorting)
+        {
+            if (SearchTabHelper.SortHelperSorting != searchResultSorting)
+            {
+                lock (SearchTabHelper.SortHelperLockObject) //this is also always going to be on the UI thread. so we have that guaranteeing safety. 
+                {
+                    SearchTabHelper.SortHelperSorting = searchResultSorting;
+                    SearchTabHelper.SortHelper = new SortedSet<SearchResponse>(new SearchResultComparableWishlist(SearchTabHelper.SortHelperSorting));
+
+                    //put all the search responses into the new sort helper
+                    if (SearchTabHelper.SearchResponses != null)
+                    {
+                        foreach (var searchResponse in SearchTabHelper.SearchResponses)
+                        {
+                            SearchTabHelper.SortHelper.Add(searchResponse);
+                        }
+                    }
+
+                    //now that they are sorted, replace them.
+                    SearchTabHelper.SearchResponses = SearchTabHelper.SortHelper.ToList();
+
+                    if (SearchTabHelper.TextFilter.IsFiltered || AreChipsFiltering() || AreFilterControlsActive())
+                    {
+                        UpdateFilteredResponses(SearchTabHelper.SearchTabCollection[SearchTabHelper.CurrentTab]);
+                        ResetAdapterAndBaseline();
+                    }
+                    else
+                    {
+                        SearchTabHelper.UI_SearchResponses.Clear();
+                        SearchTabHelper.UI_SearchResponses.AddRange(SearchTabHelper.SearchResponses);
+                        ResetAdapterAndBaseline();
+                    }
+                    NotifySearchHeaderChanged();
+
+
+
+                }
+            }
+        }
+
+        private AutoCompleteTextView chooseUserInput = null;
+        private View chooseUserInputLayout = null;
+        private AutoCompleteTextView targetRoomInput = null;
+        private View targetRoomInputLayout = null;
+        public void ShowChangeTargetDialog()
+        {
+            Context toUse = this.Activity != null ? this.Activity : SeekerState.MainActivityRef;
+            var builder = new Google.Android.Material.Dialog.MaterialAlertDialogBuilder(toUse);
+            builder.SetTitle(Resource.String.search_target_);
+            View viewInflated = LayoutInflater.From(toUse).Inflate(Resource.Layout.changeusertarget, this.rootView as ViewGroup, false);
+            chooseUserInput = viewInflated.FindViewById<AutoCompleteTextView>(Resource.Id.chosenUserInput);
+            chooseUserInputLayout = viewInflated.FindViewById<View>(Resource.Id.chosenUserInputLayout);
+            UiHelpers.SetupRecentUserAutoCompleteTextView(chooseUserInput);
+            targetRoomInput = viewInflated.FindViewById<AutoCompleteTextView>(Resource.Id.targetRoomInput);
+            targetRoomInputLayout = viewInflated.FindViewById<View>(Resource.Id.targetRoomInputLayout);
+            List<string> joinedRooms = ChatroomController.JoinedRoomNames?.ToList() ?? new List<string>();
+            targetRoomInput.Adapter = new ArrayAdapter<string>(SeekerState.ActiveActivityRef, Android.Resource.Layout.SimpleDropDownItem1Line, joinedRooms);
+            targetRoomInput.Text = SearchTabHelper.SearchTargetChosenRoom;
+
+            AndroidX.AppCompat.Widget.AppCompatRadioButton allUsers = viewInflated.FindViewById<AndroidX.AppCompat.Widget.AppCompatRadioButton>(Resource.Id.allUsers);
+            AndroidX.AppCompat.Widget.AppCompatRadioButton chosenUser = viewInflated.FindViewById<AndroidX.AppCompat.Widget.AppCompatRadioButton>(Resource.Id.chosenUser);
+            AndroidX.AppCompat.Widget.AppCompatRadioButton userList = viewInflated.FindViewById<AndroidX.AppCompat.Widget.AppCompatRadioButton>(Resource.Id.targetUserList);
+            AndroidX.AppCompat.Widget.AppCompatRadioButton room = viewInflated.FindViewById<AndroidX.AppCompat.Widget.AppCompatRadioButton>(Resource.Id.targetRoom);
+            chooseUserInput.Text = SearchTabHelper.SearchTargetChosenUser;
+            switch (SearchTabHelper.SearchTarget)
+            {
+                case SearchTarget.AllUsers:
+                    allUsers.Checked = true;
+                    chooseUserInputLayout.Visibility = ViewStates.Gone;
+                    targetRoomInputLayout.Visibility = ViewStates.Gone;
+                    break;
+                case SearchTarget.UserList:
+                    userList.Checked = true;
+                    targetRoomInputLayout.Visibility = ViewStates.Gone;
+                    chooseUserInputLayout.Visibility = ViewStates.Gone;
+                    break;
+                case SearchTarget.ChosenUser:
+                    chosenUser.Checked = true;
+                    targetRoomInputLayout.Visibility = ViewStates.Gone;
+                    chooseUserInputLayout.Visibility = ViewStates.Visible;
+                    chooseUserInput.Text = SearchTabHelper.SearchTargetChosenUser;
+                    break;
+                case SearchTarget.Room:
+                    room.Checked = true;
+                    chooseUserInputLayout.Visibility = ViewStates.Gone;
+                    targetRoomInputLayout.Visibility = ViewStates.Visible;
+                    break;
+            }
+
+            allUsers.Click += AllUsers_Click;
+            room.Click += Room_Click;
+            chosenUser.Click += ChosenUser_Click;
+            userList.Click += UserList_Click;
+            chooseUserInput.TextChanged += ChooseUserInput_TextChanged;
+            targetRoomInput.TextChanged += TargetRoomInput_TextChanged;
+
+
+            builder.SetView(viewInflated);
+
+            EventHandler<DialogClickEventArgs> eventHandlerClose = new EventHandler<DialogClickEventArgs>((object sender, DialogClickEventArgs cancelArgs) =>
+            {
+                SetSearchHintTarget(SearchTabHelper.SearchTarget, (this.Activity as AndroidX.AppCompat.App.AppCompatActivity)?.SupportActionBar?.CustomView?.FindViewById<AutoCompleteTextView>(Resource.Id.searchHere)); //in case of hitting choose user, you still have to update the name (since that gets input after clicking radio button)...
+                if (SearchTabHelper.SearchTarget == SearchTarget.ChosenUser && !string.IsNullOrEmpty(SearchTabHelper.SearchTargetChosenUser))
+                {
+                    UserMetadataService.RecentUsersManager.AddUserToTop(SearchTabHelper.SearchTargetChosenUser, true);
+                }
+                if (sender is AndroidX.AppCompat.App.AlertDialog aDiag)
+                {
+                    aDiag.Dismiss();
+                }
+                else
+                {
+                    dialogInstance.Dismiss();
+                }
+            });
+
+            var editorAction = UiHelpers.MakeDialogEditorAction(rootView, eventHandlerClose);
+
+            chooseUserInput.EditorAction += editorAction;
+            targetRoomInput.EditorAction += editorAction;
+
+            builder.SetPositiveButton(Resource.String.okay, eventHandlerClose);
+            dialogInstance = builder.Create();
+            dialogInstance.Show();
+        }
+        private void TargetRoomInput_TextChanged(object sender, Android.Text.TextChangedEventArgs e)
+        {
+            SearchTabHelper.SearchTargetChosenRoom = e.Text.ToString();
+        }
+
+        private void Room_Click(object sender, EventArgs e)
+        {
+            SearchTabHelper.SearchTarget = SearchTarget.Room;
+            targetRoomInputLayout.Visibility = ViewStates.Visible;
+            chooseUserInputLayout.Visibility = ViewStates.Gone;
+            SetSearchHintTarget(SearchTarget.Room);
+        }
+
+        private static AndroidX.AppCompat.App.AlertDialog dialogInstance = null;
+
+        private void FilterText_EditorAction(object sender, TextView.EditorActionEventArgs e)
+        {
+            if (e.ActionId == Android.Views.InputMethods.ImeAction.Done || //in this case it is Done (blue checkmark)
+                e.ActionId == Android.Views.InputMethods.ImeAction.Go ||
+                e.ActionId == Android.Views.InputMethods.ImeAction.Next ||
+                e.ActionId == Android.Views.InputMethods.ImeAction.Search)
+            {
+                Logger.Debug("IME ACTION: " + e.ActionId.ToString());
+                rootView.FindViewById<EditText>(Resource.Id.filterText).ClearFocus();
+                rootView.FindViewById<View>(Resource.Id.focusableLayout).RequestFocus();
+                UiHelpers.HideSoftKeyboard(rootView);
+            }
+        }
+
+        //should be called whenever either the filter changes, new search results come in, the search gets cleared, etc.
+        //includes chips
+        private void UpdateFilteredResponses(SearchTab searchTab)
+        {
+            //The Rules:
+            //if separated by space, then it must contain both them, in any order
+            //if - in front then it must not contain this word
+            //there are also several keywords
+
+            Logger.Debug("Words To Avoid: " + searchTab.TextFilter.WordsToAvoid.ToString());
+            Logger.Debug("Words To Include: " + searchTab.TextFilter.WordsToInclude.ToString());
+            Logger.Debug("Whether to Filter: " + searchTab.TextFilter.IsFiltered);
+            Logger.Debug("FilterString: " + searchTab.TextFilter.FilterString);
+            bool hideLocked = PreferencesState.HideLockedResultsInSearch;
+            var mergedFlags = MergeFilterFlags(searchTab.TextFilter.FilterSpecialFlags);
+            searchTab.UI_SearchResponses.Clear();
+            searchTab.UI_SearchResponses.AddRange(searchTab.SearchResponses.FindAll(
+                s => SearchFilter.MatchesAllCriteria(s, searchTab.ChipsFilter, mergedFlags, searchTab.TextFilter.WordsToAvoid, searchTab.TextFilter.WordsToInclude, hideLocked)));
+            UpdateEmptyState();
+        }
+
+        internal static FilterSpecialFlags MergeFilterFlags(FilterSpecialFlags textFlags)
+        {
+            var merged = new FilterSpecialFlags();
+            if (textFlags != null)
+            {
+                merged.MinBitRateKBS = textFlags.MinBitRateKBS;
+                merged.MinFileSizeMB = textFlags.MinFileSizeMB;
+                merged.MinFoldersInFile = textFlags.MinFoldersInFile;
+                merged.IsVBR = textFlags.IsVBR;
+                merged.IsCBR = textFlags.IsCBR;
+                merged.FormatFilter = textFlags.FormatFilter;
+                merged.ContainsSpecialFlags = textFlags.ContainsSpecialFlags;
+            }
+            if (PreferencesState.FilterFormat != FormatFilterType.Any)
+            {
+                merged.FormatFilter = PreferencesState.FilterFormat;
+                merged.ContainsSpecialFlags = true;
+            }
+            if (PreferencesState.FilterMinBitrateKbs > 0)
+            {
+                merged.MinBitRateKBS = System.Math.Max(merged.MinBitRateKBS, PreferencesState.FilterMinBitrateKbs);
+                merged.ContainsSpecialFlags = true;
+            }
+            return merged;
+        }
+
+        private void FilterText_TextChanged(object sender, Android.Text.TextChangedEventArgs e)
+        {
+            var searchTab = SearchTabHelper.SearchTabCollection[SearchTabHelper.CurrentTab];
+            if (!searchTab.IsLoaded())
+            {
+                return;
+            }
+            Logger.Debug("Text Changed: " + e.Text);
+            string oldFilterString = SearchTabHelper.TextFilter.IsFiltered ? SearchTabHelper.TextFilter.FilterString : string.Empty;
+            if ((e.Text != null && e.Text.ToString() != string.Empty && SearchTabHelper.SearchResponses != null) || AreChipsFiltering() || AreFilterControlsActive())
+            {
+
+#if DEBUG
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                var oldList = SearchTabHelper.UI_SearchResponses.ToList();
+#endif
+                SearchTabHelper.TextFilter.Set(e.Text.ToString());
+                if (PreferencesState.FilterSticky)
+                {
+                    PreferencesState.FilterStickyString = SearchTabHelper.TextFilter.FilterString;
+                }
+
+                UpdateFilteredResponses(SearchTabHelper.SearchTabCollection[SearchTabHelper.CurrentTab]);
+#if DEBUG
+
+                int oldCount = oldList.Count;
+                int newCount = SearchTabHelper.UI_SearchResponses.Count();
+                Logger.Debug($"update filtered only - old {oldCount} new {newCount} time {sw.ElapsedMilliseconds} ms");
+#endif
+#if DEBUG
+                sw.Stop();
+#endif
+                ResetAdapterAndBaseline(); //does have the nice effect that if nothing changes, you dont just back to top. (unlike old method)
+#if DEBUG
+                Logger.Debug($"old {oldCount} new {newCount} time {sw.ElapsedMilliseconds} ms");
+#endif
+
+            }
+            else
+            {
+                SearchTabHelper.TextFilter.Reset();
+                if (PreferencesState.FilterSticky)
+                {
+                    PreferencesState.FilterStickyString = string.Empty;
+                }
+
+                SearchTabHelper.UI_SearchResponses.Clear();
+                SearchTabHelper.UI_SearchResponses.AddRange(SearchTabHelper.SearchResponses);
+
+                ResetAdapterAndBaseline(); //does have the nice effect that if nothing changes, you dont just back to top.
+                UpdateEmptyState();
+            }
+            NotifySearchHeaderChanged();
+
+            if (oldFilterString == string.Empty && e.Text.ToString() != string.Empty)
+            {
+                UpdateDrawableState(sender as EditText, true);
+            }
+            else if (oldFilterString != string.Empty && e.Text.ToString() == string.Empty)
+            {
+                UpdateDrawableState(sender as EditText, true);
+            }
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
+        public void RefreshOnChipChanged()
+        {
+            if (AreChipsFiltering() || SearchTabHelper.TextFilter.IsFiltered || AreFilterControlsActive())
+            {
+                UpdateFilteredResponses(SearchTabHelper.SearchTabCollection[SearchTabHelper.CurrentTab]);
+                ResetAdapterAndBaseline();
+            }
+            else
+            {
+                SearchTabHelper.UI_SearchResponses.Clear();
+                SearchTabHelper.UI_SearchResponses.AddRange(SearchTabHelper.SearchResponses);
+                ResetAdapterAndBaseline();
+            }
+            NotifySearchHeaderChanged();
+        }
+
+        private void RefreshSearchHistoryDropdown()
+        {
+            if (SeekerState.MainActivityRef?.SupportActionBar?.CustomView == null) return;
+            AutoCompleteTextView actv = SeekerState.MainActivityRef.SupportActionBar.CustomView.FindViewById<AutoCompleteTextView>(Resource.Id.searchHere);
+            actv.Adapter = new ArrayAdapter<string>(context, Resource.Layout.search_dropdown_item, PreferencesState.SearchHistory);
+        }
+
+        private void OnSearchHistoryCleared(object sender, EventArgs e)
+        {
+            RefreshSearchHistoryDropdown();
+        }
+
+        public override void OnPause()
+        {
+            Logger.Debug("SearchFragmentOnPause");
+            base.OnPause();
+            PreferencesManager.SaveSearchFragmentFilterState(PreferencesState.FilterSticky, SearchTabHelper.TextFilter.FilterString, (int)PreferencesState.SearchResultStyle, ExpandAllResults);
+            StopWishlistBannerTicker();
+            StopSpinnerTimer();
+            SearchHistoryCleared -= OnSearchHistoryCleared;
+        }
+
+        private static void Actv_KeyPressHELPER(object sender, View.KeyEventArgs e)
+        {
+            SearchFragment.Instance.Actv_KeyPress(sender, e);
+        }
+
+        /// <summary>
+        /// Search dialog (link following / share intent): put the term in the app bar box, then search it.
+        /// </summary>
+        public static void SubmitSearchFromDialog(string searchTerm)
+        {
+            RenderActionBarCustomView(SeekerState.MainActivityRef?.SupportActionBar?.CustomView, searchTerm);
+            SearchFragment.Instance?.SubmitSearch(searchTerm);
+        }
+
+        private void Actv_KeyPress(object sender, View.KeyEventArgs e)
+        {
+            if (e.KeyCode == Keycode.Enter && e.Event.Action == KeyEventActions.Down)
+            {
+                Logger.Debug("ENTER PRESSED " + e.KeyCode.ToString());
+                SubmitSearch(GetSearchBoxText());
+            }
+            else if (e.KeyCode == Keycode.Del && e.Event.Action == KeyEventActions.Down)
+            {
+                (sender as AutoCompleteTextView).OnKeyDown(e.KeyCode, e.Event);
+                return;
+            }
+            else if ((e.Event.Action == KeyEventActions.Down || e.Event.Action == KeyEventActions.Up) && (e.KeyCode == Android.Views.Keycode.Back || e.KeyCode == Android.Views.Keycode.VolumeUp || e.KeyCode == Android.Views.Keycode.VolumeDown))
+            {
+                //for some reason e.Handled is always true coming in.  also only on down volume press does anything.
+                e.Handled = false;
+            }
+            else //this will only occur on unhandled keys which on the softkeyboard probably has to be in the above two categories....
+            {
+                if (e.Event.Action == KeyEventActions.Down)
+                {
+                    //Logger.Debug(e.KeyCode.ToString()); //happens on HW keyboard... event does NOT get called on SW keyboard. :)
+                    //Logger.Debug((sender as AutoCompleteTextView).IsFocused.ToString());
+                    (sender as AutoCompleteTextView).OnKeyDown(e.KeyCode, e.Event);
+                }
+            }
+        }
+
+        private static void AddIncomingSearchResponse(SearchResponse response, int fromTab, bool fromWishlist)
+        {
+            if ((response.FileCount == 0 && PreferencesState.HideLockedResultsInSearch) || (!PreferencesState.HideLockedResultsInSearch && response.FileCount == 0 && response.LockedFileCount == 0))
+            {
+                Logger.Debug("Skipping Locked or 0/0");
+                return;
+            }
+            AddIncomingSearchResponseImp(response, fromTab, fromWishlist);
+
+        }
+
+        private static void ClearTab(int fromTab, bool fromWishlist)
+        {
+            if (fromWishlist)
+            {
+                return; //we combine results...
+            }
+
+            Logger.Debug("ClearTab SearchResponses.Clear() from Tab: " + fromTab + " current tab: "+ SearchTabHelper.CurrentTab);
+            var searchTab = SearchTabHelper.SearchTabCollection[fromTab];
+            searchTab.SortHelper.Clear();
+            searchTab.SearchResponses.Clear();
+            searchTab.LastSearchResponseCount = -1;
+            searchTab.UI_SearchResponses.Clear();
+            searchTab.ChipDataItems = null;
+            searchTab.ChipsFilter = null;
+            if (!PreferencesState.FilterSticky)
+            {
+                searchTab.TextFilter.Reset();
+            }
+
+            // TODO: this next part should really just read "update UI from state"
+            if (fromTab == SearchTabHelper.CurrentTab)
+            {
+                SearchFragment.Instance.ResetFilterControlsUI(false);
+
+                SearchFragment.Instance.recyclerViewSearch.SetAdapter(SearchFragment.Instance.CreateSearchAdapter(SearchTabHelper.CurrentSearchTab, SearchTabHelper.UI_SearchResponses));
+
+                SearchFragment.Instance.RefreshUIChipAdapterFromData();
+                SearchFragment.Instance.UpdateEmptyState();
+                SearchFragment.Instance.NotifySearchHeaderChanged();
+            }
+        }
+
+
+        public override void OnDetach() //happens whenever the fragment gets recreated.  (i.e. on rotating device).
+        {
+            Logger.Debug("search frag detach");
+            base.OnDetach();
+        }
+        public override void OnAttach(Context context)
+        {
+            Logger.Debug("search frag attach");
+            base.OnAttach(context);
+        }
+
+        private RecyclerView.LayoutManager recycleLayoutManager;
+        private RecyclerView recyclerViewSearch;
+        private SearchAdapterRecyclerVersion recyclerSearchAdapter;
+        private View searchResultsHeaderView;
+
+        private SearchAdapterRecyclerVersion CreateSearchAdapter(SearchTab tab, List<SearchResponse> responses)
+        {
+            recyclerSearchAdapter = new SearchAdapterRecyclerVersion(tab, responses);
+            // every adapter creation (tab switch, new search, style change, view recreate) goes through here
+            SetOldList(tab.TextFilter.FilterString, responses?.ToList());
+            return recyclerSearchAdapter;
+        }
+
+        /// <summary>
+        /// Full reset after a sort / filter / chip change. Also resync old list to what we 
+        /// currently show so that subsequent updates can use it.
+        /// </summary>
+        private void ResetAdapterAndBaseline()
+        {
+            recyclerSearchAdapter.NotifyDataSetChanged();
+            SetOldList(SearchTabHelper.TextFilter.FilterString, SearchTabHelper.UI_SearchResponses.ToList());
+        }
+
+        private void NotifySearchHeaderChanged()
+        {
+            RefreshSearchResultsHeader(searchResultsHeaderView);
+        }
+
+
+        private static List<SearchResponse> GetOldList(string filter)
+        {
+            if (filter == null)
+            {
+                filter = string.Empty;
+            }
+            if (filter == oldListCondition)
+            {
+                return oldList;
+            }
+            return null;
+        }
+
+        private static void SetOldList(string filter, List<SearchResponse> searchResponses)
+        {
+            if (filter == null)
+            {
+                filter = string.Empty;
+            }
+            oldListCondition = filter;
+            oldList = searchResponses;
+        }
+
+        private static List<SearchResponse> oldList = new List<SearchResponse>();
+        private static string oldListCondition = string.Empty;
+
+        /// <summary>
+        /// Applies new search results to the RecyclerView, creating a new adapter if needed or
+        /// notifying just the inserted ranges. Since results only ever get added, never removed or changed
+        /// during a search, the previous list will always be a subsequence of the new one.
+        /// This prevents expensive diffing O(N+D^2) + JNI copy of every item which took 500+ ms at times
+        /// for real searches in release (whenever we would get an addition with say 500 new items)
+        /// </summary>
+        private static void ApplySearchResults(List<SearchResponse> newResults, string cacheKey)
+        {
+            var prevList = GetOldList(cacheKey);
+            if (prevList == null)
+            {
+                Instance.recyclerViewSearch.SetAdapter(Instance.CreateSearchAdapter(SearchTabHelper.CurrentSearchTab, newResults));
+            }
+            else
+            {
+                // SaveInstanceState/RestoreInstanceState prevents autoscroll even when animations are off
+                var state = Instance.recycleLayoutManager.OnSaveInstanceState();
+                Instance.recyclerSearchAdapter.localDataSet = newResults;
+                if (InsertOnlyDiff.TryComputeInsertRuns(prevList, newResults, out var runs))
+                {
+                    // a run's start is the adapter position once the runs before it are applied
+                    foreach (var (start, count) in runs)
+                    {
+                        Instance.recyclerSearchAdapter.NotifyItemRangeInserted(start, count);
+                    }
+                }
+                else
+                {
+                    // this shouldnt happen
+                    Logger.Firebase("search results baseline stale, full reset. oldList: " + prevList.Count + " newList " + newResults.Count);
+                    Instance.recyclerSearchAdapter.NotifyDataSetChanged();
+                }
+                Instance.recycleLayoutManager.OnRestoreInstanceState(state);
+            }
+            Instance.NotifySearchHeaderChanged();
+            SetOldList(cacheKey, newResults.ToList());
+            Instance.UpdateEmptyState();
+        }
+
+        /// <summary>
+        /// To add a search response to the list view
+        /// </summary>
+        private static void AddIncomingSearchResponseImp(SearchResponse resp, int fromTab, bool fromWishlist)
+        {
+            var tab = SearchTabHelper.SearchTabCollection[fromTab];
+            Tuple<bool, List<SearchResponse>> splitResponses = new Tuple<bool, List<SearchResponse>>(false, null);
+            try
+            {
+                splitResponses = Common.SearchResponseUtil.SplitMultiDirResponse(PreferencesState.HideLockedResultsInSearch, resp);
+            }
+            catch (System.Exception e)
+            {
+                Logger.Firebase(e.Message + " splitmultidirresponse");
+            }
+
+            lock (tab.SortHelperLockObject)
+            {
+                try
+                {
+                    if (splitResponses.Item1)
+                    {
+                        foreach (SearchResponse splitResponse in splitResponses.Item2)
+                        {
+                            if (fromWishlist && WishlistController.OldResultsToCompare[fromTab].Contains(splitResponse))
+                            {
+                                continue;
+                            }
+                            if (fromWishlist && tab.SortHelper.Count >= WishlistUtil.MaxResultsPerWishlist)
+                            {
+                                break;
+                            }
+                            tab.SortHelper.Add(splitResponse);
+                            if (fromWishlist)
+                            {
+                                tab.UnseenResults.Add(splitResponse);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        bool isWishlistDuplicate = fromWishlist && WishlistController.OldResultsToCompare[fromTab].Contains(resp);
+                        bool wishlistFull = fromWishlist && tab.SortHelper.Count >= WishlistUtil.MaxResultsPerWishlist;
+                        if (!isWishlistDuplicate && !wishlistFull)
+                        {
+                            tab.SortHelper.Add(resp);
+                            if (fromWishlist)
+                            {
+                                tab.UnseenResults.Add(resp);
+                            }
+                        }
+                    }
+                }
+                catch (System.Exception e)
+                {
+                    Logger.Debug(e.Message);
+                }
+
+                tab.SearchResponses = tab.SortHelper.ToList();
+                tab.LastSearchResultsCount = tab.SearchResponses.Count;
+            }
+
+            if ((!fromWishlist || SearchFragment.Instance != null) && fromTab == SearchTabHelper.CurrentTab)
+            {
+                ScheduleDebouncedRefresh(fromTab, tab);
+            }
+
+        }
+
+        // Coalesces per-response UI refreshes during a burst. The first response in a quiet
+        // window schedules a refresh; subsequent responses arriving during the window are
+        // absorbed (their data is already in tab.SortHelper and tab.SearchResponses, which
+        // the scheduled refresh re-reads at fire time). The pending flag is cleared before
+        // the work runs, so any response arriving mid-render schedules the next refresh.
+        private static readonly Handler _refreshUiHandler = new Handler(Looper.MainLooper);
+        private static int _refreshPending; // 0 or 1
+        private const int RefreshDebounceMs = 100;
+
+        private static void ScheduleDebouncedRefresh(int fromTab, SearchTab tab)
+        {
+            if (Interlocked.CompareExchange(ref _refreshPending, 1, 0) != 0)
+            {
+                return;
+            }
+            _refreshUiHandler.PostDelayed(new Action(() =>
+            {
+                Interlocked.Exchange(ref _refreshPending, 0);
+                if (fromTab != SearchTabHelper.CurrentTab)
+                {
+                    return;
+                }
+                int total = tab.SearchResponses.Count;
+                if (tab.LastSearchResponseCount == total)
+                {
+                    return;
+                }
+                if (tab.TextFilter.IsFiltered || AreChipsFiltering() || AreFilterControlsActive())
+                {
+                    SearchFragment.Instance.UpdateFilteredResponses(tab);
+                    ApplySearchResults(tab.UI_SearchResponses, tab.TextFilter.FilterString);
+                }
+                else
+                {
+                    tab.UI_SearchResponses = tab.SearchResponses.ToList();
+                    ApplySearchResults(tab.UI_SearchResponses, string.Empty);
+                }
+                tab.LastSearchResponseCount = total;
+            }), RefreshDebounceMs);
+        }
+
+        public static System.Diagnostics.Stopwatch StopWatch = new System.Diagnostics.Stopwatch();
+
+        public static bool dlDialogShown = false;
+
+        public void ShowDownloadDialog(int pos)
+        {
+            try
+            {
+                if (dlDialogShown)
+                {
+                    dlDialogShown = false; //just in the worst case we dont want to prevent too badly.
+                    return;
+                }
+                dlDialogShown = true;
+                SearchResponse dlDiagResp = null;
+                if (SearchTabHelper.TextFilter.IsFiltered || AreChipsFiltering() || AreFilterControlsActive())
+                {
+                    dlDiagResp = SearchTabHelper.UI_SearchResponses.ElementAt<SearchResponse>(pos);
+                }
+                else
+                {
+                    dlDiagResp = SearchTabHelper.SearchResponses.ElementAt<SearchResponse>(pos);
+                }
+                DownloadDialog downloadDialog = DownloadDialog.CreateNewInstance(pos, dlDiagResp);
+                downloadDialog.Show(FragmentManager, DownloadDialog.DOWNLOAD_DIALOG_FRAGMENT);
+                // When creating a DialogFragment from within a Fragment, you must use the Fragment's CHILD FragmentManager to ensure that the state is properly restored after configuration changes. ????
+            }
+            catch (System.Exception e)
+            {
+                System.String msg = string.Empty;
+                if (SearchTabHelper.TextFilter.IsFiltered || AreChipsFiltering() || AreFilterControlsActive())
+                {
+                    msg = "Filtered.Count " + SearchTabHelper.UI_SearchResponses.Count.ToString() + " position selected = " + pos.ToString();
+                }
+                else
+                {
+                    msg = "SearchResponses.Count = " + SearchTabHelper.SearchResponses.Count.ToString() + " position selected = " + pos.ToString();
+                }
+
+                Logger.Firebase(msg + " showEditDialog" + e.Message);
+                SeekerApplication.Toaster.ShowToast("Error, please try again: " + msg, ToastLength.Long);
+            }
+        }
+
+        public const int SearchToCloseDuration = 300;
+
+        private static bool searchResponseFilter(SearchResponse s)
+        {
+            if (PreferencesState.FreeUploadSlotsOnly && !s.HasFreeUploadSlot)
+            {
+                return false;
+            }
+            return true;
+        }
+
+        private static void SearchLogic(CancellationToken cancellationToken, string searchString, int fromTab, SearchScope scope, bool fromWishlist)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                // cancelled (X) or superseded (restart) while we waited on a reconnect, not needed anymore
+                Logger.Debug("search cancelled before it started, tab " + fromTab);
+                return;
+            }
+            try
+            {
+                //all click event handlers occur on UI thread.
+                ClearTab(fromTab, fromWishlist);
+                //editTextSearch = SeekerState.MainActivityRef.SupportActionBar.CustomView.FindViewById<EditText>(Resource.Id.searchHere);
+            }
+            catch (System.Exception e)
+            {
+            }
+            //in my testing:
+            // if someone has 0 free upload slots I could never download from them (even if queue was 68, 250) the progress bar just never moves, though no error, nothing.. ****
+            // if someone has 1 free upload slot and a queue size of 100, 143, 28, 5, etc. it worked just fine.
+            int searchTimeout = SearchTabHelper.SearchTarget == SearchTarget.AllUsers ? 5000 : 12000;
+
+            Action<(Soulseek.Search, SearchResponse)> searchResponseReceived = new Action<(Soulseek.Search, SearchResponse)>(tuple =>
+            {
+                AddIncomingSearchResponse(tuple.Item2, fromTab, fromWishlist);
+            });
+
+            SearchOptions searchOptions = new SearchOptions(responseLimit: PreferencesState.NumberSearchResults, 
+                searchTimeout: searchTimeout, 
+                maximumPeerQueueLength: int.MaxValue, 
+                responseReceived: searchResponseReceived, 
+                responseFilter: (SearchResponse s) => searchResponseFilter(s), 
+                filterResponses: true);
+            try
+            {
+                Task<(Soulseek.Search, IReadOnlyCollection<SearchResponse>)> t = null;
+                t = SeekerState.SoulseekClient.SearchAsync(SearchQuery.FromText(searchString), options: searchOptions, scope: scope, cancellationToken: cancellationToken);
+
+                t.ContinueWith(new Action<Task<(Soulseek.Search, IReadOnlyCollection<SearchResponse>)>>(t =>
+                {
+                    var searchTab = SearchTabHelper.SearchTabCollection[fromTab];
+                    // Superseded by a newer search on this tab (SubmitSearch replaced the token, then cancelled old token)
+                    bool IsStale() => !fromWishlist && searchTab.CancellationTokenSource?.Token != cancellationToken;
+                    if (IsStale())
+                    {
+                        Logger.Debug("stale search continuation, tab " + fromTab);
+                        return;
+                    }
+
+                    if (t.IsFaulted)
+                    {
+                        // Timeout, ConnectionException, SoulseekClientException (basically issue writing the search request to server)
+                        MarkSearchFailed(fromTab, fromWishlist, cancellationToken, t.Exception?.InnerException?.Message ?? t.Exception?.Message);
+                        return;
+                    }
+
+                    SeekerApplication.RunOnUIThread(() =>
+                    {
+                        if (IsStale())
+                        {
+                            Logger.Debug("stale search continuation (ui), tab " + fromTab);
+                            return;
+                        }
+                        try
+                        {
+                            if (fromWishlist)
+                            {
+                                RefreshSearchStateUi();
+                            }
+                            else
+                            {
+                                SetSearchingState(fromTab, false);
+                            }
+                        }
+                        catch (System.ObjectDisposedException)
+                        {
+                            //since its disposed when you go back to the screen it will be the correct search icon again..
+                            //noop
+                        }
+                    });
+                    if ((!t.IsCanceled) && t.Result.Item2.Count == 0 && !fromWishlist) //if t is cancelled, t.Result throws..
+                    {
+                        SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.no_search_results), ToastLength.Short);
+                    }
+#if DEBUG && !MOCK
+                    if (!t.IsCanceled && t.IsCompletedSuccessfully && t.Result.Item2 != null && t.Result.Item2.Count > 0)
+                    {
+                        try
+                        {
+                            Seeker.Debug.SearchCaptureStore.Save(searchString, t.Result.Item2);
+                        }
+                        catch (System.Exception ex)
+                        {
+                            Logger.Debug("SearchCaptureStore save failed: " + ex);
+                        }
+                    }
+#endif
+                    searchTab.LastSearchResultsCount = searchTab.SearchResponses.Count;
+                    if (PreferencesState.ShowSmartFilters)
+                    {
+                        searchTab.UpdateChips(PreferencesState.SmartFilterOptions, PreferencesState.HideLockedResultsInSearch);
+                    }
+
+                    if (fromWishlist)
+                    {
+                        WishlistController.SearchCompleted(fromTab);
+                    }
+                    else if (searchTab.SearchTarget == SearchTarget.Wishlist)
+                    {
+                        //this is if the search was not automatic (i.e. wishlist timer elapsed) but was performed in the wishlist tab..
+                        //therefore save the new results...
+                        SearchTabHelper.SaveHeadersToSharedPrefs();
+                        SearchTabHelper.SaveSearchResultsToDisk(fromTab, SeekerState.ActiveActivityRef);
+                    }
+
+                    if (fromTab == SearchTabHelper.CurrentTab)
+                    {
+                        if (searchTab.SearchTarget == SearchTarget.Wishlist)
+                        {
+                            SeekerState.ActiveActivityRef.RunOnUiThread(new Action(() =>
+                            {
+                                SearchFragment.Instance?.RefreshWishlistBanner();
+                            }));
+                        }
+                        if (PreferencesState.ShowSmartFilters)
+                        {
+#if DEBUG
+                            try
+                            {
+                                var df = StorageState.RootDocumentFile.CreateFile("text/plain", SearchTabHelper.SearchTabCollection[fromTab].LastSearchTerm.Replace(' ', '_'));
+                                var outputStream = SeekerState.ActiveActivityRef.ContentResolver.OpenOutputStream(df.Uri);
+                                foreach (var sr in SearchTabHelper.SearchTabCollection[fromTab].SearchResponses)
+                                {
+                                    byte[] bytesText = System.Text.Encoding.ASCII.GetBytes(sr.Files.First().Filename + System.Environment.NewLine);
+                                    outputStream.Write(bytesText, 0, bytesText.Length);
+                                }
+                                outputStream.Close();
+                            }
+                            catch
+                            {
+
+                            }
+
+#endif
+                            SeekerState.ActiveActivityRef.RunOnUiThread(new Action(() =>
+                            {
+                                SearchFragment.Instance.RefreshUIChipAdapterFromData();
+                            }));
+                        }
+
+                    }
+
+                }));
+            }
+            catch (ArgumentNullException)
+            {
+                MarkSearchFailed(fromTab, fromWishlist, cancellationToken, fromWishlist ? SeekerApplication.GetString(Resource.String.no_wish_text) : SeekerApplication.GetString(Resource.String.no_search_text));
+                return;
+            }
+            catch (ArgumentException ex)
+            {
+                string message = ex.Message;
+                if (message.Contains("Search text must not be a null or empty string"))
+                {
+                    // use localized version
+                    message = fromWishlist ? SeekerApplication.GetString(Resource.String.no_wish_text) : SeekerApplication.GetString(Resource.String.no_search_text);
+                }
+                else
+                {
+                    // Strip dev specific message from library if applicable
+                    int paramSuffix = message.IndexOf(" (Parameter '", StringComparison.Ordinal);
+                    if (paramSuffix > 0)
+                    {
+                        message = message.Substring(0, paramSuffix);
+                    }
+                }
+                MarkSearchFailed(fromTab, fromWishlist, cancellationToken, message);
+                return;
+            }
+            catch (System.Exception ex)
+            {
+                MarkSearchFailed(fromTab, fromWishlist, cancellationToken, ex.Message);
+                return;
+            }
+            if (!fromWishlist)
+            {
+                //add a new item to our search history
+                if (PreferencesState.RememberSearchHistory)
+                {
+                    if (!PreferencesState.SearchHistory.Contains(searchString))
+                    {
+                        PreferencesState.SearchHistory.Add(searchString);
+                        PreferencesManager.SaveSearchHistory();
+                    }
+                }
+                var actv = SeekerState.MainActivityRef.SupportActionBar?.CustomView?.FindViewById<AutoCompleteTextView>(Resource.Id.searchHere); // lot of nullrefs with actv before this change....
+                if (actv == null)
+                {
+                    actv = (SearchFragment.Instance.Activity as AndroidX.AppCompat.App.AppCompatActivity)?.SupportActionBar?.CustomView?.FindViewById<AutoCompleteTextView>(Resource.Id.searchHere);
+                    if (actv == null)
+                    {
+                        Logger.Firebase("actv stull null, cannot refresh adapter");
+                        return;
+                    }
+                }
+                actv.Adapter = new ArrayAdapter<string>(SearchFragment.Instance.context, Resource.Layout.search_dropdown_item, PreferencesState.SearchHistory); //refresh adapter
+            }
+        }
+
+        private static void MarkSearchFailed(int tabId, bool fromWishlist, CancellationToken cancellationToken, string reason)
+        {
+            Logger.Debug($"search failed, tab {tabId}, wishlist {fromWishlist}: {reason}");
+            if (fromWishlist)
+            {
+                WishlistController.SearchFailed(tabId);
+                return;
+            }
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+            SeekerApplication.RunOnUIThread(() =>
+            {
+                SearchTab tab = SearchTabHelper.SearchTabCollection[tabId];
+                tab.LastSearchError = string.IsNullOrEmpty(reason) ? SeekerApplication.GetString(Resource.String.search_failed_title) : reason;
+                bool failedStateWillShow = tabId == SearchTabHelper.CurrentTab && tab.SearchResponses.Count == 0;
+                if (!failedStateWillShow)
+                {
+                    SeekerApplication.Toaster.ShowToast(tab.LastSearchError, ToastLength.Short);
+                }
+                SetSearchingState(tabId, false);
+            });
+        }
+
+        public static void SearchAPI(CancellationToken cancellationToken, string searchString, int fromTab, SearchScope scope, bool fromWishlist = false)
+        {
+            SearchTabHelper.SearchTabCollection[fromTab].LastSearchTerm = searchString;
+            SearchTabHelper.SearchTabCollection[fromTab].LastRanTime = DateTime.UtcNow;
+            if (!PreferencesState.CurrentlyLoggedIn)
+            {
+                MarkSearchFailed(fromTab, fromWishlist, cancellationToken, SeekerApplication.GetString(Resource.String.must_be_logged_to_search));
+                return;
+            }
+            SessionService.Instance.RunWithReconnect(t =>
+            {
+                if (t.IsFaulted)
+                {
+                    MarkSearchFailed(fromTab, fromWishlist, cancellationToken, SeekerApplication.GetString(Resource.String.failed_to_connect));
+                    throw new FaultPropagationException();
+                }
+                if (fromWishlist)
+                {
+                    SearchLogic(cancellationToken, searchString, fromTab, scope, fromWishlist);
+                }
+                else
+                {
+                    SeekerApplication.RunOnUIThread(() => SearchLogic(cancellationToken, searchString, fromTab, scope, fromWishlist));
+                }
+            }, silent: fromWishlist);
+        }
+    }
+
+}

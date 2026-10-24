@@ -1,0 +1,398 @@
+﻿/*
+ * Copyright 2021 Seeker
+ *
+ * This file is part of Seeker
+ *
+ * Seeker is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Seeker is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Seeker. If not, see <http://www.gnu.org/licenses/>.
+ */
+
+using Seeker.Browse;
+using Seeker.Helpers;
+using Seeker.Messages;
+using Seeker.Users;
+using Android.App;
+using Android.Content;
+using Android.OS;
+using Android.Util;
+using Android.Views;
+using Android.Widget;
+using AndroidX.Core.Graphics.Drawable;
+using AndroidX.RecyclerView.Widget;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+
+using Common;
+namespace Seeker
+{
+    [Activity(Label = "UserListActivity", Theme = "@style/AppTheme.NoActionBar", Exported = false, ParentActivity = typeof(MainActivity))]
+    public class UserListActivity : ThemeableActivity
+    {
+        public override bool OnCreateOptionsMenu(IMenu menu)
+        {
+            MenuInflater.Inflate(Resource.Menu.user_list_menu, menu);
+            return base.OnCreateOptionsMenu(menu);
+        }
+
+        private void NotifyItemChanged(string username)
+        {
+            int i = this.recyclerAdapter.GetPositionForUsername(username);
+            if (i == -1)
+            {
+                return;
+            }
+            this.recyclerAdapter.NotifyItemChanged(i);
+        }
+
+        private void NotifyItemRemoved(string username)
+        {
+            int i = this.recyclerAdapter.GetPositionForUsername(username);
+            if (i == -1)
+            {
+                return;
+            }
+            this.recyclerAdapter.RemoveFromDataSet(i);
+            this.recyclerAdapter.NotifyItemRemoved(i);
+        }
+
+
+        public override bool OnOptionsItemSelected(IMenuItem item)
+        {
+            switch (item.ItemId)
+            {
+                case Resource.Id.add_user_action:
+                    ShowEditTextDialogAddUserToList(false);
+                    return true;
+                case Resource.Id.add_user_to_ignored_action:
+                    ShowEditTextDialogAddUserToList(true);
+                    return true;
+                case Resource.Id.sort_user_list_action:
+                    ShowSortUserListDialog();
+                    return true;
+                case Android.Resource.Id.Home:
+                    OnBackPressedDispatcher.OnBackPressed();
+                    return true;
+            }
+            return base.OnOptionsItemSelected(item);
+        }
+        private LinearLayoutManager recycleLayoutManager;
+        public RecyclerUserListAdapter recyclerAdapter;
+        private RecyclerView recyclerViewUserList;
+        private View noUsersView;
+        protected override void OnCreate(Bundle savedInstanceState)
+        {
+            base.OnCreate(savedInstanceState);
+            SeekerState.ActiveActivityRef = this;
+            SetContentView(Resource.Layout.user_list_activity_layout);
+
+            AndroidX.AppCompat.Widget.Toolbar myToolbar = (AndroidX.AppCompat.Widget.Toolbar)FindViewById<AndroidX.AppCompat.Widget.Toolbar>(Resource.Id.user_list_toolbar);
+            myToolbar.InflateMenu(Resource.Menu.user_list_menu);
+            myToolbar.Title = this.GetString(Resource.String.target_user_list);
+            this.SetSupportActionBar(myToolbar);
+            this.SupportActionBar.SetDisplayHomeAsUpEnabled(true);
+            this.SupportActionBar.SetHomeButtonEnabled(true);
+            this.SupportActionBar.SetDisplayShowHomeEnabled(true);
+
+            if (CommonState.UserList == null)
+            {
+                var sharedPref = this.GetSharedPreferences(Constants.SharedPrefFile, 0);
+                CommonState.UserList = SerializationHelper.RestoreUserListFromString(sharedPref.GetString(KeyConsts.M_UserList, ""));
+            }
+
+            //this.SupportActionBar.SetBackgroundDrawable turn off overflow....
+
+            recyclerViewUserList = this.FindViewById<RecyclerView>(Resource.Id.userList);
+            noUsersView = this.FindViewById<View>(Resource.Id.noUsersView);
+            recycleLayoutManager = new LinearLayoutManager(this);
+            recyclerViewUserList.SetLayoutManager(recycleLayoutManager);
+
+            RefreshUserList();
+        }
+
+        public void RefreshUserList()
+        {
+            if (CommonState.UserList != null)
+            {
+                lock (CommonState.UserList)
+                {
+                    recyclerAdapter = new RecyclerUserListAdapter(this, ParseUserListForPresentation());
+                    recyclerViewUserList.SetAdapter(recyclerAdapter);
+                }
+            }
+
+            bool hasUsers = recyclerAdapter != null && recyclerAdapter.ItemCount > 0;
+            noUsersView.Visibility = hasUsers ? ViewStates.Gone : ViewStates.Visible;
+        }
+
+
+        private void OnUserStatusChanged(object sender, string username)
+        {
+            if (SeekerApplication.OnUIThread())
+            {
+                if (UserListSortOrder == SortOrder.OnlineStatus)
+                {
+
+                    var oldList = recyclerAdapter.localDataSet.ToList();
+                    recyclerAdapter.localDataSet.Clear();
+                    recyclerAdapter.localDataSet.AddRange(ParseUserListForPresentation());
+
+                    DiffUtil.DiffResult res = DiffUtil.CalculateDiff(new UserListDiffCallback(oldList, recyclerAdapter.localDataSet), true);
+                    //SearchTabHelper.SearchTabCollection[fromTab].FilteredResponses.Clear();
+                    //SearchTabHelper.SearchTabCollection[fromTab].FilteredResponses.AddRange(newList);
+                    res.DispatchUpdatesTo(recyclerAdapter);
+
+                    recyclerAdapter.NotifyItemChanged(recyclerAdapter.GetPositionForUsername(username));
+                }
+                else
+                {
+                    recyclerAdapter.NotifyItemChanged(recyclerAdapter.GetPositionForUsername(username));
+                }
+            }
+            else
+            {
+                SeekerState.ActiveActivityRef.RunOnUiThread(() => { OnUserStatusChanged(null, username); });
+            }
+        }
+
+        private static List<UserListItem> ParseUserListForPresentation()
+        {
+            String friendString = SeekerState.ActiveActivityRef.GetString(Resource.String.friends);
+            String ignoredString = SeekerState.ActiveActivityRef.GetString(Resource.String.ignored);
+            return UserListUtils.ParseUserListForPresentation(friendString, ignoredString);
+        }
+
+        protected override void OnPause()
+        {
+            SeekerApplication.UserStatusChangedUIEvent -= OnUserStatusChanged;
+            UserListService.UserListChanged -= OnUserListChanged;
+            UserListService.IgnoreListChanged -= OnIgnoreListChanged;
+            UserListService.UserRowChanged -= OnUserRowChanged;
+            base.OnPause();
+        }
+
+        protected override void OnResume()
+        {
+            RefreshUserList();
+            SeekerApplication.UserStatusChangedUIEvent += OnUserStatusChanged;
+            UserListService.UserListChanged += OnUserListChanged;
+            UserListService.IgnoreListChanged += OnIgnoreListChanged;
+            UserListService.UserRowChanged += OnUserRowChanged;
+            base.OnResume();
+        }
+
+        private void OnUserListChanged(object sender, UserListChangedEventArgs e)
+        {
+            HandleListChange(e, friendList: true);
+        }
+
+        private void OnIgnoreListChanged(object sender, UserListChangedEventArgs e)
+        {
+            HandleListChange(e, friendList: false);
+        }
+
+        private void HandleListChange(UserListChangedEventArgs e, bool friendList)
+        {
+            if (!SeekerApplication.OnUIThread())
+            {
+                SeekerState.ActiveActivityRef.RunOnUiThread(() => HandleListChange(e, friendList));
+                return;
+            }
+            if (e.ChangeType == UserListChangeType.Removed)
+            {
+                int sectionCount = friendList ? CommonState.UserList.Count : CommonState.IgnoreUserList.Count;
+                if (sectionCount == 0)
+                {
+                    // last item in the section — rebuild so the category header is removed too
+                    RefreshUserList();
+                }
+                else
+                {
+                    NotifyItemRemoved(e.Username);
+                }
+            }
+            else
+            {
+                RefreshUserList();
+            }
+        }
+
+        private void OnUserRowChanged(object sender, string username)
+        {
+            if (!SeekerApplication.OnUIThread())
+            {
+                SeekerState.ActiveActivityRef.RunOnUiThread(() => OnUserRowChanged(null, username));
+                return;
+            }
+            NotifyItemChanged(username);
+        }
+
+        public override bool OnNavigateUp()
+        {
+            OnBackPressedDispatcher.OnBackPressed();
+            return true;
+            //return base.OnNavigateUp();
+        }
+
+        public static SortOrder UserListSortOrder
+        {
+            get => Common.PreferencesState.UserListSortOrder;
+            set => Common.PreferencesState.UserListSortOrder = value;
+        }
+        private static AndroidX.AppCompat.App.AlertDialog dialogInstance = null;
+        public void ShowSortUserListDialog()
+        {
+            var builder = new Google.Android.Material.Dialog.MaterialAlertDialogBuilder(this);
+            builder.SetTitle(this.Resources.GetString(Resource.String.SortUsersBy));
+
+            View viewInflated = LayoutInflater.From(this).Inflate(Resource.Layout.change_sort_order_dialog, this.FindViewById(Android.Resource.Id.Content) as ViewGroup, false);
+
+            AndroidX.AppCompat.Widget.AppCompatRadioButton onlineStatus = viewInflated.FindViewById<AndroidX.AppCompat.Widget.AppCompatRadioButton>(Resource.Id.onlineStatus);
+            AndroidX.AppCompat.Widget.AppCompatRadioButton alphaOrder = viewInflated.FindViewById<AndroidX.AppCompat.Widget.AppCompatRadioButton>(Resource.Id.alphaOrder);
+            AndroidX.AppCompat.Widget.AppCompatRadioButton dateAddedDesc = viewInflated.FindViewById<AndroidX.AppCompat.Widget.AppCompatRadioButton>(Resource.Id.dateAddedDesc);
+            AndroidX.AppCompat.Widget.AppCompatRadioButton dateAddedAsc = viewInflated.FindViewById<AndroidX.AppCompat.Widget.AppCompatRadioButton>(Resource.Id.dateAddedAsc);
+
+            RadioGroup radioGroupChangeUserSort = viewInflated.FindViewById<RadioGroup>(Resource.Id.radioGroupChangeUserSort);
+            radioGroupChangeUserSort.CheckedChange += RadioGroupChangeUserSort_CheckedChange;
+
+
+            switch (UserListSortOrder)
+            {
+                case SortOrder.DateAddedAsc:
+                    dateAddedAsc.Checked = true;
+                    break;
+                case SortOrder.DateAddedDesc:
+                    dateAddedDesc.Checked = true;
+                    break;
+                case SortOrder.Alphabetical:
+                    alphaOrder.Checked = true;
+                    break;
+                case SortOrder.OnlineStatus:
+                    onlineStatus.Checked = true;
+                    break;
+            }
+
+            builder.SetView(viewInflated);
+
+            EventHandler<DialogClickEventArgs> eventHandlerClose = new EventHandler<DialogClickEventArgs>((object sender, DialogClickEventArgs cancelArgs) =>
+            {
+                if (sender is AndroidX.AppCompat.App.AlertDialog aDiag)
+                {
+                    aDiag.Dismiss();
+                }
+                else
+                {
+                    dialogInstance.Dismiss();
+                }
+                dialogInstance = null; //memory cleanup
+            });
+
+            builder.SetPositiveButton(Resource.String.okay, eventHandlerClose);
+            dialogInstance = builder.Create();
+            dialogInstance.Show();
+
+        }
+
+        private void RadioGroupChangeUserSort_CheckedChange(object sender, RadioGroup.CheckedChangeEventArgs e)
+        {
+            SortOrder prev = UserListSortOrder;
+            switch (e.CheckedId)
+            {
+                case Resource.Id.dateAddedAsc:
+                    UserListSortOrder = SortOrder.DateAddedAsc;
+                    break;
+                case Resource.Id.dateAddedDesc:
+                    UserListSortOrder = SortOrder.DateAddedDesc;
+                    break;
+                case Resource.Id.alphaOrder:
+                    UserListSortOrder = SortOrder.Alphabetical;
+                    break;
+                case Resource.Id.onlineStatus:
+                    UserListSortOrder = SortOrder.OnlineStatus;
+                    break;
+            }
+
+            if (prev != UserListSortOrder)
+            {
+                PreferencesManager.SaveUserListSortOrder();
+                this.RefreshUserList();
+            }
+        }
+
+        public void ShowEditTextDialogAddUserToList(bool toIgnored)
+        {
+            var builder = new Google.Android.Material.Dialog.MaterialAlertDialogBuilder(this);
+            // the reason the title is plural is because, using enter, you can add multiple users without closing the dialog.
+            if (toIgnored)
+            {
+                string ignoreUser = this.GetString(Resource.String.ignore_user_title);
+                builder.SetTitle(ignoreUser);
+            }
+            else
+            {
+                string addUser = this.GetString(Resource.String.add_user_title);
+                builder.SetTitle(addUser);
+            }
+
+            var rootView = (ViewGroup)this.FindViewById(Android.Resource.Id.Content).RootView;
+            View viewInflated = LayoutInflater.From(this).Inflate(Resource.Layout.autocomplete_user_dialog_content, rootView, false);
+            AutoCompleteTextView input = (AutoCompleteTextView)viewInflated.FindViewById<AutoCompleteTextView>(Resource.Id.chosenUserEditText);
+            UiHelpers.SetupRecentUserAutoCompleteTextView(input, true);
+            // Specify the type of input expected; this, for example, sets the input as a password, and will mask the text
+            builder.SetView(viewInflated);
+
+            EventHandler<DialogClickEventArgs> eventHandler = new EventHandler<DialogClickEventArgs>((object sender, DialogClickEventArgs okayArgs) =>
+            {
+                string enteredUsername = UiHelpers.GetEnteredUsername(input);
+                if (toIgnored)
+                {
+                    if (string.IsNullOrEmpty(enteredUsername))
+                    {
+                        SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.must_type_a_username_to_add), ToastLength.Short);
+                        return;
+                    }
+
+                    UserListService.AddToIgnoreListFeedback(SeekerState.ActiveActivityRef, enteredUsername);
+                }
+                else
+                {
+                    if (enteredUsername != String.Empty)
+                    {
+                        UserMetadataService.RecentUsersManager.AddUserToTop(enteredUsername, true);
+                    }
+                    UserListService.AddUserAPI(SeekerState.ActiveActivityRef, enteredUsername, null);
+                }
+            });
+            EventHandler<DialogClickEventArgs> eventHandlerCancel = new EventHandler<DialogClickEventArgs>((object sender, DialogClickEventArgs cancelArgs) =>
+            {
+                (sender as AndroidX.AppCompat.App.AlertDialog).Dismiss();
+            });
+
+            var editorAction = UiHelpers.MakeDialogEditorAction(Window?.DecorView, eventHandler);
+
+            var keypressAction = UiHelpers.MakeDialogKeyPressAction(Window?.DecorView, eventHandler);
+
+            input.KeyPress += keypressAction;
+
+            input.EditorAction += editorAction;
+
+            builder.SetPositiveButton(Resource.String.add, eventHandler);
+            builder.SetNegativeButton(Resource.String.close, eventHandlerCancel);
+            // Set up the buttons
+
+            var dialog = builder.Show();
+            UiHelpers.DoNotEnablePositiveUntilText(dialog, input);
+        }
+    }
+}

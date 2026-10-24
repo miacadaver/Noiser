@@ -1,0 +1,69 @@
+<RelativeLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context="android.PageFragment"
+    android:focusable="true"
+    android:focusableInTouchMode="true"
+    android:id="@+id/chatroomOverviewLayout"
+>
+   <com.google.android.material.progressindicator.LinearProgressIndicator
+        android:id="@+id/chatroomListRefreshProgress"
+        android:layout_width="match_parent"
+        android:layout_height="4dp"
+        android:visibility="gone"
+        app:trackCornerRadius="0dp"
+        app:trackInnerCornerRadius="2dp"
+        app:indicatorColor="?attr/mainPurple"
+        android:indeterminateOnly="true" />
+    <SearchView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/chatroomListRefreshProgress"
+        android:id="@+id/filterChatroom"
+        android:queryHint="@string/filter_chatrooms_here"
+        android:iconifiedByDefault="false"
+        android:layout_marginBottom="2dp"
+    />
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:minWidth="25px"
+        android:minHeight="25px"
+        android:layout_below="@id/filterChatroom"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:clipToPadding="false"
+        android:id="@+id/recyclerViewOverview"
+    />
+
+	<LinearLayout
+	android:id="@+id/chatroomListLoading"
+	android:layout_width="wrap_content"
+	android:layout_height="wrap_content"
+	android:layout_below="@id/filterChatroom"
+	android:layout_centerHorizontal="true"
+	android:layout_marginTop="170dp"
+	android:orientation="vertical"
+	android:gravity="center_horizontal">
+
+		<com.google.android.material.progressindicator.CircularProgressIndicator
+			android:layout_width="wrap_content"
+			android:layout_height="wrap_content"
+			app:indicatorSize="120dp"
+			app:trackCornerRadius="5dp"
+			app:trackThickness="6dp"
+			app:indicatorColor="?attr/mainPurple"
+			android:indeterminateOnly="true" />
+
+		<TextView
+			android:layout_width="wrap_content"
+			android:layout_height="wrap_content"
+			android:text="@string/chatroomsLoading"
+			android:textSize="18sp"
+			android:textColor="?attr/cellTextColor"
+			android:layout_marginTop="16dp" />
+
+	</LinearLayout>
+</RelativeLayout>

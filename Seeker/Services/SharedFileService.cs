@@ -1,0 +1,1283 @@
+﻿using Android.Content;
+using Android.Provider;
+using AndroidX.DocumentFile.Provider;
+using Common;
+using Common.Share;
+using Seeker.Helpers;
+using Seeker.Serialization;
+using Seeker.Transfers;
+using Soulseek;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Runtime.Serialization.Formatters.Binary;
+using System.Threading;
+using static Android.Provider.DocumentsContract;
+
+namespace Seeker.Services
+{
+    public static class SharedFileService
+    {
+        public static SharedFileCache SharedFileCache { get; private set; } = null;
+        public static bool NumberOfSharedDirectoriesIsStale { get; private set; } = true;
+        public static bool AttemptedToSetUpSharing = false; // TODO make setter private
+        public static EventHandler<EventArgs> SharingStatusChangedEvent;
+
+        // Sole owner of the mutable parse state
+        private static readonly ParsingStatusState _parseStatus = new ParsingStatusState();
+        public static IParsingStatus ParseStatus => _parseStatus;
+
+        /// <summary>Flip the global parsing flag. Starting a parse (true) resets all progress counters.
+        /// For external callers.</summary>
+        public static void SetParsing(bool value) => _parseStatus.IsParsing = value;
+
+        // Cancellation for the in-flight parse. Only one parse runs at a time (rescans are guarded by
+        // IsParsing; startup parse is once), so a single source suffices.
+        private static CancellationTokenSource _parseCts;
+
+        /// <summary>Begin a fresh cancellation scope for a parse and return its token. Disposes the
+        /// previous source (safe — the prior parse has finished by the time a new one begins).</summary>
+        public static CancellationToken BeginNewParseCancellation()
+        {
+            var old = _parseCts;
+            _parseCts = new CancellationTokenSource();
+            try
+            {
+                old?.Dispose();
+            }
+            catch
+            {
+                // ignore — defensive against a disposed/in-use source
+            }
+            return _parseCts.Token;
+        }
+
+        /// <summary>Request cancellation of the in-flight parse, if any. No-op when nothing is parsing.</summary>
+        public static void CancelOngoingParse()
+        {
+            var cts = _parseCts;
+            if (cts == null)
+            {
+                return;
+            }
+            try
+            {
+                cts.Cancel();
+            }
+            catch
+            {
+                // ignore ObjectDisposedException etc.
+            }
+        }
+
+        public class FullFileInfosResult
+        {
+            public Dictionary<string, Tuple<long, string, Tuple<int, int, int, int>, bool, bool>> PresentableNameToFullFileInfo { get; set; }
+            public int DirectoryCount { get; set; }
+            public BrowseResponse BrowseResponse { get; set; }
+            public List<Tuple<string, string>> DirMappingFriendlyNameToUri { get; set; }
+            public List<Soulseek.Directory> HiddenDirectories { get; set; }
+        }
+
+        private static FullFileInfosResult GetFullFileInfoFromSharedDirectory(
+            Dictionary<string, Tuple<long, string, Tuple<int, int, int, int>, bool, bool>> previousFileInfoToUse, CancellationToken ct)
+        {
+            //searchable name (just folder/song), uri.ToString (to actually get it), size (for ID purposes and to send), presentablename (to send - this is the name that is supposed to show up as the folder that the QT and nicotine clients send)
+            //so the presentablename should be FolderSelected/path to rest
+            //there due to the way android separates the sdcard root (or primary:) and other OS.  wherewas other OS use path separators, Android uses primary:FolderName vs say C:\Foldername.  If primary: is part of the presentable name then I will change 
+            //it to primary:\Foldername similar to C:\Foldername.  I think this makes most sense of the things I have tried.
+            Dictionary<string, Tuple<long, string, Tuple<int, int, int, int>, bool, bool>> presentableNameToFullFileInfos = new Dictionary<string, Tuple<long, string, Tuple<int, int, int, int>, bool, bool>>();
+            List<Soulseek.Directory> allDirs = new List<Soulseek.Directory>();
+            List<Soulseek.Directory> allLockedDirs = new List<Soulseek.Directory>();
+            var allHiddenDirs = new List<Soulseek.Directory>();
+            var dirMappingFriendlyNameToUri = new List<Tuple<string, string>>();
+            int directoryCount = 0;
+
+            HashSet<string> volNames = UploadDirectoryManager.GetInterestedVolNames();
+
+            Dictionary<string, List<Tuple<string, int, int>>> allMediaStoreInfo = new Dictionary<string, List<Tuple<string, int, int>>>();
+            PopulateAllMediaStoreInfo(allMediaStoreInfo, volNames);
+
+
+            var uploadDirectories = UploadDirectoryManager.UploadDirectories.ToList(); //avoid race conditions and enumeration modified exceptions.
+            foreach (var uploadDirEntry in uploadDirectories)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (uploadDirEntry.IsSubdir || uploadDirEntry.Info.HasError())
+                {
+                    continue;
+                }
+
+                DocumentFile uploadDirectory = uploadDirEntry.UploadDirectory;
+                GetAllFolderInfo(uploadDirEntry, out string rootFolderDisplayName, out _);
+
+                _parseStatus.BeginRoot(uploadDirEntry.Info.UploadDataDirectoryUri, presentableNameToFullFileInfos.Count);
+                traverseDirectoriesGatherFullFileInfos(SeekerState.ActiveActivityRef.ContentResolver, uploadDirectory.Uri, DocumentsContract.GetTreeDocumentId(uploadDirectory.Uri), uploadDirectory.Uri,
+                    presentableNameToFullFileInfos, allDirs, allLockedDirs, allHiddenDirs, dirMappingFriendlyNameToUri, allMediaStoreInfo, previousFileInfoToUse, rootFolderDisplayName,
+                    ref directoryCount, ct);
+                _parseStatus.EndRoot(uploadDirEntry.Info.UploadDataDirectoryUri, presentableNameToFullFileInfos.Count); // final count + mark complete
+            }
+
+            return new FullFileInfosResult
+            {
+                PresentableNameToFullFileInfo = presentableNameToFullFileInfos,
+                DirectoryCount = directoryCount,
+                BrowseResponse = new BrowseResponse(allDirs, allLockedDirs),
+                DirMappingFriendlyNameToUri = dirMappingFriendlyNameToUri,
+                HiddenDirectories = allHiddenDirs,
+            };
+        }
+
+        public static void GetAllFolderInfo(UploadDirectoryEntry uploadDirEntry, out string rootFolderDisplayName, out string presentableNameToUse)
+        {
+            DocumentFile dir = uploadDirEntry.UploadDirectory;
+            Android.Net.Uri uri = dir.Uri;
+            Logger.InfoFirebase("case " + uri.ToString() + " - - - - " + uri.LastPathSegment);
+            string lastPathSegment = CommonHelpers.GetLastPathSegmentWithSpecialCaseProtection(dir, out bool msdCase);
+            string toStrip = string.Empty;
+            //can be reproduced with pixel emulator API 28 (android 9). the last path segment for the downloads dir is "downloads" but the last path segment for its child is "raw:/storage/emulated/0/Download/Soulseek Complete" (note it is still a content scheme, raw: is the volume)
+            string volName = null;
+            if (!msdCase)
+            {
+                volName = FileFilterHelper.GetVolumeName(lastPathSegment, true, out _);
+                if (lastPathSegment.Contains('\\'))
+                {
+                    int stripIndex = lastPathSegment.LastIndexOf('\\');
+                    toStrip = lastPathSegment.Substring(0, stripIndex + 1);
+                }
+                else if (volName != null && lastPathSegment.Contains(volName))
+                {
+                    if (lastPathSegment == volName)
+                    {
+                        toStrip = null;
+                    }
+                    else
+                    {
+                        toStrip = volName;
+                    }
+                }
+                else
+                {
+                    Logger.Firebase("contains neither: " + lastPathSegment); //Download (on Android 9 emu)
+                }
+            }
+
+            rootFolderDisplayName = uploadDirEntry.Info.DisplayNameOverride;
+
+            if (msdCase)
+            {
+                if (string.IsNullOrEmpty(rootFolderDisplayName))
+                {
+                    rootFolderDisplayName = "downloads";
+                }
+            }
+
+            if (!string.IsNullOrEmpty(rootFolderDisplayName))
+            {
+                presentableNameToUse = rootFolderDisplayName;
+            }
+            else
+            {
+                presentableNameToUse = FileFilterHelper.GetPresentableName(uri, toStrip, volName);
+                rootFolderDisplayName = presentableNameToUse;
+            }
+        }
+
+        private static void PopulateAllMediaStoreInfo(Dictionary<string, List<Tuple<string, int, int>>> allMediaStoreInfo, HashSet<string> volumeNamesOfInterest)
+        {
+
+            bool hasAnyInfo = HasMediaStoreDurationColumn();
+            if (hasAnyInfo)
+            {
+                bool hasBitRate = HasMediaStoreBitRateColumn();
+                string[] selectionColumns = null;
+                if (hasBitRate)
+                {
+                    selectionColumns = new string[] {
+                        Android.Provider.MediaStore.IMediaColumns.Size,
+                        Android.Provider.MediaStore.IMediaColumns.DisplayName,
+
+                        Android.Provider.MediaStore.IMediaColumns.Data, //disambiguator if applicable
+                        Android.Provider.MediaStore.IMediaColumns.Duration,
+                        Android.Provider.MediaStore.IMediaColumns.Bitrate };
+                }
+                else //only has duration
+                {
+                    selectionColumns = new string[] {
+                        Android.Provider.MediaStore.IMediaColumns.Size,
+                        Android.Provider.MediaStore.IMediaColumns.DisplayName,
+
+                        Android.Provider.MediaStore.IMediaColumns.Data, //disambiguator if applicable
+                        Android.Provider.MediaStore.IMediaColumns.Duration };
+                }
+
+
+                foreach (var chosenVolume in volumeNamesOfInterest)
+                {
+                    Android.Net.Uri mediaStoreUri = null;
+                    if (!string.IsNullOrEmpty(chosenVolume))
+                    {
+                        mediaStoreUri = MediaStore.Audio.Media.GetContentUri(chosenVolume);
+                    }
+                    else
+                    {
+                        mediaStoreUri = MediaStore.Audio.Media.ExternalContentUri;
+                    }
+
+                    //metadata content resolver info
+                    Android.Database.ICursor mediaStoreInfo = null;
+                    try
+                    {
+                        mediaStoreInfo = SeekerState.ActiveActivityRef.ContentResolver.Query(mediaStoreUri, selectionColumns,
+                            null, null, null);
+                        while (mediaStoreInfo.MoveToNext())
+                        {
+                            string key = mediaStoreInfo.GetInt(0) + mediaStoreInfo.GetString(1);
+                            if (!allMediaStoreInfo.ContainsKey(key))
+                            {
+                                var list = new List<Tuple<string, int, int>>();
+                                list.Add(new Tuple<string, int, int>(mediaStoreInfo.GetString(2), mediaStoreInfo.GetInt(3), hasBitRate ? mediaStoreInfo.GetInt(4) : -1));
+                                allMediaStoreInfo.Add(key, list);
+                            }
+                            else
+                            {
+                                allMediaStoreInfo[key].Add(new Tuple<string, int, int>(mediaStoreInfo.GetString(2), mediaStoreInfo.GetInt(3), hasBitRate ? mediaStoreInfo.GetInt(4) : -1));
+                            }
+                        }
+                    }
+                    catch (Exception e)
+                    {
+                        Logger.Firebase("pre get all mediaStoreInfo: " + e.Message + e.StackTrace);
+                    }
+                    finally
+                    {
+                        if (mediaStoreInfo != null)
+                        {
+                            mediaStoreInfo.Close();
+                        }
+                    }
+                }
+            }
+        }
+
+        private static FullFileInfosResult GetFullFileInfoFromSharedDirectoryLegacy(
+            Dictionary<string, Tuple<long, string, Tuple<int, int, int, int>, bool, bool>> previousFileInfoToUse, CancellationToken ct)
+        {
+            //searchable name (just folder/song), uri.ToString (to actually get it), size (for ID purposes and to send), presentablename (to send - this is the name that is supposed to show up as the folder that the QT and nicotine clients send)
+            //so the presentablename should be FolderSelected/path to rest
+            //there due to the way android separates the sdcard root (or primary:) and other OS.  wherewas other OS use path separators, Android uses primary:FolderName vs say C:\Foldername.  If primary: is part of the presentable name then I will change
+            //it to primary:\Foldername similar to C:\Foldername.  I think this makes most sense of the things I have tried.
+            Dictionary<string, Tuple<long, string, Tuple<int, int, int, int>, bool, bool>> pairs = new Dictionary<string, Tuple<long, string, Tuple<int, int, int, int>, bool, bool>>();
+            List<Soulseek.Directory> allDirs = new List<Soulseek.Directory>();
+            List<Soulseek.Directory> allLockedDirs = new List<Soulseek.Directory>();
+            var allHiddenDirs = new List<Soulseek.Directory>();
+            var dirMappingFriendlyNameToUri = new List<Tuple<string, string>>();
+            int directoryCount = 0;
+
+            var tmpUploadDirs = UploadDirectoryManager.UploadDirectories.ToList(); //avoid race conditions and enumeration modified exceptions.
+            foreach (var uploadDirEntry in tmpUploadDirs)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (uploadDirEntry.IsSubdir || uploadDirEntry.Info.HasError())
+                {
+                    continue;
+                }
+
+                DocumentFile dir = uploadDirEntry.UploadDirectory;
+                GetAllFolderInfo(uploadDirEntry, out string rootFolderDisplayName, out _);
+
+                _parseStatus.BeginRoot(uploadDirEntry.Info.UploadDataDirectoryUri, pairs.Count);
+                traverseDirectoryEntriesLegacy(dir, pairs, allDirs, allLockedDirs,
+                    allHiddenDirs, dirMappingFriendlyNameToUri,
+                    previousFileInfoToUse, rootFolderDisplayName,
+                    ref directoryCount, ct);
+                _parseStatus.EndRoot(uploadDirEntry.Info.UploadDataDirectoryUri, pairs.Count);
+            }
+
+            return new FullFileInfosResult
+            {
+                PresentableNameToFullFileInfo = pairs,
+                DirectoryCount = directoryCount,
+                BrowseResponse = new BrowseResponse(allDirs, allLockedDirs),
+                DirMappingFriendlyNameToUri = dirMappingFriendlyNameToUri,
+                HiddenDirectories = allHiddenDirs,
+            };
+        }
+
+        /// <summary>
+        /// We only use this in Contents Response Resolver.
+        /// </summary>
+        /// <param name="dirFile"></param>
+        /// <param name="dirToStrip"></param>
+        /// <param name="diagFromDirectoryResolver"></param>
+        /// <param name="volumePath"></param>
+        /// <returns></returns>
+        public static Soulseek.Directory SlskDirFromDocumentFile(DocumentFile dirFile, bool diagFromDirectoryResolver, string volumePath)
+        {
+            string directoryPath = dirFile.Uri.LastPathSegment; //on the emulator this is /tree/downloads/document/docwonlowds but the dirToStrip is uppercase Downloads
+            directoryPath = directoryPath.Replace("/", @"\");
+
+            List<Soulseek.File> files = new List<Soulseek.File>();
+            foreach (DocumentFile f in dirFile.ListFiles())
+            {
+                if (f.IsDirectory)
+                {
+                    continue;
+                }
+                try
+                {
+                    string fname = null;
+                    string searchableName = null;
+
+                    if (dirFile.Uri.Authority == "com.android.providers.downloads.documents" && !f.Uri.Path.Contains(dirFile.Uri.Path))
+                    {
+                        //msd, msf case
+                        fname = f.Name;
+                        searchableName = /*folderName + @"\" + */fname; //for the brose response should only be the filename!!! 
+                    }
+                    else
+                    {
+                        fname = SimpleHelpers.GetFileNameFromFile(f.Uri.Path.Replace("/", @"\")).ToString();
+                        searchableName = /*folderName + @"\" + */fname; //for the brose response should only be the filename!!! 
+                    }
+                    //when a user tries to download something from a browse resonse, the soulseek client on their end must create a fully qualified path for us
+                    //bc we get a path that is:
+                    //"Soulseek Complete\\document\\primary:Pictures\\Soulseek Complete\\FolderName\\FileName.txt"
+                    //not quite a full URI but it does add quite a bit..
+
+                    //{
+                    //    searchableName = searchableName.Substring(8);
+                    //}
+                    var slskFile = new Soulseek.File(1, searchableName.Replace("/", @"\"), f.Length(), System.IO.Path.GetExtension(f.Uri.Path));
+                    files.Add(slskFile);
+                }
+                catch (Exception e)
+                {
+                    Logger.Debug("Parse error with " + f.Uri.Path + e.Message + e.StackTrace);
+                    Logger.Firebase("Parse error with " + f.Uri.Path + e.Message + e.StackTrace);
+                }
+
+            }
+            SimpleHelpers.SortSlskDirFiles(files); //otherwise our browse response files will be way out of order
+
+            if (volumePath != null)
+            {
+                if (directoryPath.StartsWith(volumePath))
+                {
+                    directoryPath = directoryPath.Substring(volumePath.Length);
+                }
+            }
+
+            var slskDir = new Soulseek.Directory(directoryPath, files);
+            return slskDir;
+        }
+
+
+        public static void ClearLegacyParsedCacheResults()
+        {
+            try
+            {
+                PreferencesManager.ClearLegacyCachedResults();
+            }
+            catch (Exception e)
+            {
+                Logger.Debug("ClearParsedCacheResults " + e.Message + e.StackTrace);
+                Logger.Firebase("ClearParsedCacheResults " + e.Message + e.StackTrace);
+            }
+        }
+
+        //Pretty much all clients send "attributes" or limited metadata.
+        // if lossless - they send duration, bit rate, bit depth, and sample rate
+        // if lossy - they send duration and bit rate.
+
+        //notes:
+        // for lossless - bit rate = sample rate * bit depth * num channels
+        //                1411.2 kpbs = 44.1kHz * 16 * 2
+        //  --if the formula is required note that typically sample rate is in (44.1, 48, 88.2, 96) with the last too being very rare (never seen it).
+        //      and bit depth in (16, 24, 32) with 16 most common, sometimes 24, never seen 32.  
+        // for both lossy and lossless - determining bit rate from file size and duration is a bit too imprecise.  
+        //      for mp3 320kps cbr one will get 320.3, 314, 315, etc.
+
+        //for the pre-indexed media store (note: its possible for one to revoke the photos&media permission and for seeker to work right in all places by querying mediastore)
+        //  api 29+ we have duration
+        //  api 30+ we have bit rate
+        //  api 31+ (Android 12) we have sample rate and bit depth - proposed change?  I dont think this made it in..
+
+        //for the built in media retreiver (which requires actually reading the file) we have duration, bit rate, with sample rate and bit depth for api31+
+
+        //the library tag lib sharp can get us everything, tho it is 1 MB extra.
+
+
+
+        private static bool HasMediaStoreDurationColumn()
+        {
+            return OperatingSystem.IsAndroidVersionAtLeast(29);
+        }
+
+        private static bool HasMediaStoreBitRateColumn()
+        {
+            return OperatingSystem.IsAndroidVersionAtLeast(30);
+        }
+
+        // never made it into Android 12
+        //public static bool HasMediaStoreSampleRateBitDepthColumn()
+        //{
+        //    return (int)Android.OS.Build.VERSION.SdkInt >= 31;
+        //}
+
+        //public static bool HasMediaRetreiverSampleRateBitDepth()
+        //{
+        //    return (int)Android.OS.Build.VERSION.SdkInt >= 31;
+        //}
+
+        private static bool IsUncompressed(string name)
+        {
+            string ext = System.IO.Path.GetExtension(name);
+            switch (ext)
+            {
+                case ".wav":
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static bool IsLossless(string name)
+        {
+            string ext = System.IO.Path.GetExtension(name);
+            switch (ext)
+            {
+                case ".ape":
+                case ".flac":
+                case ".wav":
+                case ".alac":
+                case ".aiff":
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static bool IsSupportedAudio(string name)
+        {
+            string ext = System.IO.Path.GetExtension(name);
+            switch (ext)
+            {
+                case ".ape":
+                case ".flac":
+                case ".wav":
+                case ".alac":
+                case ".aiff":
+                case ".mp3":
+                case ".m4a":
+                case ".wma":
+                case ".aac":
+                case ".opus":
+                case ".ogg":
+                case ".oga":
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>
+        /// Any exceptions here get caught.  worst case, you just get no metadata...
+        /// </summary>
+        /// <param name="contentResolver"></param>
+        /// <param name="displayName"></param>
+        /// <param name="size"></param>
+        /// <param name="presentableName"></param>
+        /// <param name="childUri"></param>
+        /// <param name="allMediaInfoDict"></param>
+        /// <param name="prevInfoToUse"></param>
+        /// <returns></returns>
+        private static Tuple<int, int, int, int> GetAudioAttributes(ContentResolver contentResolver, string displayName, long size, string presentableName, Android.Net.Uri childUri, Dictionary<string, List<Tuple<string, int, int>>> allMediaInfoDict, Dictionary<string, Tuple<long, string, Tuple<int, int, int, int>, bool, bool>> prevInfoToUse)
+        {
+            try
+            {
+                if (prevInfoToUse != null)
+                {
+                    if (prevInfoToUse.ContainsKey(presentableName))
+                    {
+                        var tuple = prevInfoToUse[presentableName];
+                        if (tuple.Item1 == size) //this is the file...
+                        {
+                            return tuple.Item3;
+                        }
+                    }
+                }
+                //get media attributes...
+                bool supported = IsSupportedAudio(presentableName);
+                if (!supported)
+                {
+                    return null;
+                }
+                bool lossless = IsLossless(presentableName);
+                bool uncompressed = IsUncompressed(presentableName);
+                int duration = -1;
+                int bitrate = -1;
+                int sampleRate = -1;
+                int bitDepth = -1;
+                bool useContentResolverQuery = HasMediaStoreDurationColumn();//else it has no more additional data for us..
+                if (useContentResolverQuery)
+                {
+                    bool hasBitRate = HasMediaStoreBitRateColumn();
+                    //querying it every time was slow...
+                    //so now we query it all ahead of time (with 1 query request) and put it in a dict.
+                    string key = size + displayName;
+                    if (allMediaInfoDict.ContainsKey(key))
+                    {
+                        string nameToSearchFor = presentableName.Replace('\\', '/');
+                        bool found = true;
+                        var listInfo = allMediaInfoDict[key];
+                        Tuple<string, int, int> infoItem = null;
+                        if (listInfo.Count > 1)
+                        {
+                            found = false;
+                            foreach (var item in listInfo)
+                            {
+                                if (item.Item1.Contains(nameToSearchFor))
+                                {
+                                    infoItem = item;
+                                    found = true;
+                                    break;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            infoItem = listInfo[0];
+                        }
+                        if (found)
+                        {
+                            duration = infoItem.Item2 / 1000; //in ms
+                            if (hasBitRate)
+                            {
+                                bitrate = infoItem.Item3;
+                            }
+                        }
+                    }
+                }
+
+                if ((PreferencesState.PerformDeepMetadataSearch && (bitrate == -1 || duration == -1) && size != 0))
+                {
+                    Android.Media.MediaMetadataRetriever mediaMetadataRetriever = new Android.Media.MediaMetadataRetriever();
+                    try
+                    {
+                        mediaMetadataRetriever.SetDataSource(SeekerState.ActiveActivityRef, childUri); //TODO: error file descriptor must not be null.
+                        string? bitRateStr = mediaMetadataRetriever.ExtractMetadata(Android.Media.MetadataKey.Bitrate);
+                        string? durationStr = mediaMetadataRetriever.ExtractMetadata(Android.Media.MetadataKey.Duration);
+
+                        if (bitRateStr != null)
+                        {
+                            bitrate = int.Parse(bitRateStr);
+                        }
+                        if (durationStr != null)
+                        {
+                            duration = int.Parse(durationStr) / 1000;
+                        }
+                    }
+                    catch (Exception e)
+                    {
+                        //ape and aiff always fail with built in metadata retreiver.
+                        if (string.Equals(System.IO.Path.GetExtension(presentableName), ".ape", StringComparison.OrdinalIgnoreCase))
+                        {
+                            using var stream = contentResolver.OpenInputStream(childUri);
+                            MicroTagReader.Instance.GetApeMetadata(stream, out sampleRate, out bitDepth, out duration);
+                        }
+                        else if (string.Equals(System.IO.Path.GetExtension(presentableName), ".aiff", StringComparison.OrdinalIgnoreCase))
+                        {
+                            using var stream = contentResolver.OpenInputStream(childUri);
+                            MicroTagReader.Instance.GetAiffMetadata(stream, out sampleRate, out bitDepth, out duration);
+                        }
+
+                        //if still not fixed
+                        if (sampleRate == -1 || duration == -1 || bitDepth == -1)
+                        {
+                            Logger.Firebase("MediaMetadataRetriever: " + e.Message + e.StackTrace + " isnull" + (SeekerState.ActiveActivityRef == null) + childUri?.ToString());
+                        }
+                    }
+                    finally
+                    {
+                        if (HasMediaStoreDurationColumn())
+                        {
+                            mediaMetadataRetriever.Close(); //added in api 29
+                        }
+                        else
+                        {
+                            mediaMetadataRetriever.Release();
+                        }
+                    }
+                }
+
+                //this is the mp3 vbr case, android meta data retriever and therefore also the mediastore cache fail
+                //quite badly in this case.  they often return the min vbr bitrate of 32000.
+                //if its under 128kbps then lets just double check it..
+                //I did test .m4a vbr.  android meta data retriever handled it quite well.
+                //on api 19 the vbr being reported at 32000 is reported as 128000.... both obviously quite incorrect...
+                if (System.IO.Path.GetExtension(presentableName) == ".mp3" && (bitrate >= 0 && bitrate <= 128000) && size != 0)
+                {
+                    if (PreferencesState.PerformDeepMetadataSearch)
+                    {
+                        using var mp3Stream = contentResolver.OpenInputStream(childUri);
+                        MicroTagReader.Instance.GetMp3Metadata(mp3Stream, duration, size, out bitrate);
+                    }
+                    else
+                    {
+                        bitrate = -1; //better to have nothing than for it to be so blatantly wrong..
+                    }
+                }
+
+
+
+
+                if (PreferencesState.PerformDeepMetadataSearch && System.IO.Path.GetExtension(presentableName) == ".flac" && size != 0)
+                {
+                    using var flacStream = contentResolver.OpenInputStream(childUri);
+                    MicroTagReader.Instance.GetFlacMetadata(flacStream, out sampleRate, out bitDepth);
+                }
+
+                //if uncompressed we can use this simple formula
+                if (uncompressed)
+                {
+                    if (bitrate != -1)
+                    {
+                        //bitrate = 2 * sampleRate * depth
+                        //so test pairs in order of precedence..
+                        if ((bitrate) / (2 * 44100) == 16)
+                        {
+                            sampleRate = 44100;
+                            bitDepth = 16;
+                        }
+                        else if ((bitrate) / (2 * 44100) == 24)
+                        {
+                            sampleRate = 44100;
+                            bitDepth = 24;
+                        }
+                        else if ((bitrate) / (2 * 48000) == 16)
+                        {
+                            sampleRate = 48000;
+                            bitDepth = 16;
+                        }
+                        else if ((bitrate) / (2 * 48000) == 24)
+                        {
+                            sampleRate = 48000;
+                            bitDepth = 24;
+                        }
+                    }
+                }
+                if (duration == -1 && bitrate == -1 && bitDepth == -1 && sampleRate == -1)
+                {
+                    return null;
+                }
+                return new Tuple<int, int, int, int>(duration, (lossless || bitrate == -1) ? -1 : (bitrate / 1000), bitDepth, sampleRate); //for lossless do not send bitrate!! no other client does that!!
+            }
+            catch (Exception e)
+            {
+                Logger.Firebase("get audio attr failed: " + e.Message + e.StackTrace);
+                return null;
+            }
+        }
+
+        private static void traverseDirectoriesGatherFullFileInfos(ContentResolver contentResolver, Android.Net.Uri rootUri, string parentDoc, Android.Net.Uri parentUri,
+            Dictionary<string, Tuple<long, string, Tuple<int, int, int, int>, bool, bool>> presentableNameToFullFileInfos, List<Directory> listOfDirs, List<Directory> listOfLockedDirs, List<Directory> listOfHiddenDirs,
+            List<Tuple<string, string>> dirMappingFriendlyNameToUri,
+            Dictionary<string, List<Tuple<string, int, int>>> allMediaInfoDict, Dictionary<string, Tuple<long, string, Tuple<int, int, int, int>, bool, bool>> previousFileInfoToUse,
+            string parentDisplayName, ref int totalDirectoryCount, CancellationToken ct)
+        {
+            //this should be the folder before the selected to strip away..
+            Android.Net.Uri listChildrenUri = DocumentsContract.BuildChildDocumentsUriUsingTree(rootUri, parentDoc);
+            //Log.d(TAG, "node uri: ", childrenUri);
+            Android.Database.ICursor c = contentResolver.Query(listChildrenUri, new String[] { Document.ColumnDocumentId, Document.ColumnDisplayName, Document.ColumnMimeType, Document.ColumnSize }, null, null, null);
+            //c can be null... reasons are fairly opaque - if remote exception return null. if underlying content provider is null.
+            if (c == null)
+            {
+                //diagnostic code.
+
+                //would a non /children uri work?
+                bool nonChildrenWorks = contentResolver.Query(rootUri, new string[] { Document.ColumnSize }, null, null, null) != null;
+
+                //would app context work?
+                bool wouldActiveWork = SeekerState.ActiveActivityRef.ApplicationContext.ContentResolver.Query(listChildrenUri, new String[] { Document.ColumnDocumentId, Document.ColumnDisplayName, Document.ColumnMimeType, Document.ColumnSize }, null, null, null) != null;
+
+                //would list files work?
+                bool docFileLegacyWork = DocumentFile.FromTreeUri(SeekerState.ActiveActivityRef, parentUri).Exists();
+
+                Logger.Firebase("cursor is null: parentDoc" + parentDoc + " list children uri: " + listChildrenUri?.ToString() + "nonchildren: " + nonChildrenWorks + " activeContext: " + wouldActiveWork + " legacyWork: " + docFileLegacyWork);
+            }
+
+            List<Soulseek.File> files = new List<Soulseek.File>();
+            try
+            {
+                while (c.MoveToNext())
+                {
+                    ct.ThrowIfCancellationRequested();
+                    string docId = c.GetString(0);
+                    string name = c.GetString(1);
+                    string mime = c.GetString(2);
+                    long size = c.GetLong(3);
+                    var childUri = DocumentsContract.BuildDocumentUriUsingTree(rootUri, docId);
+                    //Logger.Debug("docId: " + docId + ", name: " + name + ", mime: " + mime);
+                    if (isDirectory(mime))
+                    {
+                        totalDirectoryCount++;
+                        traverseDirectoriesGatherFullFileInfos(contentResolver, rootUri, docId, childUri, presentableNameToFullFileInfos, listOfDirs, listOfLockedDirs, listOfHiddenDirs,
+                            dirMappingFriendlyNameToUri, allMediaInfoDict, previousFileInfoToUse,
+                            parentDisplayName + '\\' + name, ref totalDirectoryCount, ct);
+                    }
+                    else
+                    {
+                        string presentableName = parentDisplayName + '\\' + name;
+
+                        Tuple<int, int, int, int> attributes = GetAudioAttributes(contentResolver, name, size, presentableName, childUri, allMediaInfoDict, previousFileInfoToUse);
+                        if (attributes != null)
+                        {
+                            //Logger.Debug("fname: " + name + " attr: " + attributes.Item1 + "  " + attributes.Item2 + "  " + attributes.Item3 + "  " + attributes.Item4 + "  ");
+                        }
+
+                        presentableNameToFullFileInfos.Add(presentableName, new Tuple<long, string, Tuple<int, int, int, int>, bool, bool>(size, childUri.ToString(), attributes, FileFilterHelper.IsLockedFile(presentableName), FileFilterHelper.IsHiddenFile(presentableName)));
+                        _parseStatus.NumberParsed = presentableNameToFullFileInfos.Count;
+                        _parseStatus.UpdateCurrentRoot(presentableNameToFullFileInfos.Count);
+
+                        string fname = SimpleHelpers.GetFileNameFromFile(presentableName.Replace("/", @"\")).ToString(); //use presentable name so that the filename will not be primary:file.mp3
+                                                                                                              //for the brose response should only be the filename!!! 
+                                                                                                              //when a user tries to download something from a browse resonse, the soulseek client on their end must create a fully qualified path for us
+                                                                                                              //bc we get a path that is:
+                                                                                                              //"Soulseek Complete\\document\\primary:Pictures\\Soulseek Complete\\album\\09 Between Songs 4.mp3"
+                                                                                                              //not quite a full URI but it does add quite a bit..
+
+                        //if (searchableName.Length > 7 && searchableName.Substring(0, 8).ToLower() == "primary:")
+                        //{
+                        //    searchableName = searchableName.Substring(8);
+                        //}
+
+                        var slskFile = new Soulseek.File(1, fname, size, System.IO.Path.GetExtension(childUri.Path), SharedFileCache.GetFileAttributesFromTuple(attributes)); //soulseekQT does not show attributes in browse tab, but nicotine does.
+                        files.Add(slskFile);
+                    }
+                }
+                SimpleHelpers.SortSlskDirFiles(files);
+                string directoryPath = parentDisplayName;
+
+                var slskDir = new Soulseek.Directory(directoryPath, files);
+                if (FileFilterHelper.IsHiddenFolder(directoryPath))
+                {
+                    listOfHiddenDirs.Add(slskDir);
+                }
+                else if (FileFilterHelper.IsLockedFolder(directoryPath))
+                {
+                    listOfLockedDirs.Add(slskDir);
+                }
+                else
+                {
+                    listOfDirs.Add(slskDir);
+                }
+
+                dirMappingFriendlyNameToUri.Add(new Tuple<string, string>(directoryPath, parentUri.ToString()));
+            }
+            finally
+            {
+                closeQuietly(c);
+            }
+        }
+
+        private static void traverseDirectoryEntriesLegacy(DocumentFile parentDocFile, Dictionary<string, Tuple<long, string, Tuple<int, int, int, int>, bool, bool>> pairs,
+            List<Directory> listOfDirs, List<Directory> listOfLockedDirs, List<Directory> listOfHiddenDirs, List<Tuple<string, string>> dirMappingFriendlyNameToUri,
+            Dictionary<string, Tuple<long, string, Tuple<int, int, int, int>, bool, bool>> previousFileInfoToUse,
+            string parentDisplayName,
+            ref int totalDirectoryCount, CancellationToken ct)
+        {
+            //this should be the folder before the selected to strip away..
+            List<Soulseek.File> files = new List<Soulseek.File>();
+            foreach (var childDocFile in parentDocFile.ListFiles())
+            {
+                ct.ThrowIfCancellationRequested();
+                if (childDocFile.IsDirectory)
+                {
+                    totalDirectoryCount++;
+                    traverseDirectoryEntriesLegacy(childDocFile, pairs, listOfDirs, listOfLockedDirs, listOfHiddenDirs,
+                        dirMappingFriendlyNameToUri, previousFileInfoToUse,
+                        parentDisplayName + '\\' + childDocFile.Name, ref totalDirectoryCount, ct);
+                }
+                else
+                {
+                    string presentableName = parentDisplayName + '\\' + childDocFile.Name;
+
+                    Tuple<int, int, int, int> attributes = GetAudioAttributes(SeekerState.ActiveActivityRef.ContentResolver, childDocFile.Name, childDocFile.Length(), presentableName, childDocFile.Uri, null, previousFileInfoToUse);
+                    if (attributes != null)
+                    {
+                        //Logger.Debug("fname: " + childDocFile.Name + " attr: " + attributes.Item1 + "  " + attributes.Item2 + "  " + attributes.Item3 + "  " + attributes.Item4 + "  ");
+                    }
+
+                    pairs.Add(presentableName, new Tuple<long, string, Tuple<int, int, int, int>, bool, bool>(childDocFile.Length(), childDocFile.Uri.ToString(), attributes, FileFilterHelper.IsLockedFile(presentableName), FileFilterHelper.IsHiddenFile(presentableName))); //todo attributes was null here???? before
+                    _parseStatus.NumberParsed = pairs.Count;
+                    _parseStatus.UpdateCurrentRoot(pairs.Count);
+
+                    string fname = SimpleHelpers.GetFileNameFromFile(presentableName.Replace("/", @"\")).ToString(); //use presentable name so that the filename will not be primary:file.mp3
+                                                                                                          //for the brose response should only be the filename!!! 
+                                                                                                          //when a user tries to download something from a browse resonse, the soulseek client on their end must create a fully qualified path for us
+                                                                                                          //bc we get a path that is:
+                                                                                                          //"Soulseek Complete\\document\\primary:Pictures\\Soulseek Complete\\album\\09 Between Songs 4.mp3"
+                                                                                                          //not quite a full URI but it does add quite a bit..
+
+                    //if (searchableName.Length > 7 && searchableName.Substring(0, 8).ToLower() == "primary:")
+                    //{
+                    //    searchableName = searchableName.Substring(8);
+                    //}
+                    var slskFile = new Soulseek.File(1, fname, childDocFile.Length(), System.IO.Path.GetExtension(childDocFile.Uri.Path));
+                    files.Add(slskFile);
+                }
+            }
+
+            SimpleHelpers.SortSlskDirFiles(files);
+            string directoryPath = parentDisplayName;
+
+            var slskDir = new Soulseek.Directory(directoryPath, files);
+            if (FileFilterHelper.IsHiddenFolder(directoryPath))
+            {
+                listOfHiddenDirs.Add(slskDir);
+            }
+            else if (FileFilterHelper.IsLockedFolder(directoryPath))
+            {
+                listOfLockedDirs.Add(slskDir);
+            }
+            else
+            {
+                listOfDirs.Add(slskDir);
+            }
+
+            dirMappingFriendlyNameToUri.Add(new Tuple<string, string>(directoryPath, parentDocFile.Uri.ToString()));
+        }
+
+        // Util method to check if the mime type is a directory
+        private static bool isDirectory(String mimeType)
+        {
+            return DocumentsContract.Document.MimeTypeDir.Equals(mimeType);
+        }
+
+        // Util method to close a closeable
+        private static void closeQuietly(Android.Database.ICursor closeable)
+        {
+            if (closeable != null)
+            {
+                try
+                {
+                    closeable.Close();
+                }
+                catch
+                {
+                    // ignore exception
+                }
+            }
+        }
+
+        /// <summary>
+        /// Check Cache should be false if setting a new dir.. true if on startup.
+        /// </summary>
+        /// <param name="dir"></param>
+        /// <param name="checkCache"></param>
+        public static bool InitializeDatabase(UploadDirectoryEntry newlyAddedDirectoryIfApplicable, bool checkCache, CancellationToken ct, out string errorMsg)
+        {
+            errorMsg = string.Empty;
+            bool success = false;
+            bool cancelled = false;
+            try
+            {
+                CachedParseResults cachedParseResults = null;
+                if (checkCache)
+                {
+                    cachedParseResults = GetCachedParseResults(SeekerState.ActiveActivityRef);
+                }
+
+                if (cachedParseResults == null)
+                {
+                    //optimization - if new directory is a subdir we can skip this part. !!!! but we still have things to do like make all files that start with said presentableDir to be locked / hidden. etc.
+
+                    UploadDirectoryManager.RecomputeDirectoryState();
+                    if (UploadDirectoryManager.AreAllFailed())
+                    {
+                        throw new DirectoryAccessFailure("All Failed");
+                    }
+
+                    FullFileInfosResult result;
+                    if (UploadDirectoryManager.AreAnyFromLegacy())
+                    {
+                        result = GetFullFileInfoFromSharedDirectoryLegacy(SharedFileService.SharedFileCache?.PresentableNameToFullFileInfo, ct);
+                    }
+                    else
+                    {
+                        result = GetFullFileInfoFromSharedDirectory(SharedFileService.SharedFileCache?.PresentableNameToFullFileInfo, ct);
+                    }
+
+                    // Final guard: abort before we commit / persist so a cancel landing right as the walk
+                    // finishes never overwrites or persists the (now-stale) cache.
+                    ct.ThrowIfCancellationRequested();
+
+                    var presentableNameToFullFileInfo = result.PresentableNameToFullFileInfo;
+                    var browseResponse = result.BrowseResponse;
+                    var presentableDirectoryNameToDirectoryUriMappings = result.DirMappingFriendlyNameToUri;
+                    var hiddenDirectories = result.HiddenDirectories;
+                    int directoryCount = result.DirectoryCount;
+
+                    int nonHiddenCountForServer = presentableNameToFullFileInfo.Count(pair1 => !pair1.Value.Item5);
+                    Logger.Debug($"Non Hidden Count for Server: {nonHiddenCountForServer}");
+
+                    _parseStatus.NumberParsed = ParsingStatusState.FinishingUpSentinel; //our signal that we are finishing up...
+
+                    Dictionary<int, string> fileKeyToPresentableName = SharedFileCache.GenerateFileKeyToPresentableNameIndex(presentableNameToFullFileInfo);
+                    Dictionary<string, List<int>> searchTermTokenToListOfFileKeys = SharedFileCache.GenerateSearchTermTokenToFileKeysIndex(presentableNameToFullFileInfo, fileKeyToPresentableName);
+
+                    var newCachedResults = new CachedParseResults(
+                        presentableNameToFullFileInfo,
+                        browseResponse.DirectoryCount, // todo?
+                        browseResponse,
+                        hiddenDirectories,
+                        presentableDirectoryNameToDirectoryUriMappings,
+                        searchTermTokenToListOfFileKeys,
+                        fileKeyToPresentableName,
+                        nonHiddenCountForServer);
+                    StoreCachedParseResults(SeekerState.ActiveActivityRef, newCachedResults);
+
+                    UploadDirectoryManager.SaveToSharedPreferences(SeekerState.SharedPreferences);
+
+                    // TODO we do not save the directoryCount ?? and so subsequent times its just browseResponse.Count?
+                    // would it ever be different?
+
+                    SharedFileCache sharedFileCache = new SharedFileCache(presentableNameToFullFileInfo, directoryCount, browseResponse, presentableDirectoryNameToDirectoryUriMappings, searchTermTokenToListOfFileKeys, fileKeyToPresentableName, hiddenDirectories, nonHiddenCountForServer);//.Select(_=>_.Item1).ToList());
+                    SharedFileCache_Refreshed(null, (sharedFileCache.DirectoryCount, nonHiddenCountForServer));
+                    SharedFileService.SharedFileCache = sharedFileCache;
+                }
+                else
+                {
+                    Logger.Debug("Using cached results");
+                    UploadDirectoryManager.RecomputeDirectoryState();
+                    if (UploadDirectoryManager.AreAllFailed())
+                    {
+                        throw new DirectoryAccessFailure("All Failed");
+                    }
+                    else
+                    {
+                        SharedFileCache sharedFileCache = new SharedFileCache(cachedParseResults.PresentableNameToFullFileInfo,
+                            cachedParseResults.DirectoryCount, cachedParseResults.BrowseResponse, cachedParseResults.PresentableDirectoryNameToDirectoryUriMappings,
+                            cachedParseResults.SearchTermTokenToListOfFileKeys, cachedParseResults.FileKeyToPresentableName, cachedParseResults.BrowseResponseHiddenPortion,
+                            cachedParseResults.NonHiddenFileCount);
+
+                        SharedFileCache_Refreshed(null, (sharedFileCache.DirectoryCount, sharedFileCache.GetNonHiddenFileCountForServer() != -1 ? sharedFileCache.GetNonHiddenFileCountForServer() : sharedFileCache.FileCount));
+                        SharedFileService.SharedFileCache = sharedFileCache;
+                    }
+                }
+                success = true;
+                _parseStatus.LastParseResult = ParseResultFlags.None;
+                SharedFileService.SharedFileCache.SuccessfullyInitialized = true;
+            }
+            catch (OperationCanceledException)
+            {
+                // User removed all folders mid-parse (or other cancellation). NOT a failure — leave the
+                // previous/empty cache intact and let callers handle it quietly. Rethrow so the caller can
+                // distinguish a cancel from a real failure.
+                cancelled = true;
+                _parseStatus.LastParseResult = ParseResultFlags.Cancelled;
+                Logger.Debug("Parse cancelled.");
+                throw;
+            }
+            catch (Exception e)
+            {
+                string defaultUnspecified = "Shared Folder Error - Unspecified Error";
+                errorMsg = defaultUnspecified;
+                if (e.GetType().FullName == "Java.Lang.SecurityException" || e is Java.Lang.SecurityException)
+                {
+                    errorMsg = SeekerApplication.GetString(Resource.String.PermissionsIssueShared);
+                }
+                success = false;
+                Logger.Debug("Error parsing files: " + e.Message + e.StackTrace);
+
+
+                if (e is DirectoryAccessFailure)
+                {
+                    errorMsg = "Shared Folder Error - " + UploadDirectoryManager.GetCompositeErrorString();
+                }
+                else
+                {
+                    Logger.Firebase("Error parsing files: " + e.Message + e.StackTrace);
+                }
+
+                if (e.Message.Contains("An item with the same key"))
+                {
+                    try
+                    {
+                        Logger.Firebase("Possible encoding issue: " + ShowCodePoints(e.Message.Substring(e.Message.Length - 7)));
+                        errorMsg = "Path Conflict. Same Name?";
+                    }
+                    catch
+                    {
+                        //just in case
+                    }
+                }
+
+                if (errorMsg == defaultUnspecified)
+                {
+                    Logger.Firebase("Error Parsing Files Unspecified Error" + e.Message + e.StackTrace);
+                }
+            }
+            finally
+            {
+                if (!success && !cancelled)
+                {
+                    //if(newlyAddedDirectoryIfApplicable!=null)
+                    //{
+                    //    UploadDirectoryManager.UploadDirectories.Remove(newlyAddedDirectoryIfApplicable);
+                    //    UploadDirectoryChanged?.Invoke(null, new EventArgs());
+                    //}
+                    //SeekerState.UploadDataDirectoryUri = null;
+                    //SeekerState.UploadDataDirectoryUriIsFromTree = true;
+                    _parseStatus.LastParseResult = ParseResultFlags.Failed;
+                    //if success if false then SharedFileService.SharedFileCache might be null still causing a crash!
+                    if (SharedFileService.SharedFileCache != null)
+                    {
+                        SharedFileService.SharedFileCache.SuccessfullyInitialized = false;
+                    }
+                }
+            }
+            return success;
+            //SeekerState.SoulseekClient.SearchResponseDelivered += SoulseekClient_SearchResponseDelivered;
+            //SeekerState.SoulseekClient.SearchResponseDeliveryFailed += SoulseekClient_SearchResponseDeliveryFailed;
+        }
+
+        /// <summary>
+        /// Remove a single shared folder WITHOUT re-walking disk. Remove folder from shared file cache, 
+        /// regenerates the derived search indices, re-persists, and re-informs the server. 
+        /// Returns false (caller should fall back to a full Rescan) when the removal needs metadata re-derivation 
+        /// that only a disk walk can do safely
+        /// </summary>
+        public static bool TryRemoveSharedFolderInMemory(UploadDirectoryEntry removedEntry, out string errorMsg)
+        {
+            errorMsg = string.Empty;
+            try
+            {
+                var cache = SharedFileService.SharedFileCache;
+                if (cache == null || !cache.SuccessfullyInitialized)
+                {
+                    errorMsg = "cache not initialized";
+                    return false;
+                }
+                if (ParseStatus.IsParsing)
+                {
+                    errorMsg = "parse in progress";
+                    return false;
+                }
+                if (removedEntry.IsSubdir)
+                {
+                    errorMsg = "removed entry is a subdir";
+                    return false;
+                }
+
+                // A remaining entry nested under the removed root needs to be re-keyed/promoted from a subdir back
+                // to a root, which the in-memory WithFolderRemoved can't do. Defer to a full rescan, which
+                // recomputes IsSubdir in RecomputeDirectoryState and promotes the orphan correctly.
+                var removedUri = Android.Net.Uri.Parse(removedEntry.Info.UploadDataDirectoryUri);
+                foreach (var remaining in UploadDirectoryManager.UploadDirectories)
+                {
+                    if (UploadDirectoryManager.IsNestedUnder(Android.Net.Uri.Parse(remaining.Info.UploadDataDirectoryUri), removedUri))
+                    {
+                        errorMsg = "a remaining folder is nested under the removed one";
+                        return false;
+                    }
+                }
+
+                string prefix = removedEntry.GetPresentableName();
+                var newCache = cache.WithFolderRemoved(prefix, out bool anythingRemoved);
+                if (!anythingRemoved)
+                {
+                    errorMsg = "nothing matched the removed folder";
+                    return false;
+                }
+
+                SharedFileService.SharedFileCache = newCache;
+
+                TrimPresentableDirList(UploadDirectoryManager.PresentableNameLockedDirectories, prefix);
+                TrimPresentableDirList(UploadDirectoryManager.PresentableNameHiddenDirectories, prefix);
+
+                StoreCachedParseResults(SeekerState.ActiveActivityRef, newCache.ToCachedParseResults());
+                UploadDirectoryManager.SaveToSharedPreferences(SeekerState.SharedPreferences);
+
+                SharedFileCache_Refreshed(null, (newCache.DirectoryCount, newCache.GetNonHiddenFileCountForServer()));
+                SharingStatusChangedEvent?.Invoke(null, new EventArgs());
+                return true;
+            }
+            catch (Exception e)
+            {
+                errorMsg = e.Message;
+                Logger.Firebase("TryRemoveSharedFolderInMemory failed, falling back to rescan: " + e.Message + e.StackTrace);
+                return false;
+            }
+        }
+
+        private static void TrimPresentableDirList(List<string> list, string prefix)
+        {
+            if (list == null)
+            {
+                return;
+            }
+            string subPrefix = prefix + "\\";
+            list.RemoveAll(name => name == prefix || name.StartsWith(subPrefix, StringComparison.Ordinal));
+        }
+
+        public static CachedParseResults GetCachedParseResults(Context c)
+        {
+            try
+            {
+                return CachedParseResultsSerializer.Restore(new AndroidCacheDataProvider(c));
+            }
+            catch (Exception e)
+            {
+                Logger.Firebase("FAILED to restore sharing parse results: " + e.Message + e.StackTrace);
+                return null;
+            }
+        }
+
+        public static void ClearParsedCacheResults(Context c)
+        {
+            Java.IO.File fileshare_dir = new Java.IO.File(c.FilesDir, KeyConsts.M_fileshare_cache_dir);
+            if (!fileshare_dir.Exists())
+            {
+                return;
+            }
+            foreach(var file in fileshare_dir.ListFiles())
+            {
+                file.Delete();
+            }
+        }
+
+        public static void StoreCachedParseResults(Context c, CachedParseResults cachedParseResults)
+        {
+            CachedParseResultsSerializer.Store(new AndroidCacheDataProvider(c), cachedParseResults);
+        }
+
+        public static string ShowCodePoints(string str)
+        {
+            string codePointString = string.Empty;
+            foreach (char c in str)
+            {
+                codePointString = codePointString + ($"_{(int)c:x4}");
+            }
+            return codePointString;
+        }
+
+        public static void ClearFileCache()
+        {
+            SharedFileService.SharedFileCache = SharedFileCache.GetEmptySharedFileCache();
+            SharedFileService.SharedFileCache_Refreshed(null, (0, 0));
+        }
+
+        private static void SharedFileCache_Refreshed(object sender, (int Directories, int Files) e)
+        {
+            if (SeekerState.SoulseekClient.State.HasFlag(SoulseekClientStates.LoggedIn))
+            {
+                try
+                {
+                    SeekerState.SoulseekClient.SetSharedCountsAsync(e.Directories, e.Files);
+                    SharedFileService.NumberOfSharedDirectoriesIsStale = false;
+                }
+                catch (Exception ex)
+                {
+                    // retry on next login
+                    Logger.Debug("failed to set shared counts: " + ex.Message);
+                    SharedFileService.NumberOfSharedDirectoriesIsStale = true;
+                }
+            }
+            else
+            {
+                SharedFileService.NumberOfSharedDirectoriesIsStale = true;
+            }
+        }
+
+        /// <summary>
+        /// Inform server the number of files we are sharing or 0,0 if not sharing...
+        /// it looks like people typically report all including locked files. lets not report hidden files though.
+        /// </summary>
+        public static void InformServerOfSharedFiles()
+        {
+            try
+            {
+                if (SeekerState.SoulseekClient != null && SeekerState.SoulseekClient.State.HasFlag(SoulseekClientStates.LoggedIn))
+                {
+                    if (MeetsCurrentSharingConditions())
+                    {
+                        if (SharedFileService.SharedFileCache != null)
+                        {
+                            Logger.Debug("Tell server we are sharing " + SharedFileService.SharedFileCache.DirectoryCount + " dirs and " + SharedFileService.SharedFileCache.GetNonHiddenFileCountForServer() + " files");
+                            SeekerState.SoulseekClient.SetSharedCountsAsync(SharedFileService.SharedFileCache.DirectoryCount,
+                                SharedFileService.SharedFileCache.GetNonHiddenFileCountForServer() != -1 ? SharedFileService.SharedFileCache.GetNonHiddenFileCountForServer() : SharedFileService.SharedFileCache.FileCount);
+                        }
+                        else
+                        {
+                            Logger.Debug("We would tell server but we are not successfully set up yet.");
+                        }
+                    }
+                    else
+                    {
+                        Logger.Debug("Tell server we are sharing 0 dirs and 0 files");
+                        SeekerState.SoulseekClient.SetSharedCountsAsync(0, 0);
+                    }
+                    SharedFileService.NumberOfSharedDirectoriesIsStale = false;
+                }
+                else
+                {
+                    if (MeetsCurrentSharingConditions())
+                    {
+                        if (SharedFileService.SharedFileCache != null)
+                        {
+                            Logger.Debug("We need to Tell server we are sharing " + SharedFileService.SharedFileCache.DirectoryCount + " dirs and " + SharedFileService.SharedFileCache.GetNonHiddenFileCountForServer() + " files on next log in");
+                        }
+                        else
+                        {
+                            Logger.Debug("we meet sharing conditions but our shared file cache is not successfully set up");
+                        }
+                    }
+                    else
+                    {
+                        Logger.Debug("We need to Tell server we are sharing 0 dirs and 0 files on next log in");
+                    }
+                    SharedFileService.NumberOfSharedDirectoriesIsStale = true;
+                }
+            }
+            catch (Exception e)
+            {
+                Logger.Debug("Failed to InformServerOfSharedFiles " + e.Message + e.StackTrace);
+                Logger.Firebase("Failed to InformServerOfSharedFiles " + e.Message + e.StackTrace);
+            }
+        }
+
+        /// <summary>
+        /// Has set things up properly and has sharing on.
+        /// </summary>
+        /// <returns></returns>
+        public static bool MeetsSharingConditions()
+        {
+            return PreferencesState.SharingOn && UploadDirectoryManager.UploadDirectories.Count != 0 && !_parseStatus.IsParsing && !UploadDirectoryManager.AreAllFailed();
+        }
+
+        /// <summary>
+        /// Has set things up properly and has sharing on + their network settings currently allow it.
+        /// </summary>
+        /// <returns></returns>
+        public static bool MeetsCurrentSharingConditions()
+        {
+            return MeetsSharingConditions() && NetworkStateService.IsNetworkPermitting();
+        }
+
+        public static bool IsSharingSetUpSuccessfully()
+        {
+            return SharedFileService.SharedFileCache != null && SharedFileService.SharedFileCache.SuccessfullyInitialized;
+        }
+    }
+
+    // TODOORG with other exception classes
+    public class DirectoryAccessFailure : System.Exception
+    {
+        public DirectoryAccessFailure(string msg) : base(msg)
+        {
+
+        }
+    }
+}

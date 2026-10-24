@@ -1,0 +1,739 @@
+using Seeker.Services;
+using Seeker.Chatroom;
+using Seeker.Helpers;
+using Seeker.Helpers.ActionSheet;
+using Seeker.Messages;
+using Android.Content;
+using Android.Graphics;
+using Android.Text;
+using Android.Text.Style;
+using Android.Util;
+using Android.Views;
+using Android.Widget;
+using AndroidX.Core.Content;
+using AndroidX.ConstraintLayout.Widget;
+using AndroidX.RecyclerView.Widget;
+using System;
+using System.Collections.Generic;
+using Common.Messages;
+
+namespace Seeker
+{
+    public class UserStatusView : LinearLayout
+    {
+        public RecyclerView.ViewHolder ViewHolder { get; set; }
+        private TextView viewUserStatus;
+        private TextView viewUserStatusTimestamp;
+        private ImageView viewUserStatusIcon;
+
+        public UserStatusView(Context context) : base(context)
+        {
+            LayoutInflater.From(context).Inflate(Resource.Layout.user_status_update_item, this, true);
+            setupChildren();
+        }
+
+        public static UserStatusView Create(ViewGroup parent)
+        {
+            var itemView = new UserStatusView(parent.Context);
+            itemView.LayoutParameters = new RecyclerView.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            return itemView;
+        }
+
+        public void setupChildren()
+        {
+            viewUserStatus = FindViewById<TextView>(Resource.Id.userStatusMessage);
+            viewUserStatusTimestamp = FindViewById<TextView>(Resource.Id.userStatusTimestamp);
+            viewUserStatusIcon = FindViewById<ImageView>(Resource.Id.userStatusIcon);
+        }
+
+        private void SetMessageText(TextView userStatus, StatusMessageUpdate data)
+        {
+            DateTime dateTimeLocal = SimpleHelpers.ToLocalTimeSafe(data.DateTimeUtc);
+
+            int iconRes;
+            int joinLeftAttr = data.StatusType == StatusMessageType.Joined || data.StatusType == StatusMessageType.CameBack ? Resource.Attribute.chat_join
+                    : Resource.Attribute.chat_left;
+            string actionText;
+            switch (data.StatusType)
+            {
+                case StatusMessageType.Joined:
+                    iconRes = Resource.Drawable.arrow_right;
+                    actionText = SeekerApplication.GetString(Resource.String.theUserJoined);
+                    break;
+                case StatusMessageType.Left:
+                    iconRes = Resource.Drawable.arrow_left;
+                    actionText = SeekerApplication.GetString(Resource.String.theUserLeft);
+                    break;
+                case StatusMessageType.WentAway:
+                    iconRes = Resource.Drawable.status_dot;
+                    actionText = SeekerApplication.GetString(Resource.String.theUserWentAway);
+                    break;
+                case StatusMessageType.CameBack:
+                    iconRes = Resource.Drawable.status_dot;
+                    actionText = SeekerApplication.GetString(Resource.String.theUserCameBack);
+                    break;
+                default:
+                    iconRes = Resource.Drawable.status_dot;
+                    actionText = string.Empty;
+                    break;
+            }
+
+            Color primaryColor = UiHelpers.GetColorFromAttribute(Context, Resource.Attribute.cellTextColor);
+            Color subduedColor = UiHelpers.GetColorFromAttribute(Context, Resource.Attribute.cellTextColorSubdued);
+            Color iconColor = UiHelpers.GetColorFromAttribute(Context, joinLeftAttr);
+
+            viewUserStatusIcon.SetImageResource(iconRes);
+            viewUserStatusIcon.SetColorFilter(iconColor, PorterDuff.Mode.SrcIn);
+
+            var builder = new SpannableStringBuilder();
+            int usernameStart = builder.Length();
+            builder.Append(data.Username);
+            int usernameEnd = builder.Length();
+            builder.SetSpan(new StyleSpan(TypefaceStyle.Bold), usernameStart, usernameEnd, SpanTypes.ExclusiveExclusive);
+            builder.SetSpan(new ForegroundColorSpan(primaryColor), usernameStart, usernameEnd, SpanTypes.ExclusiveExclusive);
+
+            int actionStart = builder.Length();
+            builder.Append(" ");
+            builder.Append(actionText);
+            int actionEnd = builder.Length();
+            builder.SetSpan(new ForegroundColorSpan(subduedColor), actionStart, actionEnd, SpanTypes.ExclusiveExclusive);
+
+            userStatus.SetText(builder, TextView.BufferType.Spannable);
+
+            viewUserStatusTimestamp.Text = CommonHelpers.GetNiceDateTimeGroupChat(dateTimeLocal);
+        }
+
+        public void setItem(StatusMessageUpdate userStatusMessage)
+        {
+            SetMessageText(viewUserStatus, userStatusMessage);
+        }
+    }
+
+
+    public class UserStatusHolder : RecyclerView.ViewHolder
+    {
+        public UserStatusView userStatusInnerView;
+
+        public UserStatusHolder(View view) : base(view)
+        {
+            userStatusInnerView = (UserStatusView)view;
+            userStatusInnerView.ViewHolder = this;
+        }
+
+        public UserStatusView getUnderlyingView()
+        {
+            return userStatusInnerView;
+        }
+    }
+
+
+    public class ChatroomStatusesRecyclerAdapter : RecyclerView.Adapter
+    {
+        private List<StatusMessageUpdate> localDataSet;
+        public override int ItemCount => localDataSet.Count;
+
+        public override void OnBindViewHolder(RecyclerView.ViewHolder holder, int position)
+        {
+            (holder as UserStatusHolder).getUnderlyingView().setItem(localDataSet[position]);
+        }
+
+        public override RecyclerView.ViewHolder OnCreateViewHolder(ViewGroup parent, int viewType)
+        {
+            UserStatusView view = UserStatusView.Create(parent);
+            return new UserStatusHolder(view as View);
+        }
+
+        public ChatroomStatusesRecyclerAdapter(List<StatusMessageUpdate> ti)
+        {
+            localDataSet = ti;
+        }
+    }
+
+
+    public class ChatroomInnerRecyclerAdapter : RecyclerView.Adapter
+    {
+        private List<Message> localDataSet;
+        public override int ItemCount => localDataSet.Count;
+        private int position = -1;
+        public static int VIEW_SENT = 1;
+        public static int VIEW_RECEIVER = 2;
+        public static int VIEW_STATUS = 3;
+
+        public override void OnBindViewHolder(RecyclerView.ViewHolder holder, int position)
+        {
+            if (localDataSet[position].FromMe)
+            {
+                (holder as MessageInnerViewSentHolder).messageInnerView.setItem(localDataSet[position]);
+            }
+            else if (localDataSet[position].SpecialCode != 0)
+            {
+                (holder as MessageConnectionStatusHolder).messageInnerView.setItem(localDataSet[position]);
+            }
+            else
+            {
+                (holder as GroupMessageInnerViewReceivedHolder).messageInnerView.setItem(localDataSet[position]);
+            }
+        }
+
+        public void setPosition(int position)
+        {
+            this.position = position;
+        }
+
+        public int getPosition()
+        {
+            return this.position;
+        }
+
+        public override int GetItemViewType(int position)
+        {
+            if (localDataSet[position].FromMe)
+            {
+                return VIEW_SENT;
+            }
+            else if (localDataSet[position].SpecialCode != 0)
+            {
+                return VIEW_STATUS;
+            }
+            else
+            {
+                return VIEW_RECEIVER;
+            }
+        }
+
+        public override RecyclerView.ViewHolder OnCreateViewHolder(ViewGroup parent, int viewType)
+        {
+            if (viewType == VIEW_SENT)
+            {
+                MessageInnerViewSent view = MessageInnerViewSent.Create(parent);
+                view.IsGroupChat = true;
+                (view as View).LongClick += ChatroomReceivedAdapter_LongClick;
+                return new MessageInnerViewSentHolder(view as View);
+            }
+            else if (viewType == VIEW_RECEIVER)
+            {
+                GroupMessageInnerViewReceived view = GroupMessageInnerViewReceived.Create(parent);
+                (view as View).LongClick += ChatroomReceivedAdapter_LongClick;
+                return new GroupMessageInnerViewReceivedHolder(view as View);
+            }
+            else
+            {
+                MessageConnectionStatus view = MessageConnectionStatus.Create(parent);
+                return new MessageConnectionStatusHolder(view as View);
+            }
+        }
+
+        private void ChatroomReceivedAdapter_LongClick(object sender, View.LongClickEventArgs e)
+        {
+            Message message = null;
+            if (sender is GroupMessageInnerViewReceived recv)
+            {
+                message = recv.DataItem;
+            }
+            else if (sender is MessageInnerViewSent sent)
+            {
+                message = sent.DataItem;
+                UiHelpers.ShowCopyMessageTextPopup(sent, message, GravityFlags.End);
+                e.Handled = true;
+                return;
+            }
+            if (message == null)
+            {
+                return;
+            }
+
+            // Preserve legacy guard: when a slsk:// link tap is in flight, suppress our menu.
+            if (SimpleHelpers.ShowSlskLinkContextMenu)
+            {
+                SimpleHelpers.ShowSlskLinkContextMenu = false;
+                return;
+            }
+
+            var activity = SeekerState.ActiveActivityRef;
+            var view = sender as View;
+            var config = new ActionSheetConfig();
+
+            var messageSection = new ActionSheetSection
+            {
+                HeaderText = activity.GetString(Resource.String.this_message)
+            };
+            messageSection.Rows.Add(new ActionSheetRow
+            {
+                IconResId = Resource.Drawable.content_copy_24,
+                Label = activity.GetString(Resource.String.copy_text),
+                OnClick = () => CommonHelpers.CopyTextToClipboard(activity, message.MessageText)
+            });
+            config.Sections.Add(messageSection);
+
+            config.Sections.Add(ActionSheetActions.BuildUserActionsSection(message.Username, activity, view));
+
+            UiHelpers.ShowActionSheetDialogSafe(activity.SupportFragmentManager, config);
+            e.Handled = true;
+        }
+
+        public ChatroomInnerRecyclerAdapter(List<Message> ti)
+        {
+            localDataSet = ti;
+        }
+    }
+
+
+    public class GroupMessageInnerViewReceivedHolder : RecyclerView.ViewHolder
+    {
+        public GroupMessageInnerViewReceived messageInnerView;
+
+        public GroupMessageInnerViewReceivedHolder(View view) : base(view)
+        {
+            messageInnerView = (GroupMessageInnerViewReceived)view;
+            messageInnerView.ViewHolder = this;
+        }
+
+        public GroupMessageInnerViewReceived getUnderlyingView()
+        {
+            return messageInnerView;
+        }
+    }
+
+    public class GroupMessageInnerViewReceived : ConstraintLayout
+    {
+        public GroupMessageInnerViewReceivedHolder ViewHolder { get; set; }
+        private TextView viewTimeStamp;
+        private TextView viewMessage;
+        private TextView viewUsername;
+        public Message DataItem;
+
+        public GroupMessageInnerViewReceived(Context context) : base(context)
+        {
+            LayoutInflater.From(context).Inflate(Resource.Layout.group_messages_inner_item_toMe, this, true);
+            setupChildren();
+        }
+        public static GroupMessageInnerViewReceived Create(ViewGroup parent)
+        {
+            var itemView = new GroupMessageInnerViewReceived(parent.Context);
+            itemView.LayoutParameters = new RecyclerView.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            return itemView;
+        }
+
+        public void setupChildren()
+        {
+            viewTimeStamp = FindViewById<TextView>(Resource.Id.text_gchat_timestamp_other);
+            viewMessage = FindViewById<TextView>(Resource.Id.text_gchat_message_other);
+            viewUsername = FindViewById<TextView>(Resource.Id.text_gchat_user_other);
+        }
+
+        public void setItem(Message msg)
+        {
+            DataItem = msg;
+            viewTimeStamp.Text = CommonHelpers.GetNiceDateTimeGroupChat(msg.LocalDateTime);
+            UiHelpers.SetMessageTextView(viewMessage, msg);
+            if (msg.SameAsLastUser)
+            {
+                viewUsername.Visibility = ViewStates.Gone;
+                viewUsername.Text = string.Empty;
+            }
+            else
+            {
+                viewUsername.Visibility = ViewStates.Visible;
+                viewUsername.Text = msg.Username;
+            }
+        }
+    }
+
+    public class RecyclerView2 : RecyclerView
+    {
+        public RecyclerView2(Context context) : base(context)
+        {
+        }
+
+        public RecyclerView2(Context context, IAttributeSet attrSet) : base(context, attrSet)
+        {
+        }
+
+        public RecyclerView2(Context context, IAttributeSet attrSet, int defStyle) : base(context, attrSet, defStyle)
+        {
+        }
+
+        protected override void OnSizeChanged(int w, int h, int oldw, int oldh)
+        {
+            base.OnSizeChanged(w, h, oldw, oldh);
+            if (oldh > h)
+            {
+                Logger.Debug("size changed to smaller...");
+                this.GetLayoutManager().ScrollToPosition(this.GetLayoutManager().ItemCount - 1);
+            }
+        }
+    }
+
+
+
+    public class ChatroomOverviewRecyclerAdapter : RecyclerView.Adapter
+    {
+        private List<Soulseek.RoomInfo> localDataSet;
+        public override int ItemCount => localDataSet.Count;
+        private int position = -1;
+        public static int VIEW_CATEGORY_HEADER = 1;
+        public static int VIEW_ROOM = 2;
+        public static int VIEW_JOINED_ROOM = 3;
+
+        public override void OnBindViewHolder(RecyclerView.ViewHolder holder, int position)
+        {
+            if (localDataSet[position] is RoomInfoCategory)
+            {
+                (holder as ChatroomOverviewCategoryHolder).chatroomOverviewView.setItem(localDataSet[position]);
+            }
+            else
+            {
+                if (holder is ChatroomOverviewHolder chatOverview)
+                {
+                    chatOverview.chatroomOverviewView.setItem(localDataSet[position]);
+                }
+                else if (holder is ChatroomOverviewJoinedViewHolder chatJoinedViewHolder)
+                {
+                    chatJoinedViewHolder.chatroomOverviewView.setItem(localDataSet[position]);
+                }
+            }
+        }
+
+        public void SetItems(List<Soulseek.RoomInfo> items)
+        {
+            localDataSet = items ?? new List<Soulseek.RoomInfo>();
+            NotifyDataSetChanged();
+        }
+
+        public void notifyRoomStatusChanged(string roomName)
+        {
+            for (int i = 0; i < localDataSet.Count; i++)
+            {
+                if (localDataSet[i].Name == roomName)
+                {
+                    this.NotifyItemChanged(i);
+                    Logger.Debug("NotifyItemChanged notifyRoomStatusChanged");
+                    break;
+                }
+            }
+        }
+
+        public void notifyRoomStatusesChanged(List<string> rooms)
+        {
+            foreach (string roomName in rooms)
+            {
+                notifyRoomStatusChanged(roomName);
+            }
+        }
+
+        public void setPosition(int position)
+        {
+            this.position = position;
+        }
+
+        public int getPosition()
+        {
+            return this.position;
+        }
+
+        private void ChatroomOverviewClick(object sender, EventArgs e)
+        {
+            setPosition((sender as IChatroomOverviewBase).ViewHolder.BindingAdapterPosition);
+            ChatroomActivity.ChatroomActivityRef.ChangeToInnerFragment(localDataSet[position]);
+        }
+
+        public override int GetItemViewType(int position)
+        {
+            if (localDataSet[position] is RoomInfoCategory)
+            {
+                return VIEW_CATEGORY_HEADER;
+            }
+            else if (ChatroomController.JoinedRoomNames.Contains(localDataSet[position].Name))
+            {
+                return VIEW_JOINED_ROOM;
+            }
+            else
+            {
+                return VIEW_ROOM;
+            }
+        }
+
+        public override RecyclerView.ViewHolder OnCreateViewHolder(ViewGroup parent, int viewType)
+        {
+            if (viewType == VIEW_CATEGORY_HEADER)
+            {
+                ChatroomOverviewCategoryView view = ChatroomOverviewCategoryView.Create(parent);
+                return new ChatroomOverviewCategoryHolder(view as View);
+            }
+            else if (viewType == VIEW_JOINED_ROOM)
+            {
+                ChatroomOverviewJoinedView view = ChatroomOverviewJoinedView.Create(parent);
+                (view as View).Click += ChatroomOverviewClick;
+                view.FindViewById<ImageView>(Resource.Id.leaveRoom).Click += ChatroomOverviewRecyclerAdapter_Click;
+                return new ChatroomOverviewJoinedViewHolder(view as View);
+            }
+            else
+            {
+                ChatroomOverviewView view = ChatroomOverviewView.Create(parent);
+                (view as View).Click += ChatroomOverviewClick;
+                return new ChatroomOverviewHolder(view as View);
+            }
+        }
+
+        private void ChatroomOverviewRecyclerAdapter_Click(object sender, EventArgs e)
+        {
+            setPosition((sender as View).FindAncestor<IChatroomOverviewBase>().ViewHolder.BindingAdapterPosition);
+            string roomName = localDataSet[position].Name;
+            if (SessionService.Instance.CurrentlyLoggedInButDisconnectedState())
+            {
+                ChatroomController.RemoveRoomFromJoinedAndOthers(roomName);
+                SeekerApplication.Toaster.ShowToast(string.Format(SeekerState.ActiveActivityRef.Resources.GetString(Resource.String.leaving_room), roomName), ToastLength.Short);
+                ChatroomController.UpdateJoinedRooms();
+            }
+            else
+            {
+                ChatroomController.JoinRoomApi(roomName, false, true, true, false);
+            }
+        }
+
+        public ChatroomOverviewRecyclerAdapter(List<Soulseek.RoomInfo> ti)
+        {
+            localDataSet = ti;
+        }
+    }
+
+    public class MessageConnectionStatusHolder : RecyclerView.ViewHolder
+    {
+        public MessageConnectionStatus messageInnerView;
+
+        public MessageConnectionStatusHolder(View view) : base(view)
+        {
+            messageInnerView = (MessageConnectionStatus)view;
+            messageInnerView.ViewHolder = this;
+        }
+
+        public MessageConnectionStatus getUnderlyingView()
+        {
+            return messageInnerView;
+        }
+    }
+
+    public class MessageConnectionStatus : LinearLayout
+    {
+        public MessageConnectionStatusHolder ViewHolder { get; set; }
+        private TextView viewStatus;
+
+        public MessageConnectionStatus(Context context) : base(context)
+        {
+            LayoutInflater.From(context).Inflate(Resource.Layout.chatroom_connect_disconnect_item, this, true);
+            setupChildren();
+        }
+
+        public static MessageConnectionStatus Create(ViewGroup parent)
+        {
+            var itemView = new MessageConnectionStatus(parent.Context);
+            itemView.LayoutParameters = new RecyclerView.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            return itemView;
+        }
+
+        public void setupChildren()
+        {
+            viewStatus = FindViewById<TextView>(Resource.Id.statusMsg);
+        }
+
+        public void setItem(Message msg)
+        {
+            viewStatus.Text = msg.MessageText;
+        }
+    }
+
+
+    public class ChatroomOverviewHolder : RecyclerView.ViewHolder
+    {
+        public ChatroomOverviewView chatroomOverviewView;
+
+        public ChatroomOverviewHolder(View view) : base(view)
+        {
+            chatroomOverviewView = (ChatroomOverviewView)view;
+            chatroomOverviewView.ViewHolder = this;
+        }
+
+        public ChatroomOverviewView getUnderlyingView()
+        {
+            return chatroomOverviewView;
+        }
+    }
+
+
+    public class ChatroomOverviewCategoryHolder : RecyclerView.ViewHolder
+    {
+        public ChatroomOverviewCategoryView chatroomOverviewView;
+
+        public ChatroomOverviewCategoryHolder(View view) : base(view)
+        {
+            chatroomOverviewView = (ChatroomOverviewCategoryView)view;
+            chatroomOverviewView.ViewHolder = this;
+        }
+
+        public ChatroomOverviewCategoryView getUnderlyingView()
+        {
+            return chatroomOverviewView;
+        }
+    }
+
+    public interface IChatroomOverviewBase
+    {
+        public void setItem(Soulseek.RoomInfo roomInfo);
+        public RecyclerView.ViewHolder ViewHolder { get; set; }
+    }
+
+    public class ChatroomOverviewView : LinearLayout, IChatroomOverviewBase
+    {
+        public RecyclerView.ViewHolder ViewHolder { get; set; }
+        private TextView viewRoomName;
+        private TextView viewUsersInRoom;
+
+        public ChatroomOverviewView(Context context) : base(context)
+        {
+            Foreground = UiHelpers.GetDrawableFromAttribute(context, Android.Resource.Attribute.SelectableItemBackground);
+            Clickable = true;
+            Focusable = true;
+            LayoutInflater.From(context).Inflate(Resource.Layout.chatroom_overview_item, this, true);
+            setupChildren();
+        }
+
+        public static ChatroomOverviewView Create(ViewGroup parent)
+        {
+            var itemView = new ChatroomOverviewView(parent.Context);
+            itemView.LayoutParameters = new RecyclerView.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            return itemView;
+        }
+
+        public void setupChildren()
+        {
+            viewRoomName = FindViewById<TextView>(Resource.Id.roomName);
+            viewUsersInRoom = FindViewById<TextView>(Resource.Id.usersInRoom);
+        }
+
+        public void setItem(Soulseek.RoomInfo roomInfo)
+        {
+            viewRoomName.Text = roomInfo.Name;
+            viewUsersInRoom.Text = roomInfo.UserCount.ToString();
+        }
+    }
+
+    public class ChatroomOverviewJoinedViewHolder : RecyclerView.ViewHolder
+    {
+        public ChatroomOverviewJoinedView chatroomOverviewView;
+
+        public ChatroomOverviewJoinedViewHolder(View view) : base(view)
+        {
+            chatroomOverviewView = (ChatroomOverviewJoinedView)view;
+            chatroomOverviewView.ViewHolder = this;
+        }
+
+        public ChatroomOverviewJoinedView getUnderlyingView()
+        {
+            return chatroomOverviewView;
+        }
+    }
+
+    public class ChatroomOverviewJoinedView : LinearLayout, IChatroomOverviewBase
+    {
+        public RecyclerView.ViewHolder ViewHolder { get; set; }
+        private TextView viewRoomName;
+        private TextView viewUsersInRoom;
+        private ImageView unreadImageView;
+
+        public ChatroomOverviewJoinedView(Context context) : base(context)
+        {
+            Foreground = UiHelpers.GetDrawableFromAttribute(context, Android.Resource.Attribute.SelectableItemBackground);
+            Clickable = true;
+            Focusable = true;
+            LayoutInflater.From(context).Inflate(Resource.Layout.chatroom_overview_joined_item, this, true);
+            setupChildren();
+        }
+
+        public static ChatroomOverviewJoinedView Create(ViewGroup parent)
+        {
+            var itemView = new ChatroomOverviewJoinedView(parent.Context);
+            itemView.LayoutParameters = new RecyclerView.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            return itemView;
+        }
+
+        public void setupChildren()
+        {
+            viewRoomName = FindViewById<TextView>(Resource.Id.roomName);
+            viewUsersInRoom = FindViewById<TextView>(Resource.Id.usersInRoom);
+            unreadImageView = FindViewById<ImageView>(Resource.Id.unreadImageView);
+        }
+
+        public void setItem(Soulseek.RoomInfo roomInfo)
+        {
+            viewRoomName.Text = roomInfo.Name;
+            viewUsersInRoom.Text = roomInfo.UserCount.ToString();
+
+            if (ChatroomController.UnreadRooms.ContainsKey(roomInfo.Name))
+            {
+                unreadImageView.Visibility = ViewStates.Visible;
+
+                viewRoomName.SetTypeface(null, TypefaceStyle.Bold);
+                viewUsersInRoom.SetTypeface(null, TypefaceStyle.Bold);
+                viewRoomName.SetTextColor(UiHelpers.GetColorFromAttribute(SeekerState.ActiveActivityRef, Resource.Attribute.normalTextColorNonTinted));
+                viewUsersInRoom.SetTextColor(UiHelpers.GetColorFromAttribute(SeekerState.ActiveActivityRef, Resource.Attribute.normalTextColorNonTinted));
+            }
+            else
+            {
+                unreadImageView.Visibility = ViewStates.Gone;
+
+                viewRoomName.SetTypeface(null, TypefaceStyle.Normal);
+                viewUsersInRoom.SetTypeface(null, TypefaceStyle.Normal);
+                viewRoomName.SetTextColor(new Android.Graphics.Color(ContextCompat.GetColor(SeekerState.ActiveActivityRef, Resource.Color.defaultTextColor)));
+                viewUsersInRoom.SetTextColor(new Android.Graphics.Color(ContextCompat.GetColor(SeekerState.ActiveActivityRef, Resource.Color.defaultTextColor)));
+            }
+
+            if (ChatroomController.CurrentlyJoinedRoomNames.ContainsKey(roomInfo.Name))
+            {
+                unreadImageView.Alpha = 1.0f;
+                viewRoomName.Alpha = 1.0f;
+                viewUsersInRoom.Alpha = 1.0f;
+            }
+            else
+            {
+                unreadImageView.Alpha = 0.4f;
+                viewRoomName.Alpha = 0.4f;
+                viewUsersInRoom.Alpha = 0.4f;
+            }
+        }
+    }
+
+
+    public class ChatroomOverviewCategoryView : LinearLayout
+    {
+        public ChatroomOverviewCategoryHolder ViewHolder { get; set; }
+        private TextView viewCategory;
+
+        public ChatroomOverviewCategoryView(Context context) : base(context)
+        {
+            LayoutInflater.From(context).Inflate(Resource.Layout.chatroom_overview_category_item, this, true);
+            setupChildren();
+        }
+
+        public static ChatroomOverviewCategoryView Create(ViewGroup parent)
+        {
+            var itemView = new ChatroomOverviewCategoryView(parent.Context);
+            itemView.LayoutParameters = new RecyclerView.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            return itemView;
+        }
+
+        public void setupChildren()
+        {
+            viewCategory = FindViewById<TextView>(Resource.Id.categoryHeader);
+        }
+
+        public void setItem(UserListItem usertype)
+        {
+            viewCategory.Text = usertype.Username;
+        }
+
+        public void setItem(Soulseek.RoomInfo roomInfo)
+        {
+            viewCategory.Text = roomInfo.Name;
+        }
+    }
+}

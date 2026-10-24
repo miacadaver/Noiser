@@ -1,0 +1,687 @@
+using Android.Content;
+using Android.OS;
+using Android.Widget;
+using Common;
+using Seeker.Helpers;
+using Soulseek;
+using System;
+using System.Net;
+using System.Threading.Tasks;
+
+namespace Seeker.Services
+{
+    /// <summary>
+    /// Whether we triggered login by clicking "login" or if it was done automatically
+    ///  this matters bc on clicking login for the first time we do not know if the user has 
+    ///  a valid user/pass and so we cant show the logged in screen
+    /// </summary>
+    public enum LoginOrigin
+    {
+        Interactive,
+
+        /// <summary>
+        /// Cold-start auto-login, or a reconnect after a network drop. The user still considers
+        /// themselves logged in, so the account screen stays up with a "Connecting" chip.
+        /// </summary>
+        Background,
+    }
+
+    public class LoginCompletedEventArgs : EventArgs
+    {
+        public LoginCompletedEventArgs(LoginOrigin origin, bool success)
+        {
+            Origin = origin;
+            Success = success;
+        }
+
+        public LoginOrigin Origin { get; }
+        public bool Success { get; }
+    }
+
+    /// <summary>
+    /// Session lifecycle: login state, reconnect, status, and client configuration.
+    /// </summary>
+    public class SessionService : ISessionService
+    {
+        public static SessionService Instance { get; set; }
+
+        private static readonly object loginPhaseSyncRoot = new object();
+        private static LoginOrigin? inFlightOrigin;
+
+        // We create this task so it is published under the lock.  ConnectAsync only creates the task
+        //   after both DNS and binding to the listener are done so it would be unfeasible to have that in the lock.
+        // Before this we would get issues where we would be in state Connecting but with no task.  Allowing 
+        //   multiple calls to interleave in ConnectAsync and having no way of knowing if a login was truly in flight.
+        private static Task inFlightLogin;
+
+        /// <summary>
+        /// Origin of the login currently in flight, or null when none is.
+        /// </summary>
+        public static LoginOrigin? InFlightLoginOrigin
+        {
+            get
+            {
+                lock (loginPhaseSyncRoot)
+                {
+                    return inFlightOrigin;
+                }
+            }
+        }
+
+        private static Task InFlightLogin
+        {
+            get
+            {
+                lock (loginPhaseSyncRoot)
+                {
+                    return inFlightLogin;
+                }
+            }
+        }
+
+        // for pre SoulseekClient.ConnectAsync tasks
+        public static event EventHandler LoginStarted;
+
+        public static event EventHandler<LoginCompletedEventArgs> LoginCompleted;
+
+        /// <summary>
+        /// The single entry point for logging in. Records the origin, applies the credential and
+        /// session state changes when the connect finishes, and raises <see cref="LoginCompleted"/>.
+        /// </summary>
+        /// <returns>
+        /// A task that completes only after the connect task does. Prevents multiple threads from 
+        /// entering and connecting.
+        /// </returns>
+        public static Task BeginLogin(LoginOrigin origin, string username, string password)
+        {
+            TaskCompletionSource<bool> handle;
+            lock (loginPhaseSyncRoot)
+            {
+                if (inFlightLogin != null && !inFlightLogin.IsCompleted)
+                {
+                    // Already logging in. An interactive request takes over the presentation: the
+                    // user is watching this one, so the spinner and any error belong to them.
+                    if (origin == LoginOrigin.Interactive)
+                    {
+                        inFlightOrigin = LoginOrigin.Interactive;
+                    }
+                    return inFlightLogin;
+                }
+                inFlightOrigin = origin;
+                handle = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                inFlightLogin = handle.Task;
+            }
+
+            Task soulseekClientConnectTask = ResolveThenConnectAsync(username, password);
+
+            // We set the handle after the connect task finishes
+            soulseekClientConnectTask.ContinueWith(t => OnLoginTaskCompleted(t, handle), TaskScheduler.Default);
+
+            try
+            {
+                LoginStarted?.Invoke(null, EventArgs.Empty);
+            }
+            catch (Exception e)
+            {
+                Logger.FirebaseError("LoginStarted handler failed", e);
+            }
+            return handle.Task;
+        }
+
+        // async so all faults will be on the task
+        private static async Task ResolveThenConnectAsync(string username, string password)
+        {
+            IPAddress server = await SeekerApplication.ResolveServerAddressAsync().ConfigureAwait(false);
+            Task connect;
+            try
+            {
+                // throws state checks synchronously
+                connect = SeekerApplication.ConnectAndPerformPostConnectTasks(server, username, password);
+            }
+            catch (InvalidOperationException)
+            {
+                connect = AdoptConnectInProgress();
+            }
+            await connect.ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// This is still possible to get to if we check if logged in -> false, then the login task completes and sets logged in -> true,
+        ///   then we call BeginLogin(), there is no current task, we try to Connect and we get InvalidStateException
+        /// </summary>
+        private static Task AdoptConnectInProgress()
+        {
+            Logger.InfoFirebase("AdoptConnectionInProgress");
+            if (SeekerState.SoulseekClient.State.HasFlag(SoulseekClientStates.LoggedIn))
+            {
+                // Already connected and logged in — the login we were about to start is done.
+                return Task.CompletedTask;
+            }
+
+            Task adopted;
+            lock (SeekerApplication.OurCurrentLoginTaskSyncObject)
+            {
+                adopted = SeekerApplication.CurrentInnerConnectTask;
+            }
+            if (adopted == null || adopted.IsCompleted)
+            {
+                return Task.FromException(new InvalidOperationException("BeginLogin: connect underway with no task to adopt"));
+            }
+
+            SeekerApplication.Toaster.ShowToast(
+                SeekerApplication.GetString(Resource.String.we_are_already_logging_in), ToastLength.Short);
+            return adopted;
+        }
+
+        private static void OnLoginTaskCompleted(Task connect, TaskCompletionSource<bool> handle)
+        {
+            try
+            {
+                ReportDnsFallbackIfNeeded(connect);
+
+                if (connect.IsCompletedSuccessfully)
+                {
+                    SucceedLogin();
+                }
+                else
+                {
+                    var (msg, clearCreds) = ClassifyLoginError(connect);
+                    FailLogin(msg, clearCreds);
+                }
+            }
+            finally
+            {
+                if (connect.IsFaulted)
+                {
+                    handle.TrySetException(connect.Exception.InnerExceptions);
+                }
+                else if (connect.IsCanceled)
+                {
+                    handle.TrySetCanceled();
+                }
+                else
+                {
+                    handle.TrySetResult(true);
+                }
+            }
+        }
+
+        private static void SucceedLogin()
+        {
+            Logger.Debug("Login succeeded");
+            if (!PreferencesState.CurrentlyLoggedIn)
+            {
+                PreferencesState.CurrentlyLoggedIn = true;
+                PreferencesManager.SaveCredentials();
+            }
+            FinishLogin(success: true);
+        }
+
+        private static void FailLogin(string msg, bool clearCreds)
+        {
+            LoginOrigin origin;
+            lock (loginPhaseSyncRoot)
+            {
+                origin = inFlightOrigin ?? LoginOrigin.Background;
+            }
+            Logger.Debug("Login failed: " + msg);
+
+            // clearCreds means the server rejected the credentials themselves, which no amount of
+            // retrying fixes — act on it whoever asked. Everything else (network unreachable,
+            // timeouts) is only the user's problem when the user is the one waiting: clearing
+            // CurrentlyLoggedIn on a background blip would drop them to the login screen and stop
+            // ReconnectService, which checks that same flag before every retry.
+            if (clearCreds)
+            {
+                PreferencesState.ClearCredentials();
+                PreferencesManager.SaveCredentials();
+            }
+            else if (origin == LoginOrigin.Interactive)
+            {
+                PreferencesState.CurrentlyLoggedIn = false;
+                PreferencesManager.SaveCredentials();
+            }
+
+            if (clearCreds || origin == LoginOrigin.Interactive)
+            {
+                SeekerApplication.Toaster.ShowToast(msg, ToastLength.Long);
+            }
+
+            FinishLogin(success: false);
+        }
+
+        private static void FinishLogin(bool success)
+        {
+            LoginOrigin origin;
+            lock (loginPhaseSyncRoot)
+            {
+                origin = inFlightOrigin ?? LoginOrigin.Background;
+                inFlightOrigin = null;
+                inFlightLogin = null;
+            }
+            LoginCompleted?.Invoke(null, new LoginCompletedEventArgs(origin, success));
+        }
+
+        private static void ReportDnsFallbackIfNeeded(Task t)
+        {
+            var status = SeekerApplication.DnsLookupStatus;
+            var exception = SeekerApplication.DnsLookupException;
+            if (status == SeekerApplication.DnsLookupResult.Success)
+            {
+                return;
+            }
+            SeekerApplication.DnsLookupStatus = SeekerApplication.DnsLookupResult.Success;
+            SeekerApplication.DnsLookupException = null;
+            if (t.IsFaulted)
+            {
+                // The login failed anyway; its own error is the useful message.
+                return;
+            }
+            Logger.Firebase("DNS Lookup of Server Failed. Falling back on hardcoded IP succeeded. Status: " + status + " " + SeekerApplication.DescribeDnsException(exception));
+            if (InFlightLoginOrigin == LoginOrigin.Interactive)
+            {
+                SeekerApplication.Toaster.ShowToast(
+                    SeekerApplication.GetString(Resource.String.dns_failed), ToastLength.Long);
+            }
+        }
+
+        /// <summary>
+        /// Maps a faulted connect task onto a user-facing message, and whether the credentials
+        /// themselves were rejected (as opposed to the connection failing).
+        /// </summary>
+        private static (string message, bool clearCredentials) ClassifyLoginError(Task t)
+        {
+            string msg;
+            string msgToLog = string.Empty;
+            bool clearCreds = true;
+
+            if (t.Exception != null && t.Exception.InnerExceptions != null && t.Exception.InnerExceptions.Count != 0)
+            {
+                if (t.Exception.InnerExceptions[0] is LoginRejectedException lre)
+                {
+                    string loginRejectedMessage = lre.Message;
+                    string invalidUsername = "INVALIDUSERNAME";
+                    if (loginRejectedMessage != null && loginRejectedMessage.Contains(invalidUsername))
+                    {
+                        // Soulseek.NET bakes in "The server rejected login attempt: {msg}" so we strip it
+                        //   since Toasts must be short
+                        string soulseekNetPrefix = "The server rejected login attempt: ";
+                        if (loginRejectedMessage.StartsWith(soulseekNetPrefix))
+                        {
+                            msg = loginRejectedMessage.Substring(soulseekNetPrefix.Length);
+                        }
+                        else
+                        {
+                            msg = loginRejectedMessage;
+                        }
+
+                        // here we "localize" the English soulseek message for the end users locale
+                        // if not in this list then it might be a future message (not yet documented here:
+                        // https://nicotine-plus.org/doc/SLSKPROTOCOL.html#login-rejection-details) so 
+                        // just pass the server message along (will show as INVALIDUSERNAME: reason)
+                        if (msg.Contains("No leading and trailing spaces allowed in nick."))
+                        {
+                            msg = SeekerApplication.GetString(Resource.String.user_no_leading_trailing_space);
+                        } 
+                        else if (msg.Contains("Nick too long"))
+                        {
+                            // this msg is shared with frontend validation (we dont expect to get here)
+                            msg = SeekerApplication.GetString(Resource.String.user_too_long);
+                        }
+                        else if (msg.Contains("Invalid characters in nick"))
+                        {
+                            // this msg is shared with frontend validation (we dont expect to get here)
+                            msg = SeekerApplication.GetString(Resource.String.user_invalid_char);
+                        }
+                        else if (msg.Contains("Nick empty"))
+                        {
+                            // we shouldnt get here
+                            Logger.FirebaseError("Nick empty - this is unexpected", lre);
+                            msg = SeekerApplication.GetString(Resource.String.invalid_username);
+                        } 
+                        else
+                        {
+                            Logger.FirebaseError("INVALIDUSERNAME - unexpected message", lre);
+                            string invalidUsernamePrefix = invalidUsername + ": ";
+
+                            if (msg.StartsWith(invalidUsernamePrefix))
+                            {
+                                msg = msg.Substring(invalidUsernamePrefix.Length);
+                            }
+                            // results in "Invalid Username: {reason}" where Invalid Username is localized
+                            msg = SeekerApplication.GetString(Resource.String.invalid_username) + ": " + msg;
+                        }
+
+                    }
+                    else if (loginRejectedMessage != null && loginRejectedMessage.Contains("INVALIDPASS"))
+                    {
+                        msg = SeekerApplication.GetString(Resource.String.invalid_password);
+                    }
+                    else if (loginRejectedMessage != null && loginRejectedMessage.Contains("EMPTYPASS"))
+                    {
+                        Logger.Firebase("EmptyPass - this is unexpected");
+                        msg = SeekerApplication.GetString(Resource.String.invalid_password);
+                    }
+                    else if (loginRejectedMessage != null && loginRejectedMessage.Contains("INVALIDVERSION"))
+                    {
+                        Logger.Firebase("InvalidVersion - this is unexpected");
+                        msg = SeekerApplication.GetString(Resource.String.invalid_client_version);
+                        clearCreds = false;
+                    }
+                    else if (loginRejectedMessage != null && loginRejectedMessage.Contains("SVRFULL"))
+                    {
+                        Logger.Firebase("SVRFULL - this is unexpected");
+                        msg = SeekerApplication.GetString(Resource.String.invalid_server_full);
+                        clearCreds = false;
+                    }
+                    else if (loginRejectedMessage != null && loginRejectedMessage.Contains("SVRPRIVATE"))
+                    {
+                        Logger.Firebase("SVRPRIVATE - this is unexpected");
+                        msg = SeekerApplication.GetString(Resource.String.invalid_server_private);
+                        clearCreds = false;
+                    }
+                    else
+                    {
+                        msg = SeekerApplication.GetString(Resource.String.bad_user_pass);
+                    }
+                }
+                else if (t.Exception.InnerExceptions[0] is AddressException)
+                {
+                    clearCreds = false;
+                    msg = SeekerApplication.GetString(Resource.String.dns_failed_2);
+                }
+                else if (t.Exception.InnerExceptions[0] is SoulseekClientException)
+                {
+                    clearCreds = false;
+                    if (t.Exception.InnerExceptions[0].Message.Contains("Network is unreachable") ||
+                        t.Exception.InnerExceptions[0].Message.Contains("Connection refused"))
+                    {
+                        msg = SeekerApplication.GetString(Resource.String.network_unreachable);
+                    }
+                    else
+                    {
+                        msg = SeekerApplication.GetString(Resource.String.cannot_login);
+                        msgToLog = t.Exception.InnerExceptions[0].Message + t.Exception.InnerExceptions[0].StackTrace;
+                    }
+                }
+                else if (t.Exception.InnerExceptions[0].Message != null &&
+                    (t.Exception.InnerExceptions[0].Message.Contains("wait timed out") || t.Exception.InnerExceptions[0].Message.Contains("operation timed out", StringComparison.OrdinalIgnoreCase)))
+                {
+                    clearCreds = false;
+                    msg = SeekerApplication.GetString(Resource.String.cannot_login) + " - Time Out Waiting for Server Response.";
+                }
+                else
+                {
+                    msgToLog = t.Exception.InnerExceptions[0].Message + t.Exception.InnerExceptions[0].StackTrace;
+                    clearCreds = false;
+                    msg = SeekerApplication.GetString(Resource.String.cannot_login);
+                }
+            }
+            else
+            {
+                if (t.Exception != null)
+                {
+                    msgToLog = t.Exception.Message + t.Exception.StackTrace;
+                }
+                msg = SeekerApplication.GetString(Resource.String.cannot_login);
+            }
+
+            if (msgToLog != string.Empty)
+            {
+                msgToLog = "Login Error: " + msgToLog;
+                Logger.Debug(msgToLog);
+                Logger.Firebase(msgToLog);
+            }
+
+            return (msg, clearCreds);
+        }
+
+        public bool CurrentlyLoggedInButDisconnectedState()
+        {
+            return (PreferencesState.CurrentlyLoggedIn &&
+                (SeekerState.SoulseekClient.State.HasFlag(SoulseekClientStates.Disconnected) || SeekerState.SoulseekClient.State.HasFlag(SoulseekClientStates.Disconnecting)));
+        }
+
+        public bool ShowMessageAndCreateReconnectTask(bool silent, out Task connectTask)
+        {
+            if (!silent)
+            {
+                SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.temporary_disconnected), ToastLength.Short);
+            }
+            try
+            {
+                connectTask = BeginLogin(LoginOrigin.Background, PreferencesState.Username, PreferencesState.Password);
+                if (connectTask != null)
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+                if (!silent)
+                {
+                    SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.failed_to_connect), ToastLength.Short);
+                }
+            }
+            connectTask = null;
+            return false;
+        }
+
+        public bool IfLoggingInTaskCurrentlyBeingPerformedContinueWithAction(Action<Task> action, string msg = null, Context contextToUseForMessage = null)
+        {
+            lock (SeekerApplication.OurCurrentLoginTaskSyncObject)
+            {
+                var state = SeekerState.SoulseekClient.State;
+                if (state.HasFlag(SoulseekClientStates.Connected) && state.HasFlag(SoulseekClientStates.LoggedIn))
+                {
+                    return false;
+                }
+
+                // both are fine to continue with on
+                Task loginTask = SeekerApplication.CurrentLoginTask ?? InFlightLogin;
+                if (loginTask == null)
+                {
+                    // this should never happen
+                    Logger.Firebase("RunWithReconnect: not logged in and no login in flight, state " + state);
+                    loginTask = Task.FromException(new InvalidOperationException("not logged in and no login in flight"));
+                }
+
+                SeekerApplication.CurrentLoginTask = loginTask.ContinueWith(action, System.Threading.CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+                if (msg != null)
+                {
+                    SeekerApplication.Toaster.ShowToast(msg, ToastLength.Short);
+                }
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// Standard reconnect-then-act pattern. If disconnected, reconnects and runs action on success.
+        /// If already connected, runs action immediately.
+        /// </summary>
+        /// <returns>true if action was run or will be run after reconnect; false if reconnect could not be started.</returns>
+        public bool RunWithReconnect(Action action, bool silent = false)
+        {
+            if (CurrentlyLoggedInButDisconnectedState())
+            {
+                Task t;
+                if (!ShowMessageAndCreateReconnectTask(silent, out t))
+                {
+                    return false;
+                }
+                t.ContinueWith(new Action<Task>((Task t) =>
+                {
+                    if (t.IsFaulted)
+                    {
+                        if (!silent)
+                        {
+                            SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.failed_to_connect), ToastLength.Short);
+                        }
+                        return;
+                    }
+                    SeekerState.ActiveActivityRef.RunOnUiThread(() => { action(); });
+                }));
+                return true;
+            }
+            else
+            {
+                action();
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// Extended reconnect-then-act pattern. Handles disconnected, mid-login, and connected states.
+        /// The caller provides a continuation that handles both fault propagation and the real action.
+        /// The continutationAction will always get called
+        /// </summary>
+        public void RunWithReconnect(Action<Task> continuationAction, string loggingInMsg = null, Context contextForMsg = null, bool silent = false)
+        {
+            if (CurrentlyLoggedInButDisconnectedState())
+            {
+                Task t;
+                if (!ShowMessageAndCreateReconnectTask(silent, out t))
+                {
+                    Task.FromException(new Exception("could not start reconnect")).ContinueWith(continuationAction);
+                    return;
+                }
+                lock (SeekerApplication.OurCurrentLoginTaskSyncObject)
+                {
+                    SeekerApplication.CurrentLoginTask = t.ContinueWith(continuationAction);
+                }
+            }
+            else if (IfLoggingInTaskCurrentlyBeingPerformedContinueWithAction(continuationAction, loggingInMsg, contextForMsg))
+            {
+                // chained onto login task
+            }
+            else
+            {
+                continuationAction(Task.CompletedTask);
+            }
+        }
+
+        public void SetStatusApi(bool away)
+        {
+            if (IsNotLoggedIn())
+            {
+                return;
+            }
+            if (!SeekerState.SoulseekClient.State.HasFlag(SoulseekClientStates.Connected) || !SeekerState.SoulseekClient.State.HasFlag(SoulseekClientStates.LoggedIn))
+            {
+                //dont log in just for this.
+                //but if we later connect while still in the background, it may be best to set a flag.
+                //do it when we log in... since we could not set it now...
+                SeekerState.PendingStatusChangeToAwayOnline = away ? SeekerState.PendingStatusChange.AwayPending : SeekerState.PendingStatusChange.OnlinePending;
+                return;
+            }
+            try
+            {
+                SeekerState.SoulseekClient.SetStatusAsync(away ? UserPresence.Away : UserPresence.Online).ContinueWith((Task t) =>
+                {
+                    if (t.IsCompletedSuccessfully)
+                    {
+                        SeekerState.PendingStatusChangeToAwayOnline = SeekerState.PendingStatusChange.NothingPending;
+                        SeekerState.OurCurrentStatusIsAway = away;
+                        string statusString = away ? "away" : "online"; //not user facing
+                        Logger.Debug($"We successfully changed our status to {statusString}");
+                    }
+                    else
+                    {
+                        Logger.Debug("SetStatusApi FAILED " + t.Exception?.Message);
+                    }
+                });
+            }
+            catch (Exception e)
+            {
+                Logger.Debug("SetStatusApi FAILED " + e.Message + e.StackTrace);
+            }
+        }
+
+        public bool IsNotLoggedIn()
+        {
+            return (!PreferencesState.CurrentlyLoggedIn) || string.IsNullOrEmpty(PreferencesState.Username) || string.IsNullOrEmpty(PreferencesState.Password);
+        }
+
+        public void ReconfigureOptions(bool? allowPrivateInvites, bool? enableListener, int? newPort)
+        {
+            bool requiresConnection = allowPrivateInvites.HasValue;
+            if (!PreferencesState.CurrentlyLoggedIn && requiresConnection)
+            {
+                SeekerApplication.Toaster.ShowToast(
+                    SeekerApplication.GetString(Resource.String.must_be_logged_to_toggle_priv_invites),
+                    ToastLength.Short);
+                if (SeekerState.ActiveActivityRef is SettingsActivity sa)
+                {
+                    sa.NotifyRowChanged("general.allow_private_invites");
+                }
+                return;
+            }
+            if (requiresConnection)
+            {
+                RunWithReconnect(() => ReconfigureOptionsLogic(allowPrivateInvites, enableListener, newPort));
+            }
+            else
+            {
+                ReconfigureOptionsLogic(allowPrivateInvites, enableListener, newPort);
+            }
+        }
+
+        public void ReconfigureOptionsLogic(bool? allowPrivateInvites, bool? enableTheListener, int? listenerPort)
+        {
+            Task<bool> reconfigTask = null;
+            try
+            {
+                Soulseek.SoulseekClientOptionsPatch patch = new Soulseek.SoulseekClientOptionsPatch(acceptPrivateRoomInvitations: allowPrivateInvites, enableListener: enableTheListener, listenPort: listenerPort);
+                reconfigTask = SeekerState.SoulseekClient.ReconfigureOptionsAsync(patch);
+            }
+            catch (Exception e)
+            {
+                Logger.Firebase("reconfigure options: " + e.Message + e.StackTrace);
+                Logger.Debug("reconfigure options FAILED" + e.Message + e.StackTrace);
+                return;
+            }
+            Action<Task<bool>> continueWithAction = new Action<Task<bool>>((reconfigTask) =>
+            {
+                SeekerState.ActiveActivityRef.RunOnUiThread(() =>
+                {
+                    if (reconfigTask.IsFaulted)
+                    {
+                        Logger.Debug("reconfigure options FAILED");
+                        if (allowPrivateInvites.HasValue)
+                        {
+                            string enabledDisabled = allowPrivateInvites.Value ? SeekerState.ActiveActivityRef.GetString(Resource.String.allowed) : SeekerState.ActiveActivityRef.GetString(Resource.String.denied);
+                            SeekerApplication.Toaster.ShowToast(string.Format(SeekerState.ActiveActivityRef.GetString(Resource.String.failed_setting_priv_invites), enabledDisabled), ToastLength.Long);
+                            if (SeekerState.ActiveActivityRef is SettingsActivity settingsActivity)
+                            {
+                                // Rebind the toggle row from PreferencesState (the unchanged old value,
+                                // since the setter no longer persists optimistically).
+                                settingsActivity.NotifyRowChanged("general.allow_private_invites");
+                            }
+                        }
+
+                        if (enableTheListener.HasValue)
+                        {
+                            string enabledDisabled = enableTheListener.Value ? SeekerState.ActiveActivityRef.GetString(Resource.String.allowed) : SeekerState.ActiveActivityRef.GetString(Resource.String.denied);
+                            SeekerApplication.Toaster.ShowToast(string.Format(SeekerState.ActiveActivityRef.GetString(Resource.String.network_error_setting_listener), enabledDisabled), ToastLength.Long);
+                        }
+
+                        if (listenerPort.HasValue)
+                        {
+                            SeekerApplication.Toaster.ShowToast(string.Format(SeekerState.ActiveActivityRef.GetString(Resource.String.network_error_setting_listener_port), listenerPort.Value), ToastLength.Long);
+                        }
+                    }
+                    else
+                    {
+                        if (allowPrivateInvites.HasValue)
+                        {
+                            Logger.Debug("reconfigure options SUCCESS, restart required? " + reconfigTask.Result);
+                            PreferencesState.AllowPrivateRoomInvitations = allowPrivateInvites.Value;
+                            PreferencesManager.SaveAllowPrivateRoomInvitations();
+                        }
+                    }
+                });
+            });
+            reconfigTask.ContinueWith(continueWithAction);
+        }
+    }
+}

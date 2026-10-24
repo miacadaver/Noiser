@@ -1,0 +1,352 @@
+﻿using Soulseek;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using Seeker.Helpers;
+
+namespace Seeker
+{
+    [Serializable]
+    public class FolderItem : ITransferItem
+    {
+        public string FolderName; //this is always ex "Album Name" or for depth > 1 "GrandParent/Parent".  Display Folder name is reversed.
+        public string Username;
+        public List<TransferItem> TransferItems;
+
+        public FolderItem(string folderName, string username, TransferItem initialTransferItem)
+        {
+            TransferItems = new List<TransferItem>();
+            Add(initialTransferItem);
+            if (folderName == null)
+            {
+                folderName = SimpleHelpers.GetFolderNameFromFile(initialTransferItem.FullFilename).ToString();
+            }
+            FolderName = folderName;
+            Username = username;
+        }
+
+        /// <summary>
+        /// default public constructor for serialization.
+        /// </summary>
+        public FolderItem()
+        {
+            TransferItems = new List<TransferItem>();
+        }
+
+        // How long a speed sample is valid for.  Used by Folder Remaining Time / speed calculation
+        //  bc sometimes there are no valid speed samples (i.e. during initialization and the 1st second
+        //  of in progress it is blank)
+        private static readonly TimeSpan SpeedHoldWindow = TimeSpan.FromSeconds(15);
+
+        private readonly struct SpeedEstimate
+        {
+            public readonly double Speed;
+            public readonly long BytesRemaining;
+
+            public SpeedEstimate(double speed, long bytesRemaining)
+            {
+                Speed = speed;
+                BytesRemaining = bytesRemaining;
+            }
+        }
+
+        // Time remaining (speed vs bytes remaining) to finish files that will transfer on their own (does not 
+        //   count paused / failed since those require user intervention).  There will not always be a transfer 
+        //   in progress / with active speed (since it can be intializing and we dont calc speed for the first second), 
+        //   if thats the case hold the neweset one in our folder.
+        private SpeedEstimate Estimate(DateTime utcNow)
+        {
+            const TransferStates pending = TransferStates.Requested | TransferStates.Queued
+                | TransferStates.Initializing | TransferStates.InProgress | TransferStates.Aborted;
+            long bytesRemaining = 0;
+            double speed = 0;
+            bool anyPending = false;
+            double heldSpeed = 0;
+            DateTime heldSpeedSampledUtc = DateTime.MinValue;
+            lock (TransferItems)
+            {
+                foreach (TransferItem ti in TransferItems)
+                {
+                    if (ti.AvgSpeed > 0 && ti.AvgSpeedSampledUtc > heldSpeedSampledUtc)
+                    {
+                        heldSpeed = ti.AvgSpeed;
+                        heldSpeedSampledUtc = ti.AvgSpeedSampledUtc;
+                    }
+                    if (ti.State.HasFlag(TransferStates.Completed) || (ti.State & pending) == 0)
+                    {
+                        continue;
+                    }
+                    anyPending = true;
+                    bytesRemaining += Math.Max(0, ti.Size - ti.GetBytesTransferred());
+                    if (ti.State.HasFlag(TransferStates.InProgress))
+                    {
+                        speed += ti.AvgSpeed;
+                    }
+                }
+            }
+            if (!anyPending)
+            {
+                // just completed or just paused - a held sample would show a speed (and "0s") for nothing
+                return default;
+            }
+            if (speed <= 0 && utcNow - heldSpeedSampledUtc <= SpeedHoldWindow)
+            {
+                speed = heldSpeed;
+            }
+            return new SpeedEstimate(speed, bytesRemaining);
+        }
+
+        public TimeSpan? GetRemainingTime()
+        {
+            return GetRemainingTime(DateTime.UtcNow);
+        }
+
+        public TimeSpan? GetRemainingTime(DateTime utcNow)
+        {
+            SpeedEstimate estimate = Estimate(utcNow);
+            // if nothing in progress and its been awhile since last speed update, hide time remaining,
+            //   we would be giving a misleading estimate otherwise.
+            if (estimate.Speed <= 0)
+            {
+                return null;
+            }
+            double seconds = estimate.BytesRemaining / estimate.Speed;
+            if (seconds > TimeSpan.MaxValue.TotalSeconds)
+            {
+                return null;
+            }
+            return TimeSpan.FromSeconds(seconds);
+        }
+
+        public double GetAvgSpeed()
+        {
+            return GetAvgSpeed(DateTime.UtcNow);
+        }
+
+        public double GetAvgSpeed(DateTime utcNow)
+        {
+            return Estimate(utcNow).Speed;
+        }
+
+        public bool IsUpload()
+        {
+            if (TransferItems.Count == 0)
+            {
+                return false; //usually this is if we are in the process of clearing the folder....
+            }
+            return TransferItems[0].IsUpload();
+        }
+
+        public string GetFolderName()
+        {
+            return FolderName;
+        }
+
+        public string GetUsername()
+        {
+            return Username;
+        }
+
+        public string GetDisplayFolderName()
+        {
+            //this is similar to QT (in the case of Seeker multiple subdirectories)
+            //but not quite.
+            //QT will show subdirs/complete/Soulseek Downloads/Music/H: (where everything after subdirs is your download folder)
+            //whereas we just show subdirs
+            //subdirs is folder name in both cases for single folder, 
+            // and say (01 / 2020 / test_folder) for nested.
+            if (GetDirectoryLevel() == 1)
+            {
+                //they are the same
+                return FolderName;
+            }
+            else
+            {
+                //split reverse.
+                var reversedArray = this.FolderName.Split('\\').Reverse();
+                return string.Join('\\', reversedArray);
+            }
+        }
+
+        public int GetDirectoryLevel()
+        {
+            //just parent folder = level 1 (search result and browse single dir case)
+            //grandparent = level 2 (browse download subdirs case - i.e. Album, Album > covers)
+            //etc.
+            if (this.FolderName == null || !this.FolderName.Contains('\\'))
+            {
+                return 1;
+            }
+            return this.FolderName.Split('\\').Count();
+        }
+
+        /// <summary>
+        /// Total size of the folder and how many of those bytes have transferred so far.
+        /// </summary>
+        public (long totalBytes, long bytesCompleted) GetFolderProgress()
+        {
+            lock (TransferItems)
+            {
+                long folderBytesComplete = 0;
+                long totalFolderBytes = 0;
+                foreach (TransferItem ti in TransferItems)
+                {
+                    folderBytesComplete += ti.GetBytesTransferred();
+                    totalFolderBytes += ti.Size;
+                }
+                return (totalFolderBytes, folderBytesComplete);
+            }
+        }
+
+        /// <summary>
+        /// Get the overall queue of the folder (the lowest queued track)
+        /// </summary>
+        /// <returns></returns>
+        public int GetQueueLength()
+        {
+            lock (TransferItems)
+            {
+                int queueLen = int.MaxValue;
+                foreach (TransferItem ti in TransferItems)
+                {
+                    if (ti.State.HasFlag(TransferStates.Queued) && ti.State.HasFlag(TransferStates.Remotely))
+                    {
+                        queueLen = Math.Min(ti.QueueLength, queueLen);
+                    }
+                }
+                return queueLen;
+            }
+        }
+
+        public TransferItem GetLowestQueuedTransferItem()
+        {
+            lock (TransferItems)
+            {
+                int queueLen = int.MaxValue;
+                TransferItem curLowest = null;
+                foreach (TransferItem ti in TransferItems)
+                {
+                    if (ti.State.HasFlag(TransferStates.Queued) && ti.State.HasFlag(TransferStates.Remotely))
+                    {
+                        queueLen = Math.Min(ti.QueueLength, queueLen);
+                        if (queueLen == ti.QueueLength)
+                        {
+                            curLowest = ti;
+                        }
+                    }
+                }
+                return curLowest;
+            }
+        }
+
+
+        /// <summary>
+        /// Get the overall state of the folder.
+        /// </summary>
+        /// <returns></returns>
+        public TransferStates GetState(out bool isFailed, out bool anyOffline)
+        {
+            //top priority - In Progress
+            //if ANY are InProgress then this is considered in progress
+            //if not then if ANY initialized.
+            //if not then if ANY queued its considered queued.  And the queue number is that of the lowest transfer.
+            //if not then if ANY failed its considered failed
+            //if not then its cancelled (i.e. paused)
+            //if not then its Succeeded.
+
+            isFailed = false;
+            anyOffline = false;
+            //if not then none...
+            lock (TransferItems)
+            {
+                TransferStates folderState = TransferStates.None;
+                foreach (TransferItem ti in TransferItems)
+                {
+                    TransferStates state = ti.State;
+                    if (state == TransferStates.InProgress)
+                    {
+                        isFailed = false;
+                        return TransferStates.InProgress;
+                    }
+                    else
+                    {
+                        if (ti.Failed)
+                        {
+                            isFailed = true;
+                            if (ti.State.HasFlag(TransferStates.UserOffline))
+                            {
+                                anyOffline = true;
+                            }
+                        }
+                        //do priority
+                        if (state.HasFlag(TransferStates.Initializing) || state.HasFlag(TransferStates.Requested) || state.HasFlag(TransferStates.Aborted))
+                        {
+                            folderState = state;
+                        }
+                        else if (state.HasFlag(TransferStates.Queued) && !folderState.HasFlag(TransferStates.Initializing) && !folderState.HasFlag(TransferStates.Requested) && !folderState.HasFlag(TransferStates.Aborted)
+                            // basically if folderState is remote queued dont override it with locally queued
+                            && !(folderState.HasFlag(TransferStates.Remotely) && state.HasFlag(TransferStates.Locally)))
+                        {
+                            folderState = state;
+                        }
+                        else if ((state.HasFlag(TransferStates.Errored) || state.HasFlag(TransferStates.Rejected) || state.HasFlag(TransferStates.TimedOut)) && !folderState.HasFlag(TransferStates.Queued) && !folderState.HasFlag(TransferStates.Initializing) && !folderState.HasFlag(TransferStates.Requested) && !folderState.HasFlag(TransferStates.Aborted))
+                        {
+                            folderState = state;
+                        }
+                        else if (state.HasFlag(TransferStates.Cancelled) && !folderState.HasFlag(TransferStates.Rejected) && !folderState.HasFlag(TransferStates.TimedOut) && !folderState.HasFlag(TransferStates.Errored) && !folderState.HasFlag(TransferStates.Queued) && !folderState.HasFlag(TransferStates.Initializing) && !folderState.HasFlag(TransferStates.Requested) && !folderState.HasFlag(TransferStates.Aborted))
+                        {
+                            folderState = state;
+                        }
+                        else if (state.HasFlag(TransferStates.Succeeded) && !folderState.HasFlag(TransferStates.Rejected) && !folderState.HasFlag(TransferStates.TimedOut) && !folderState.HasFlag(TransferStates.Cancelled) && !folderState.HasFlag(TransferStates.Queued) && !folderState.HasFlag(TransferStates.Errored) && !folderState.HasFlag(TransferStates.Initializing) && !folderState.HasFlag(TransferStates.Requested) && !folderState.HasFlag(TransferStates.Aborted))
+                        {
+                            folderState = state;
+                        }
+                    }
+                }
+                return folderState;
+            }
+        }
+
+        public void ClearAllComplete()
+        {
+            lock (TransferItems)
+            {
+                TransferItems.RemoveAll((TransferItem ti) => { return ti.State.HasFlag(TransferStates.Succeeded); });
+                if (IsUpload())
+                {
+                    TransferItems.RemoveAll((TransferItem i) => { return SimpleHelpers.IsUploadCompleteOrAborted(i.State); });
+                }
+            }
+        }
+
+        public bool HasTransferItem(TransferItem ti)
+        {
+            lock (TransferItems)
+            {
+                return TransferItems.Contains(ti);
+            }
+        }
+
+        public bool IsEmpty()
+        {
+            return TransferItems.Count == 0;
+        }
+
+        public void Remove(TransferItem ti)
+        {
+            lock (TransferItems)
+            {
+                TransferItems.Remove(ti);
+            }
+        }
+
+
+        public void Add(TransferItem ti)
+        {
+            lock (TransferItems)
+            {
+                TransferItems.Add(ti);
+            }
+        }
+    }
+}

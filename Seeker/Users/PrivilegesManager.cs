@@ -1,0 +1,267 @@
+﻿using Android.Content;
+using Seeker.Services;
+using Android.Widget;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using Seeker.Helpers;
+
+using Common;
+namespace Seeker.Managers
+{
+    public class PrivilegesManager
+    {
+        public static object PrivilegedUsersLock = new object();
+        private HashSet<string> PrivilegedUsers = new HashSet<string>();
+        public bool IsPrivileged = false; //are we privileged
+
+        public static Context Context = null;
+        private static PrivilegesManager instance = null;
+        public static PrivilegesManager Instance
+        {
+            get
+            {
+                if (instance == null)
+                {
+                    instance = new PrivilegesManager();
+                }
+                return instance;
+            }
+        }
+        /// <summary>
+        /// Set Privileged Users List, this will also check if we have privileges and if so, get our remaining time..
+        /// </summary>
+        /// <param name="privUsers"></param>
+        public void SetPrivilegedList(IReadOnlyCollection<string> privUsers)
+        {
+            var privilegedUsers = new HashSet<string>(privUsers);
+            lock (PrivilegedUsersLock)
+            {
+                PrivilegedUsers = privilegedUsers;
+                if (PreferencesState.Username != null && PreferencesState.Username != string.Empty)
+                {
+                    IsPrivileged = CheckIfPrivileged(PreferencesState.Username);
+                    if (IsPrivileged)
+                    {
+                        GetPrivilegesAPI(false);
+                    }
+                }
+            }
+        }
+
+        // server code 91, and the privileged flag on every user status (code 7)
+        public void SetUserPrivileged(string username, bool privileged)
+        {
+            lock (PrivilegedUsersLock)
+            {
+                bool changed = privileged ? PrivilegedUsers.Add(username) : PrivilegedUsers.Remove(username);
+                if (!changed)
+                {
+                    return;
+                }
+                Logger.Debug($"{username} privileged: {privileged}");
+                if (username == PreferencesState.Username)
+                {
+                    IsPrivileged = privileged;
+                }
+            }
+        }
+
+        public void SubtractDays(int days)
+        {
+            SecondsRemainingAtLastCheck -= (days * 24 * 3600);
+        }
+
+        private volatile int SecondsRemainingAtLastCheck = int.MinValue;
+        private DateTime LastCheckTime = DateTime.MinValue;
+        public int GetRemainingSeconds()
+        {
+            if (SecondsRemainingAtLastCheck == 0 || SecondsRemainingAtLastCheck == int.MinValue)
+            {
+                return 0;
+            }
+            else if (LastCheckTime == DateTime.MinValue)
+            {
+                //shouldnt go here
+                return 0;
+            }
+            else
+            {
+                int secondsSinceLastCheck = (int)Math.Floor(LastCheckTime.Subtract(DateTime.UtcNow).TotalSeconds);
+                int remainingSeconds = SecondsRemainingAtLastCheck - secondsSinceLastCheck;
+                return Math.Max(remainingSeconds, 0);
+            }
+        }
+
+        /// <summary>
+        /// Get Remaining Days (rounded down)
+        /// </summary>
+        /// <returns></returns>
+        public int GetRemainingDays()
+        {
+            return GetRemainingSeconds() / (24 * 3600);
+        }
+
+        public string GetPrivilegeStatus()
+        {
+            if (SecondsRemainingAtLastCheck == 0 || SecondsRemainingAtLastCheck == int.MinValue || GetRemainingSeconds() <= 0)
+            {
+                if (IsPrivileged)
+                {
+                    return SeekerApplication.GetString(Resource.String.yes); //this is if we are in the privileged list but our actual amount has not yet been returned.
+                }
+                else
+                {
+                    return SeekerApplication.GetString(Resource.String.no_image_chosen); //"None"
+                }
+            }
+            else
+            {
+                int seconds = GetRemainingSeconds();
+                if (seconds > 3600 * 24)
+                {
+                    int days = seconds / (3600 * 24);
+                    if (days == 1)
+                    {
+                        return string.Format(SeekerApplication.GetString(Resource.String.day_left), days);
+                    }
+                    else
+                    {
+                        return string.Format(SeekerApplication.GetString(Resource.String.days_left), days);
+                    }
+                }
+                else if (seconds > 3600)
+                {
+                    int hours = seconds / 3600;
+                    if (hours == 1)
+                    {
+                        return string.Format(SeekerApplication.GetString(Resource.String.hour_left), hours);
+                    }
+                    else
+                    {
+                        return string.Format(SeekerApplication.GetString(Resource.String.hours_left), hours);
+                    }
+                }
+                else if (seconds > 60)
+                {
+                    int mins = seconds / 60;
+                    if (mins == 1)
+                    {
+                        return string.Format(SeekerApplication.GetString(Resource.String.minute_left), mins);
+                    }
+                    else
+                    {
+                        return string.Format(SeekerApplication.GetString(Resource.String.minutes_left), mins);
+                    }
+                }
+                else
+                {
+                    if (seconds == 1)
+                    {
+                        return string.Format(SeekerApplication.GetString(Resource.String.second_left), seconds);
+                    }
+                    else
+                    {
+                        return string.Format(SeekerApplication.GetString(Resource.String.seconds_left), seconds);
+                    }
+                }
+            }
+        }
+
+        public EventHandler PrivilegesChecked;
+
+        /// <summary>True while a privileges check is in flight (between GetPrivilegesAPI start and
+        /// the continuation completing). Fires <see cref="CheckStateChanged"/> when the value changes.</summary>
+        public bool IsCheckInProgress { get; private set; }
+
+        /// <summary>Raised when <see cref="IsCheckInProgress"/> transitions (start of check, end of check).</summary>
+        public EventHandler<EventArgs> CheckStateChanged;
+
+        private void SetCheckInProgress(bool value)
+        {
+            if (IsCheckInProgress == value)
+            {
+                return;
+            }
+            IsCheckInProgress = value;
+            CheckStateChanged?.Invoke(null, EventArgs.Empty);
+        }
+
+        private void GetPrivilegesLogic(bool feedback)
+        {
+            SeekerState.SoulseekClient.GetPrivilegesAsync().ContinueWith(new Action<Task<int>>
+                ((Task<int> t) =>
+                {
+                    if (t.IsFaulted)
+                    {
+                        if (feedback)
+                        {
+                            if (t.Exception.InnerException is TimeoutException)
+                            {
+                                SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.priv_failed) + ": " + SeekerApplication.GetString(Resource.String.timeout), ToastLength.Long);
+                            }
+                            else
+                            {
+                                Logger.Firebase("Failed to get privileges" + t.Exception.InnerException.Message);
+                                SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.priv_failed), ToastLength.Long);
+                            }
+                        }
+                        SetCheckInProgress(false);
+                        return;
+                    }
+                    else
+                    {
+                        SecondsRemainingAtLastCheck = t.Result;
+                        if (t.Result > 0)
+                        {
+                            IsPrivileged = true;
+                        }
+                        else if (t.Result == 0)
+                        {
+                            IsPrivileged = false;
+                        }
+                        LastCheckTime = DateTime.UtcNow;
+                        if (feedback)
+                        {
+                            SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.priv_success) + ". " + SeekerApplication.GetString(Resource.String.status) + ": " + GetPrivilegeStatus(), ToastLength.Long);
+                        }
+                        SetCheckInProgress(false);
+                        PrivilegesChecked?.Invoke(null, new EventArgs());
+                    }
+                }));
+        }
+
+        public void GetPrivilegesAPI(bool feedback)
+        {
+            if (!PreferencesState.CurrentlyLoggedIn)
+            {
+                SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.must_be_logged_in_to_check_privileges), ToastLength.Short);
+                return;
+            }
+            SetCheckInProgress(true);
+            SessionService.Instance.RunWithReconnect((Task reconnectTask) =>
+            {
+                if (reconnectTask.IsFaulted)
+                {
+                    if (feedback)
+                    {
+                        SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.failed_to_connect), ToastLength.Short);
+                    }
+                    SetCheckInProgress(false);
+                    return;
+                }
+                GetPrivilegesLogic(feedback);
+            });
+        }
+
+        public bool CheckIfPrivileged(string username)
+        {
+            lock (PrivilegedUsersLock)
+            {
+                return PrivilegedUsers.Contains(username);
+            }
+        }
+    }
+
+}

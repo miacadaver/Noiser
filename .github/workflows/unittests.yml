@@ -1,0 +1,48 @@
+name: Unit Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Run UnitTestCommon
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Install workload set
+        run: dotnet workload restore UnitTestCommon/UnitTestCommon.csproj
+
+      - name: Restore
+        run: dotnet restore UnitTestCommon/UnitTestCommon.csproj
+
+      - name: Build
+        run: dotnet build UnitTestCommon/UnitTestCommon.csproj --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test UnitTestCommon/UnitTestCommon.csproj --configuration Release --filter TestCategory!=RealData --no-build --verbosity normal --logger "trx;LogFileName=test-results.trx"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: '**/TestResults/*.trx'

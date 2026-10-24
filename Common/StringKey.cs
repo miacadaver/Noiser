@@ -1,0 +1,29 @@
+namespace Common
+{
+    public enum StringKey
+    {
+        cannot_download_from_self,
+        error_duplicate,
+        error_duplicate_multiple,
+        QueuedForDownload,
+        download_is_starting,
+        FailedDownloadDirectoryNotSet,
+        UserXIsOffline,
+        CannotConnectUserX,
+        TimeoutQueueUserX,
+        error_,
+        MustBeLoggedInToRetryDL,
+        must_be_logged_to_download,
+        timeout_peer,
+        transfer_rejected_file_not_shared,
+        transfer_rejected,
+        failed_to_establish_direct_or_indirect,
+        remote_conn_closed,
+        network_down,
+        reported_as_failed,
+        error_no_space,
+        error_unspecified,
+        FinishedDownloading,
+        stream_download_conflict,
+    }
+}

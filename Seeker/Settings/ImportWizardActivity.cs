@@ -1,0 +1,1122 @@
+﻿using Seeker.Helpers;
+using Android.App;
+using Android.Content;
+using Android.Graphics;
+using Android.OS;
+using Android.Runtime;
+using Android.Util;
+using Android.Views;
+using Android.Widget;
+using AndroidX.Core.Content;
+using AndroidX.Fragment.App;
+using AndroidX.RecyclerView.Widget;
+using AndroidX.ViewPager2.Widget;
+using Common;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Xml.Serialization;
+using AndroidX.Activity;
+
+namespace Seeker
+{
+    /// <summary>
+    /// ImportParse State - read on resume, + state change events
+    /// </summary>
+    public static class ImportParseState
+    {
+        public enum Phase { Idle, Loading, Loaded, Failed }
+
+        public static Phase Current { get; private set; } = Phase.Idle;
+        public static ImportedData? Data { get; private set; }
+        public static string FailureMessage { get; private set; }
+
+        public static event EventHandler Changed;
+
+        /// <summary>Must be called on the main thread. Sets the latched state then notifies listeners.</summary>
+        public static void Publish(Phase phase, ImportedData? data = null, string failure = null)
+        {
+            Current = phase;
+            Data = data;
+            FailureMessage = failure;
+            Changed?.Invoke(null, EventArgs.Empty);
+        }
+
+        public static void Reset()
+        {
+            Publish(Phase.Idle);
+        }
+    }
+
+
+    [Activity(Label = "ImportWizardActivity", Theme = "@style/AppTheme.NoActionBar", Exported = false)]
+    public class ImportWizardActivity : ThemeableActivity
+    {
+        private const int IMPORT_FILE_SELECTED = 2000;
+
+        private const int PAGE_START = 0;
+        private const int PAGE_USERLIST = 1;
+        private const int PAGE_IGNORE = 2;
+        private const int PAGE_USERNOTES = 3;
+        private const int PAGE_WISHLIST = 4;
+
+        Button prevButton;
+        Button nextButton;
+        AndroidX.ViewPager2.Widget.ViewPager2 pager;
+        WizardPageChangeCallback pageChangeCallback;
+        PageDotsIndicator pageDots;
+        public static ImportedData? selectedImportedData = null; //this has to be static.  otherwise someone can just rotate the screen on a later step and clear it.
+        protected override void OnCreate(Bundle savedInstanceState)
+        {
+            base.OnCreate(savedInstanceState);
+
+            var backPressedCallback = new GenericOnBackPressedCallback(true, onBackPressedAction);
+            OnBackPressedDispatcher.AddCallback(backPressedCallback);
+
+            SetContentView(Resource.Layout.wizard_activity_layout);
+
+            prevButton = this.FindViewById<Button>(Resource.Id.prev_button);
+            prevButton.Click += PrevButton_Click;
+            nextButton = this.FindViewById<Button>(Resource.Id.next_button);
+            nextButton.Click += NextButton_Click;
+
+            var buttonBar = this.FindViewById<LinearLayout>(Resource.Id.wizard_button_bar);
+            AndroidX.Core.View.ViewCompat.SetOnApplyWindowInsetsListener(buttonBar, new BottomOnlyInsetsListener());
+
+            pager = this.FindViewById<AndroidX.ViewPager2.Widget.ViewPager2>(Resource.Id.pager);
+            pager.Adapter = new WizardPagerAdapter(this);
+            pager.UserInputEnabled = false; //swipe disabled
+            pageChangeCallback = new WizardPageChangeCallback(this);
+            pager.RegisterOnPageChangeCallback(pageChangeCallback);
+
+            pageDots = this.FindViewById<PageDotsIndicator>(Resource.Id.strip);
+            pageDots.SetPageCount(pager.Adapter.ItemCount);
+            pageDots.SetPosition(pager.CurrentItem);
+
+            AndroidX.AppCompat.Widget.Toolbar myToolbar = (AndroidX.AppCompat.Widget.Toolbar)FindViewById<AndroidX.AppCompat.Widget.Toolbar>(Resource.Id.setting_toolbar);
+            myToolbar.Title = SeekerApplication.GetString(Resource.String.ImportWizard);
+            SetButtonText(pager.CurrentItem);
+        }
+
+        protected override void OnResume()
+        {
+            base.OnResume();
+            ImportParseState.Changed += OnParseStateChanged;
+            SetButtonText(pager.CurrentItem);
+        }
+
+        protected override void OnPause()
+        {
+            ImportParseState.Changed -= OnParseStateChanged;
+            base.OnPause();
+        }
+
+        private void OnParseStateChanged(object sender, EventArgs e)
+        {
+            if (IsFinishing || IsDestroyed)
+            {
+                return;
+            }
+            SetButtonText(pager.CurrentItem);
+        }
+
+        // FragmentStateAdapter tags its fragments "f" + getItemId(position)
+        private AndroidX.Fragment.App.Fragment FragmentAt(int position)
+        {
+            return SupportFragmentManager.FindFragmentByTag("f" + position);
+        }
+
+        /// <summary>The currently displayed list fragment, or null if the start page is showing / not yet attached.</summary>
+        private ImportListFragment CurrentListFragment()
+        {
+            return FragmentAt(pager.CurrentItem) as ImportListFragment;
+        }
+
+        /// <summary>
+        /// Returns the wizard to the start page. Used when a restored list page has no parsed data to
+        /// show (e.g. the process was killed and <see cref="ImportParseState"/> reset to Idle).
+        /// </summary>
+        public void ResetToStartPage()
+        {
+            pager.Post(() => pager.SetCurrentItem(PAGE_START, false));
+        }
+
+        protected override void OnDestroy()
+        {
+            if (pager != null && pageChangeCallback != null)
+            {
+                pager.UnregisterOnPageChangeCallback(pageChangeCallback);
+            }
+            base.OnDestroy();
+        }
+
+        public bool IsCurrentStep(AndroidX.Fragment.App.Fragment f)
+        {
+            return f == FragmentAt(pager.CurrentItem);
+        }
+
+        private void onBackPressedAction(OnBackPressedCallback callback)
+        {
+            PrevButton_Click(null, new EventArgs());
+        }
+
+        protected override void OnActivityResult(int requestCode, [GeneratedEnum] Result resultCode, Intent data)
+        {
+            if (requestCode == IMPORT_FILE_SELECTED)
+            {
+                if (resultCode == Result.Ok)
+                {
+                    ImportParseState.Publish(ImportParseState.Phase.Loading);
+                    string realName = string.Empty;
+                    var mainHandler = new Android.OS.Handler(Android.OS.Looper.MainLooper);
+                    System.Threading.Tasks.Task.Run(() =>
+                    {
+                        if (data.Data.Scheme == "content")
+                        {
+                            Android.Database.ICursor cursor = this.ContentResolver.Query(data.Data, new string[] { Android.Provider.MediaStore.IMediaColumns.DisplayName }, null, null, null);
+                            if (cursor != null)
+                            {
+                                try
+                                {
+                                    if (cursor.MoveToFirst())
+                                    {
+                                        realName = cursor.GetString(0);
+                                    }
+                                }
+                                finally
+                                {
+                                    cursor.Close();
+                                }
+                            }
+                        }
+                        else
+                        {
+                            //i.e. "file" scheme from some file managers.  OpenInputStream handles it too.
+                            realName = data.Data.LastPathSegment ?? string.Empty;
+                        }
+
+                        using (var stream = this.ContentResolver.OpenInputStream(data.Data))
+                        {
+                            return ImportHelper.ImportFile(realName, stream);
+                        }
+                    }).ContinueWith(
+                            (System.Threading.Tasks.Task<ImportedData> t) =>
+                            {
+                                mainHandler.Post(() =>
+                                {
+                                    if (t.IsCompletedSuccessfully)
+                                    {
+                                        selectedImportedData = new ImportedData();
+                                        ImportParseState.Publish(ImportParseState.Phase.Loaded, t.Result);
+                                        SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.SuccessfullyParsed), ToastLength.Long);
+                                    }
+                                    else
+                                    {
+                                        Exception inner = t.Exception?.InnerException;
+                                        if (inner is ImportHelper.NicotineParsingException npe)
+                                        {
+                                            ImportParseState.Publish(ImportParseState.Phase.Failed, failure: npe.MessageToToast);
+                                            SeekerApplication.Toaster.ShowToast(String.Format(SeekerApplication.GetString(Resource.String.FailedToParseReasonContactDev), npe.MessageToToast), ToastLength.Long);
+                                        }
+                                        else
+                                        {
+                                            ImportParseState.Publish(ImportParseState.Phase.Failed, failure: inner?.Message);
+                                            SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.FailedToParseContactDev), ToastLength.Long);
+                                        }
+                                        Logger.Firebase("failed to parse: " + realName + " " + inner?.Message + "---" + inner?.StackTrace);
+                                    }
+                                });
+                            });
+                }
+            }
+            base.OnActivityResult(requestCode, resultCode, data);
+        }
+
+        public void LaunchImportIntent()
+        {
+            Intent intent = new Intent();
+            intent.SetType("*/*");
+            intent.SetAction(Intent.ActionOpenDocument);
+            //this will open default file browser and allow user to select anything.  This is preferable to Intent.ActionGetContent as ActionGetContent pulled up image gallery, contacts, etc.
+            //however, if the default file browser is disabled then this fails.  So as backup do ActionGetContent.
+            bool launched = false;
+            try
+            {
+                this.StartActivityForResult(intent, IMPORT_FILE_SELECTED);
+                launched = true;
+            }
+            catch (Android.Content.ActivityNotFoundException)
+            {
+                //fall through to ActionGetContent below
+            }
+
+            if (!launched)
+            {
+                Intent backUpIntent = new Intent();
+                backUpIntent.SetType("*/*");
+                backUpIntent.SetAction(Intent.ActionGetContent);
+                try
+                {
+                    this.StartActivityForResult(backUpIntent, IMPORT_FILE_SELECTED);
+                }
+                catch (Android.Content.ActivityNotFoundException)
+                {
+                    //toast nothing can handle
+                    SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.NoSuitableFileManager), ToastLength.Long);
+                }
+            }
+        }
+
+        private void NextButton_Click(object sender, EventArgs e)
+        {
+            switch (pager.CurrentItem)
+            {
+                case PAGE_START:
+                    pager.SetCurrentItem(pager.CurrentItem + 1, true);
+                    break;
+                case PAGE_USERLIST:
+                    //need to select which data
+                    selectedImportedData = new ImportedData(CurrentListFragment().GetSelectedItems(), selectedImportedData.Value.IgnoredBanned, selectedImportedData.Value.Wishlist, selectedImportedData.Value.UserNotes);
+                    pager.SetCurrentItem(pager.CurrentItem + 1, true);
+                    break;
+                case PAGE_IGNORE:
+                    //need to select which data
+                    selectedImportedData = new ImportedData(selectedImportedData.Value.UserList, CurrentListFragment().GetSelectedItems(), selectedImportedData.Value.Wishlist, selectedImportedData.Value.UserNotes);
+                    pager.SetCurrentItem(pager.CurrentItem + 1, true);
+                    break;
+                case PAGE_USERNOTES:
+                    //need to select which data
+                    var userNotesUsernames = CurrentListFragment().GetSelectedItems();
+                    List<Tuple<string, string>> userNotes = new List<Tuple<string, string>>();
+                    var lookupNotes = ImportParseState.Data.Value.UserNotes.ToDictionary(x => x.Item1, x => x.Item2);
+                    foreach (string name in userNotesUsernames)
+                    {
+                        userNotes.Add(new Tuple<string, string>(name, lookupNotes[name]));
+                    }
+                    selectedImportedData = new ImportedData(selectedImportedData.Value.UserList, selectedImportedData.Value.IgnoredBanned, selectedImportedData.Value.Wishlist, userNotes);
+                    pager.SetCurrentItem(pager.CurrentItem + 1, true);
+                    break;
+                case PAGE_WISHLIST:
+                    //finish
+                    selectedImportedData = new ImportedData(selectedImportedData.Value.UserList, selectedImportedData.Value.IgnoredBanned, CurrentListFragment().GetSelectedItems(), selectedImportedData.Value.UserNotes);
+                    ImportSelectedData(selectedImportedData.Value);
+                    SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.SuccessfullyImported), ToastLength.Long);
+                    MemoryCleanup();
+                    this.Finish();
+                    break;
+            }
+        }
+
+        private void MemoryCleanup()
+        {
+            selectedImportedData = null;
+            ImportParseState.Reset();
+        }
+
+        private void ImportSelectedData(ImportedData selectedData)
+        {
+            foreach (string uname in selectedData.IgnoredBanned)
+            {
+                lock (CommonState.IgnoreUserList)
+                {
+                    CommonState.IgnoreUserList.Add(new UserListItem(uname, UserRole.Ignored));
+                }
+            }
+            foreach (string uname in selectedData.UserList)
+            {
+                UserListService.AddUserMassImport(uname);
+            }
+            foreach (var unote in selectedData.UserNotes)
+            {
+                UserMetadataService.UserNotes[unote.Item1] = unote.Item2;
+            }
+            foreach (var wish in selectedData.Wishlist)
+            {
+                //this guys state will always be good (SeekerApplication - on create)
+                SearchTabHelper.AddWishlistSearchTabFromString(wish);
+            }
+            SearchTabHelper.SaveHeadersToSharedPrefs();
+            //SearchTabHelper.SaveAllSearchTabsToDisk(SeekerState.ActiveActivityRef); //there are no additional results...
+            CommonHelpers.SaveUserNotes();
+            if (SeekerState.SharedPreferences != null && CommonState.UserList != null)
+            {
+                PreferencesManager.SaveUserList(SerializationHelper.SaveUserListToString(CommonState.UserList));
+            }
+            if (SeekerState.SharedPreferences != null && CommonState.IgnoreUserList != null)
+            {
+                PreferencesManager.SaveIgnoreUserList(SerializationHelper.SaveUserListToString(CommonState.IgnoreUserList));
+            }
+        }
+
+        private void PrevButton_Click(object sender, EventArgs e)
+        {
+            switch (pager.CurrentItem)
+            {
+                case 0:
+                    this.Finish();
+                    break;
+                default:
+                    this.pager.SetCurrentItem(this.pager.CurrentItem - 1, true);
+                    break;
+            }
+        }
+
+        private void OnPagerScrolled(int position, float positionOffset)
+        {
+            pageDots.SetPosition(position + positionOffset);
+        }
+
+        private void OnPagerSelected(int position)
+        {
+            SetButtonText(position);
+            pageDots.SetPosition(position);
+            if (position != PAGE_START)
+            {
+                CurrentListFragment()?.SetState(this);
+            }
+        }
+
+        /// <summary>Bridges ViewPager2's page-change callback to the activity (ViewPager2 is final / not an events source).</summary>
+        private class WizardPageChangeCallback : AndroidX.ViewPager2.Widget.ViewPager2.OnPageChangeCallback
+        {
+            private readonly ImportWizardActivity activity;
+            public WizardPageChangeCallback(ImportWizardActivity activity)
+            {
+                this.activity = activity;
+            }
+
+            public override void OnPageScrolled(int position, float positionOffset, int positionOffsetPixels)
+            {
+                activity.OnPagerScrolled(position, positionOffset);
+            }
+
+            public override void OnPageSelected(int position)
+            {
+                activity.OnPagerSelected(position);
+            }
+        }
+
+        private void SetButtonText(int position)
+        {
+            bool loaded = ImportParseState.Current == ImportParseState.Phase.Loaded;
+            nextButton.Enabled = loaded;
+            nextButton.Clickable = loaded;
+            nextButton.Alpha = loaded ? 1.0f : 0.5f;
+            switch (position)
+            {
+                case PAGE_START:
+                    prevButton.Text = SeekerApplication.GetString(Resource.String.cancel);
+                    nextButton.Text = SeekerApplication.GetString(Resource.String.next);
+                    break;
+                case PAGE_WISHLIST:
+                    prevButton.Text = SeekerApplication.GetString(Resource.String.back_desc);
+                    nextButton.Text = SeekerApplication.GetString(Resource.String.finish);
+                    break;
+                default:
+                    prevButton.Text = SeekerApplication.GetString(Resource.String.back_desc);
+                    nextButton.Text = SeekerApplication.GetString(Resource.String.next);
+                    break;
+            }
+        }
+    }
+
+
+    public class StartPageFragment : AndroidX.Fragment.App.Fragment
+    {
+        private View rootView;
+        private Button importButton;
+        private AndroidX.Core.Widget.ContentLoadingProgressBar loadingBar;
+        public override View OnCreateView(LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState)
+        {
+            this.rootView = inflater.Inflate(Resource.Layout.import_start_page, container, false);
+            this.importButton = this.rootView.FindViewById<Button>(Resource.Id.importData);
+            importButton.Click += ImportButton_Click;
+            SetExportPathLine(Resource.Id.qtExportPath, Resource.String.ImportPathQT, ".scd1");
+            SetExportPathLine(Resource.Id.nicotineExportPath, Resource.String.ImportPathNicotine, ".tar.bz2", "config");
+            SetExportPathLine(Resource.Id.seekerExportPath, Resource.String.ImportPathSeeker, ".xml");
+            this.loadingBar = this.rootView.FindViewById<AndroidX.Core.Widget.ContentLoadingProgressBar>(Resource.Id.contentLoadingProgressBar1);
+            return rootView;
+        }
+
+        public override void OnResume()
+        {
+            base.OnResume();
+            ImportParseState.Changed += OnParseStateChanged;
+            RenderParsePhase();
+        }
+
+        public override void OnPause()
+        {
+            ImportParseState.Changed -= OnParseStateChanged;
+            base.OnPause();
+        }
+
+        private void OnParseStateChanged(object sender, EventArgs e)
+        {
+            RenderParsePhase();
+        }
+
+        /// <summary>Disables the import button + shows the spinner while a parse is in progress.</summary>
+        private void RenderParsePhase()
+        {
+            if (importButton == null)
+            {
+                return;
+            }
+            bool loading = ImportParseState.Current == ImportParseState.Phase.Loading;
+            importButton.Enabled = !loading;
+            importButton.Clickable = !loading;
+            importButton.Alpha = loading ? 0.5f : 1.0f;
+            if (loading)
+            {
+                loadingBar.Show();
+            }
+            else
+            {
+                loadingBar.Hide();
+            }
+        }
+
+        /// <summary>
+        /// Sets a "where to find the export" line, i.e. the translatable menu path followed by
+        /// the literal file names / extensions rendered as monospace accent-colored code chunks.
+        /// </summary>
+        private void SetExportPathLine(int textViewId, int pathStringId, params string[] codeChunks)
+        {
+            var textView = this.rootView.FindViewById<TextView>(textViewId);
+            var accentColor = UiHelpers.GetColorFromAttribute(textView.Context, Resource.Attribute.colorPrimary);
+            var builder = new Android.Text.SpannableStringBuilder(this.GetString(pathStringId));
+            bool firstSeparator = true;
+            foreach (string chunk in codeChunks)
+            {
+                if (firstSeparator)
+                {
+                    int separatorStart = builder.Length();
+                    builder.Append(" — ");
+                    var subduedColor = new Color(textView.CurrentTextColor);
+                    subduedColor.A = (byte)(subduedColor.A / 2);
+                    builder.SetSpan(new Android.Text.Style.ForegroundColorSpan(subduedColor), separatorStart, builder.Length(), Android.Text.SpanTypes.ExclusiveExclusive);
+                }
+                else
+                {
+                    builder.Append(" / ");
+                }
+                firstSeparator = false;
+                int start = builder.Length();
+                builder.Append(chunk);
+                builder.SetSpan(new Android.Text.Style.TypefaceSpan("monospace"), start, builder.Length(), Android.Text.SpanTypes.ExclusiveExclusive);
+                builder.SetSpan(new Android.Text.Style.ForegroundColorSpan(accentColor), start, builder.Length(), Android.Text.SpanTypes.ExclusiveExclusive);
+                builder.SetSpan(new Android.Text.Style.RelativeSizeSpan(0.95f), start, builder.Length(), Android.Text.SpanTypes.ExclusiveExclusive);
+            }
+            textView.TextFormatted = builder;
+        }
+
+        private void ImportButton_Click(object sender, EventArgs e)
+        {
+            (this.Activity as ImportWizardActivity).LaunchImportIntent();
+        }
+    }
+
+    public enum ImportListType
+    {
+        UserList = 0,
+        Ignore = 1,
+        Wishlist = 2,
+        UserNotes = 3
+    }
+
+    public class ImportItem
+    {
+        public ImportItem(string itemString, bool ischecked, bool asterisk)
+        {
+            item = itemString;
+            isChecked = ischecked;
+            showAsterisk = asterisk;
+        }
+        public bool showAsterisk;
+        public bool isChecked;
+        public string item;
+    }
+
+
+    public class ImportListAdapter : RecyclerView.Adapter
+    {
+        /// <summary>
+        /// Raised whenever the user toggles a row, so the fragment can refresh the select-all checkbox.
+        /// </summary>
+        public event Action SelectionChanged;
+
+        public void SetAll(bool isChecked)
+        {
+            for (int i = 0; i < localDataSet.Count; i++)
+            {
+                localDataSet[i].isChecked = isChecked;
+            }
+        }
+
+        public List<ImportItem> localDataSet;
+        public override int ItemCount => localDataSet.Count;
+        public override RecyclerView.ViewHolder OnCreateViewHolder(ViewGroup parent, int viewType) //so view Type is a real thing that the recycler adapter knows about.
+        {
+
+            ImportItemView view = ImportItemView.Create(parent);
+            var holder = new ImportItemViewHolder(view as View);
+            (view as View).Click += (object sender, EventArgs e) =>
+            {
+                int pos = holder.BindingAdapterPosition;
+                if (pos == RecyclerView.NoPosition)
+                {
+                    return;
+                }
+                localDataSet[pos].isChecked = !localDataSet[pos].isChecked;
+                view.ImportItemCheckbox.Checked = localDataSet[pos].isChecked;
+                SelectionChanged?.Invoke();
+            };
+            return holder;
+
+
+        }
+
+        public override void OnBindViewHolder(RecyclerView.ViewHolder holder, int position)
+        {
+            (holder as ImportItemViewHolder).pathItemView.setItem(localDataSet[position]);
+            (holder as ImportItemViewHolder).pathItemView.SetDividerVisible(position != ItemCount - 1);
+        }
+
+        public ImportListAdapter(List<ImportItem> ti)
+        {
+            localDataSet = ti;
+        }
+
+    }
+
+    public class ImportItemViewHolder : RecyclerView.ViewHolder
+    {
+        public ImportItemView pathItemView;
+
+
+        public ImportItemViewHolder(View view) : base(view)
+        {
+            //super(view);
+            // Define click listener for the ViewHolder's View
+
+            pathItemView = (ImportItemView)view;
+            pathItemView.ViewHolder = this;
+        }
+    }
+
+
+
+    public class ImportItemView : LinearLayout
+    {
+        //public TransfersFragment.TransferViewHolder ViewHolder { get; set; }
+        public CheckBox ImportItemCheckbox;
+        public TextView ImportItemText;
+        private View importItemDivider;
+        public ImportItem InnerImportItem { get; set; }
+        public ImportItemViewHolder ViewHolder;
+
+        public ImportItemView(Context context) : base(context)
+        {
+            Background = UiHelpers.GetDrawableFromAttribute(context, Resource.Attribute.selectableItemBackground);
+            Clickable = true;
+            Focusable = true;
+            LayoutInflater.From(context).Inflate(Resource.Layout.import_item_view, this, true);
+            setupChildren();
+        }
+
+        public static ImportItemView Create(ViewGroup parent)
+        {
+            var itemView = new ImportItemView(parent.Context);
+            itemView.LayoutParameters = new RecyclerView.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            return itemView;
+        }
+
+        public void setupChildren()
+        {
+            ImportItemCheckbox = FindViewById<CheckBox>(Resource.Id.importItemCheckbox);
+            ImportItemText = FindViewById<TextView>(Resource.Id.importItemText);
+            importItemDivider = FindViewById<View>(Resource.Id.importItemDivider);
+        }
+
+        public void setItem(ImportItem item)
+        {
+            InnerImportItem = item;
+            if (item.showAsterisk)
+            {
+                ImportItemText.Text = item.item + "*";
+            }
+            else
+            {
+                ImportItemText.Text = item.item;
+            }
+            ImportItemCheckbox.Checked = item.isChecked;
+        }
+
+        public void SetDividerVisible(bool visible)
+        {
+            importItemDivider.Visibility = visible ? ViewStates.Visible : ViewStates.Gone;
+        }
+    }
+
+
+
+    public class ImportListFragment : AndroidX.Fragment.App.Fragment
+    {
+        // Mirrors Material's MaterialCheckBox.STATE_* constants. Using local copies
+        // because the Xamarin binding surface for these constants varies by version;
+        // Java source guarantees these exact int values.
+        private const int STATE_UNCHECKED = 0;
+        private const int STATE_CHECKED = 1;
+        private const int STATE_INDETERMINATE = 2;
+
+        private View rootView;
+        private View noneFoundView;
+        private TextView noneFound;
+        private TextView alreadyAdded;
+        private TextView importHeader;
+        private Google.Android.Material.CheckBox.MaterialCheckBox selectAllCheckbox;
+        private AndroidX.RecyclerView.Widget.RecyclerView recyclerView;
+        private ImportListType importListType;
+
+        public List<string> GetSelectedItems()
+        {
+            return this.importListAdapter.localDataSet.Where((item) => item.isChecked).Select(item => item.item).ToList();
+        }
+
+        //private Recyc alreadyAdded;
+        /// <summary>
+        /// Default constructor necessary for android system
+        /// </summary>
+        public ImportListFragment()
+        {
+
+        }
+
+        public override void OnSaveInstanceState(Bundle outState)
+        {
+            base.OnSaveInstanceState(outState);
+            outState.PutInt("IMPORT_LIST_TYPE", (int)importListType);
+        }
+
+
+        public ImportListFragment(ImportListType _importListType)
+        {
+            importListType = _importListType;
+        }
+        public override View OnCreateView(LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState)
+        {
+            if (savedInstanceState != null)
+            {
+                importListType = (ImportListType)(savedInstanceState.GetInt("IMPORT_LIST_TYPE", (int)-1));
+            }
+            this.rootView = inflater.Inflate(Resource.Layout.import_list_layout, container, false);
+            noneFoundView = this.rootView.FindViewById<View>(Resource.Id.noneFoundView);
+            noneFound = this.rootView.FindViewById<TextView>(Resource.Id.noneFound);
+            alreadyAdded = this.rootView.FindViewById<TextView>(Resource.Id.alreadyPresentTextView);
+            alreadyAdded.MovementMethod = Android.Text.Method.ScrollingMovementMethod.Instance; //capped at 4 lines, scrollable beyond that
+            importHeader = this.rootView.FindViewById<TextView>(Resource.Id.selectTheFollowing);
+            recyclerView = this.rootView.FindViewById<AndroidX.RecyclerView.Widget.RecyclerView>(Resource.Id.recyclerViewImportList);
+            var lm = new LinearLayoutManager(this.Context, LinearLayoutManager.Vertical, false);
+            recyclerView.SetLayoutManager(lm);
+            recyclerView.ClipToOutline = true; //so row ripples do not draw over the card's rounded corners
+            selectAllCheckbox = this.rootView.FindViewById<Google.Android.Material.CheckBox.MaterialCheckBox>(Resource.Id.selectAllCheckbox);
+            selectAllCheckbox.Click += SelectAll_Click;
+
+            return rootView;
+        }
+
+        private void SelectAll_Click(object sender, EventArgs e)
+        {
+            //the click already toggled the checkbox (indeterminate counts as unchecked, so
+            //clicking an indeterminate checkbox moves it to checked i.e. "select all").
+            bool isChecked = selectAllCheckbox.CheckedState == STATE_CHECKED;
+            this.importListAdapter.SetAll(isChecked);
+            this.importListAdapter.NotifyDataSetChanged();
+        }
+
+        private void UpdateSelectAllState()
+        {
+            if (selectAllCheckbox == null || importListAdapter == null)
+            {
+                return;
+            }
+            int checkedCount = importListAdapter.localDataSet.Count((item) => item.isChecked);
+            if (checkedCount == 0)
+            {
+                selectAllCheckbox.CheckedState = STATE_UNCHECKED;
+            }
+            else if (checkedCount == importListAdapter.localDataSet.Count)
+            {
+                selectAllCheckbox.CheckedState = STATE_CHECKED;
+            }
+            else
+            {
+                selectAllCheckbox.CheckedState = STATE_INDETERMINATE;
+            }
+        }
+
+        public override void OnResume()
+        {
+            base.OnResume();
+            var wizard = this.Activity as ImportWizardActivity;
+            if (wizard == null)
+            {
+                return;
+            }
+            if (wizard.IsCurrentStep(this))
+            {
+                RenderCurrentStep(wizard);
+            }
+        }
+
+        public void SetState(ImportWizardActivity wizard)
+        {
+            if (wizard.IsCurrentStep(this))
+            {
+                RenderCurrentStep(wizard);
+            }
+        }
+
+        /// <summary>
+        /// Renders this page from the parsed data, or — if there is no parsed data (e.g. the process
+        /// was killed and <see cref="ImportParseState"/> reset to Idle) — bails back to the start page
+        /// instead of dereferencing a null result.
+        /// </summary>
+        private void RenderCurrentStep(ImportWizardActivity wizard)
+        {
+            if (ImportParseState.Current != ImportParseState.Phase.Loaded || !ImportParseState.Data.HasValue)
+            {
+                wizard.ResetToStartPage();
+                return;
+            }
+            SetState(ImportParseState.Data.Value, this.importListType);
+        }
+
+        private Java.Lang.ICharSequence CreateAlreadyAddedString(IEnumerable<string> usernames, ImportListType listType)
+        {
+            string alreadyPresentPrefix = listType switch {
+                ImportListType.Ignore => SeekerApplication.GetString(Resource.String.ImportIgnoredAlreadyPresent),
+                ImportListType.Wishlist => SeekerApplication.GetString(Resource.String.ImportWishlistAlreadyPresent),
+                _ => SeekerApplication.GetString(Resource.String.ImportFriendsAlreadyPresent)
+            };
+            var alreadyAddedNote = new Android.Text.SpannableStringBuilder(alreadyPresentPrefix + " ");
+
+            bool first = true;
+            foreach (string name in usernames)
+            {
+                if (!first)
+                {
+                    alreadyAddedNote.Append(", ");
+                }
+                first = false;
+                int start = alreadyAddedNote.Length();
+                alreadyAddedNote.Append(name);
+                alreadyAddedNote.SetSpan(new Android.Text.Style.StyleSpan(TypefaceStyle.Bold), start, alreadyAddedNote.Length(), Android.Text.SpanTypes.ExclusiveExclusive);
+            }
+            return alreadyAddedNote;
+        }
+
+        private void SetAlreadyAddedText(Java.Lang.ICharSequence text)
+        {
+            alreadyAdded.TextFormatted = text;
+            alreadyAdded.ScrollTo(0, 0); //the note is scrollable; reset in case a previous longer note was scrolled
+        }
+
+        /// <summary>
+        /// Toggles between the list view and the centered empty state.
+        /// Empty is "Nothing (new) to import"
+        /// </summary>
+        private void SetListVisibility(bool hasItemsToImport, bool sourceHadItems)
+        {
+            if (hasItemsToImport)
+            {
+                this.recyclerView.Visibility = ViewStates.Visible;
+                this.selectAllCheckbox.Visibility = ViewStates.Visible;
+                this.noneFoundView.Visibility = ViewStates.Gone;
+            }
+            else
+            {
+                this.recyclerView.Visibility = ViewStates.Gone;
+                this.selectAllCheckbox.Visibility = ViewStates.Gone;
+                this.noneFoundView.Visibility = ViewStates.Visible;
+                this.noneFound.SetText(sourceHadItems ? Resource.String.NothingNewToImport : Resource.String.NothingToImport);
+            }
+        }
+
+        private ImportListAdapter importListAdapter;
+        public void SetState(ImportedData data, ImportListType listType)
+        {
+            if (importHeader == null)
+            {
+                return;//too early.
+            }
+            switch (listType)
+            {
+                case ImportListType.UserList:
+                    importHeader.Text = this.GetString(Resource.String.ImportFriends);
+                    //todo already present
+                    var currentlyHave = CommonState.UserList.Select(item => item.Username).ToList();
+                    var notYetAdded = data.UserList.Except(currentlyHave).ToList();
+                    var alreadyAddedList = data.UserList.Except(notYetAdded).ToList();
+                    if (alreadyAddedList.Count == 0)
+                    {
+                        alreadyAdded.Visibility = ViewStates.Gone;
+                    }
+                    else
+                    {
+                        alreadyAdded.Visibility = ViewStates.Visible;
+                        SetAlreadyAddedText(CreateAlreadyAddedString(alreadyAddedList, listType));
+                    }
+
+                    if (ImportWizardActivity.selectedImportedData.Value.UserList != null)
+                    {
+                        var selectedItemsDict = ImportWizardActivity.selectedImportedData.Value.UserList.ToDictionary(x => x, x => 0);
+                        importListAdapter = new ImportListAdapter(notYetAdded.Select(item => new ImportItem(item, selectedItemsDict.ContainsKey(item) ? true : false, false)).ToList());
+                    }
+                    else
+                    {
+                        importListAdapter = new ImportListAdapter(notYetAdded.Select(item => new ImportItem(item, true, false)).ToList());
+                    }
+
+                    importListAdapter.SelectionChanged += UpdateSelectAllState;
+                    this.recyclerView.SetAdapter(importListAdapter);
+                    UpdateSelectAllState();
+
+                    SetListVisibility(notYetAdded.Count > 0, data.UserList != null && data.UserList.Count > 0);
+                    break;
+                case ImportListType.Ignore:
+                    importHeader.Text = this.GetString(Resource.String.ImportIgnored);
+                    //todo already present
+                    var currentlyHaveIgnored = CommonState.IgnoreUserList.Select(item => item.Username).ToList();
+                    var notYetIgnored = data.IgnoredBanned.Except(currentlyHaveIgnored).ToList();
+                    var alreadyIgnoredList = data.IgnoredBanned.Except(notYetIgnored).ToList();
+                    if (alreadyIgnoredList.Count == 0)
+                    {
+                        alreadyAdded.Visibility = ViewStates.Gone;
+                    }
+                    else
+                    {
+                        alreadyAdded.Visibility = ViewStates.Visible;
+                        SetAlreadyAddedText(CreateAlreadyAddedString(alreadyIgnoredList, listType));
+                    }
+                    if (ImportWizardActivity.selectedImportedData.Value.IgnoredBanned != null)
+                    {
+                        var selectedItemsIgDict = ImportWizardActivity.selectedImportedData.Value.IgnoredBanned.ToDictionary(x => x, x => 0);
+                        importListAdapter = new ImportListAdapter(notYetIgnored.Select(item => new ImportItem(item, selectedItemsIgDict.ContainsKey(item) ? true : false, false)).ToList());
+                    }
+                    else
+                    {
+                        importListAdapter = new ImportListAdapter(notYetIgnored.Select(item => new ImportItem(item, true, false)).ToList());
+                    }
+                    importListAdapter.SelectionChanged += UpdateSelectAllState;
+                    this.recyclerView.SetAdapter(importListAdapter);
+                    UpdateSelectAllState();
+                    SetListVisibility(notYetIgnored.Count > 0, data.IgnoredBanned != null && data.IgnoredBanned.Count > 0);
+                    break;
+                case ImportListType.UserNotes:
+                    importHeader.Text = this.GetString(Resource.String.ImportUserNotes);
+                    var currentlyHaveNoted = UserMetadataService.UserNotes.Select(item => item.Key).ToList();
+                    var notYetNoted = data.UserNotes.Select(item => item.Item1).Except(currentlyHaveNoted).ToList();
+                    var alreadyNotedList = data.UserNotes.Select(item => item.Item1).Except(notYetNoted).ToList();
+                    if (alreadyNotedList.Count == 0)
+                    {
+                        alreadyAdded.Visibility = ViewStates.Gone;
+                    }
+                    else
+                    {
+                        alreadyAdded.Visibility = ViewStates.Visible;
+                        alreadyAdded.Text = this.GetString(Resource.String.ImportUserNotesOverwriteNote);
+                    }
+                    var notYetNotedItems = notYetNoted.Select(item => new ImportItem(item, true, false)).ToList();
+                    notYetNotedItems.AddRange(alreadyNotedList.Select(item => new ImportItem(item, true, true)));
+                    if (ImportWizardActivity.selectedImportedData.Value.UserNotes != null)
+                    {
+                        var selectedItemsNotesDict = ImportWizardActivity.selectedImportedData.Value.UserNotes.ToDictionary(x => x.Item1, x => 0);
+                        foreach (var item in notYetNotedItems)
+                        {
+                            if (!selectedItemsNotesDict.ContainsKey(item.item))
+                            {
+                                item.isChecked = false;
+                            }
+                        }
+                    }
+                    importListAdapter = new ImportListAdapter(notYetNotedItems.ToList());
+                    importListAdapter.SelectionChanged += UpdateSelectAllState;
+                    this.recyclerView.SetAdapter(importListAdapter);
+                    UpdateSelectAllState();
+                    SetListVisibility(notYetNotedItems.Count > 0, data.UserNotes != null && data.UserNotes.Count > 0);
+                    break;
+                case ImportListType.Wishlist:
+                    importHeader.Text = this.GetString(Resource.String.ImportWishlist);
+                    var currentlyHaveWishes = SearchTabHelper.SearchTabCollection.Where(item => item.Key < 0).Select(item => item.Value.LastSearchTerm).ToList();
+                    var notYetWished = data.Wishlist.Except(currentlyHaveWishes).ToList();
+                    var alreadyWishedList = data.Wishlist.Except(notYetWished).ToList();
+                    if (alreadyWishedList.Count == 0)
+                    {
+                        alreadyAdded.Visibility = ViewStates.Gone;
+                    }
+                    else
+                    {
+                        alreadyAdded.Visibility = ViewStates.Visible;
+                        SetAlreadyAddedText(CreateAlreadyAddedString(alreadyWishedList, listType));
+                    }
+                    if (ImportWizardActivity.selectedImportedData.Value.Wishlist != null)
+                    {
+                        var selectedItemsWishesDict = ImportWizardActivity.selectedImportedData.Value.Wishlist.ToDictionary(x => x, x => 0);
+                        importListAdapter = new ImportListAdapter(notYetWished.Select(item => new ImportItem(item, selectedItemsWishesDict.ContainsKey(item) ? true : false, false)).ToList());
+                    }
+                    else
+                    {
+                        importListAdapter = new ImportListAdapter(notYetWished.Select(item => new ImportItem(item, true, false)).ToList());
+                    }
+                    importListAdapter.SelectionChanged += UpdateSelectAllState;
+                    this.recyclerView.SetAdapter(importListAdapter);
+                    UpdateSelectAllState();
+
+                    SetListVisibility(notYetWished.Count > 0, data.Wishlist != null && data.Wishlist.Count > 0);
+                    break;
+            }
+        }
+
+    }
+
+
+    public class WizardPagerAdapter : AndroidX.ViewPager2.Adapter.FragmentStateAdapter
+    {
+        public WizardPagerAdapter(AndroidX.Fragment.App.FragmentActivity fa) : base(fa)
+        {
+        }
+
+        public override int ItemCount => 5;
+
+        //FragmentStateAdapter manages the fragment instances itself (creating, restoring and
+        //destroying them); this just produces a fresh fragment for a given page.
+        public override AndroidX.Fragment.App.Fragment CreateFragment(int position)
+        {
+            switch (position)
+            {
+                case 0:
+                    return new StartPageFragment();
+                case 1:
+                    return new ImportListFragment(ImportListType.UserList);
+                case 2:
+                    return new ImportListFragment(ImportListType.Ignore);
+                case 3:
+                    return new ImportListFragment(ImportListType.UserNotes);
+                case 4:
+                    return new ImportListFragment(ImportListType.Wishlist);
+                default:
+                    throw new System.Exception("Invalid Tab");
+            }
+        }
+    }
+
+
+
+    /// <summary>
+    /// Centered "worm" style page indicator. Inactive pages are small dots and the
+    /// current page expands into a rounded pill. The position is fractional (driven
+    /// by ViewPager.PageScrolled) so the expansion animates with the page transition.
+    /// </summary>
+    public class PageDotsIndicator : View
+    {
+        private int mPageCount;
+        private float mPosition;
+
+        private readonly float mDotDiameter;
+        private readonly float mPillWidth;
+        private readonly float mDotSpacing;
+
+        private readonly Paint mPaint;
+        private readonly Android.Graphics.Color mActiveColor;
+        private readonly Android.Graphics.Color mInactiveColor;
+
+        private readonly RectF mTempRectF = new RectF();
+
+        public PageDotsIndicator(Context context) : this(context, null)
+        {
+        }
+
+        public PageDotsIndicator(Context context, IAttributeSet attrs) : base(context, attrs)
+        {
+            float density = this.Resources.DisplayMetrics.Density;
+            mDotDiameter = 8f * density;
+            mPillWidth = 36f * density;
+            mDotSpacing = 8f * density;
+            var color = UiHelpers.GetColorFromAttribute(context, Resource.Attribute.colorPrimary);
+            mActiveColor = color;
+            mInactiveColor = Android.Graphics.Color.Argb(0x42, mActiveColor.R, mActiveColor.G, mActiveColor.B);
+
+            mPaint = new Paint(PaintFlags.AntiAlias);
+        }
+
+        protected override void OnDraw(Canvas canvas)
+        {
+            base.OnDraw(canvas);
+
+            if (mPageCount == 0)
+            {
+                return;
+            }
+
+            float position = Math.Clamp(mPosition, 0f, mPageCount - 1);
+            float pillExtra = mPillWidth - mDotDiameter;
+            // the expansion influences below always sum to 1, so total width is constant
+            float totalWidth = mPageCount * mDotDiameter + (mPageCount - 1) * mDotSpacing + pillExtra;
+            float left = (this.Width - totalWidth) / 2f;
+            float top = this.PaddingTop + (this.Height - this.PaddingTop - this.PaddingBottom - mDotDiameter) / 2f;
+
+            mTempRectF.Top = top;
+            mTempRectF.Bottom = top + mDotDiameter;
+            float cornerRadius = mDotDiameter / 2f;
+
+            for (int i = 0; i < mPageCount; i++)
+            {
+                float influence = Math.Max(0f, 1f - Math.Abs(i - position));
+                float width = mDotDiameter + pillExtra * influence;
+                // visited pages stay fully colored; the upcoming page fades in as it becomes current
+                float colorFraction = Math.Clamp(position - i + 1f, 0f, 1f);
+                mPaint.Color = BlendColor(mInactiveColor, mActiveColor, colorFraction);
+
+                mTempRectF.Left = left;
+                mTempRectF.Right = left + width;
+                canvas.DrawRoundRect(mTempRectF, cornerRadius, cornerRadius, mPaint);
+                left += width + mDotSpacing;
+            }
+        }
+
+        private static Android.Graphics.Color BlendColor(Android.Graphics.Color from, Android.Graphics.Color to, float t)
+        {
+            return Android.Graphics.Color.Argb(
+                (int)(from.A + (to.A - from.A) * t),
+                (int)(from.R + (to.R - from.R) * t),
+                (int)(from.G + (to.G - from.G) * t),
+                (int)(from.B + (to.B - from.B) * t));
+        }
+
+        protected override void OnMeasure(int widthMeasureSpec, int heightMeasureSpec)
+        {
+            int contentWidth = (int)Math.Ceiling(
+                mPageCount * mDotDiameter + Math.Max(0, mPageCount - 1) * mDotSpacing + (mPillWidth - mDotDiameter));
+            SetMeasuredDimension(
+                View.ResolveSize(contentWidth + this.PaddingLeft + this.PaddingRight, widthMeasureSpec),
+                View.ResolveSize((int)Math.Ceiling(mDotDiameter) + this.PaddingTop + this.PaddingBottom, heightMeasureSpec));
+        }
+
+        public void SetPosition(float position)
+        {
+            mPosition = position;
+            this.Invalidate();
+        }
+
+        public void SetPageCount(int count)
+        {
+            mPageCount = count;
+            this.RequestLayout();
+            this.Invalidate();
+        }
+    }
+}

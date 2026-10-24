@@ -1,0 +1,671 @@
+using Common;
+using Soulseek;
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Diagnostics;
+using System.Drawing;
+using System.Linq;
+using System.Text.RegularExpressions;
+
+namespace Seeker
+{
+    public enum RecentTimeUnit
+    {
+        JustNow,
+        Minutes,
+        Hours,
+        Days,
+        AbsoluteDate,
+    }
+
+    public static class SimpleHelpers
+    {
+        public static readonly string LOCK_EMOJI = char.ConvertFromUtf32(0x1F512);
+
+        /// <summary>
+        /// Fragment of the message Soulseek.NET puts on the SoulseekClientException it throws when
+        /// neither a direct nor an indirect connection to a peer could be established.
+        /// </summary>
+        public const string FailedToEstablishDirectOrIndirectString = "failed to establish a direct or indirect";
+
+        // one-line unwrap i.e. "Type: message <- InnerType: message" for logs
+        public static string DescribeException(Exception e)
+        {
+            if (e == null)
+            {
+                return "null";
+            }
+            if (e is AggregateException agg && agg.InnerException != null)
+            {
+                e = agg.InnerException;
+            }
+            var sb = new System.Text.StringBuilder();
+            for (Exception cur = e; cur != null; cur = cur.InnerException)
+            {
+                if (sb.Length > 0)
+                {
+                    sb.Append(" <- ");
+                }
+                sb.Append(cur.GetType().Name).Append(": ").Append(cur.Message);
+            }
+            return sb.ToString();
+        }
+
+        public static string AvoidLineBreaks(string orig)
+        {
+            return orig.Replace(' ', '\u00A0').Replace("\\", "\\\u2060");
+        }
+
+        /// <summary>
+        /// This is necessary since DocumentFile.ListFiles() returns files in an incomprehensible order (not by name, size, modified, inode, etc.)
+        /// </summary>
+        public static void SortSlskDirFiles(List<Soulseek.File> files)
+        {
+            files.Sort((x, y) => x.Filename.CompareTo(y.Filename));
+        }
+
+        public static string GenerateIncompleteFolderName(string username, string fullFileName, int depth)
+        {
+            string albumFolderName = string.Empty;
+            if (depth == 1)
+            {
+                albumFolderName = SimpleHelpers.GetFolderNameFromFile(fullFileName, depth).ToString();
+            }
+            else
+            {
+                albumFolderName = SimpleHelpers.GetFolderNameFromFile(fullFileName, depth).ToString();
+                albumFolderName = albumFolderName.Replace('\\', '_');
+            }
+            string incompleteFolderName = username + "_" + albumFolderName;
+            //Path.GetInvalidPathChars() doesnt seem like enough bc I still get failures on ''' and '&'
+            foreach (char c in System.IO.Path.GetInvalidPathChars().Union(new[] { '&', '\'' }))
+            {
+                incompleteFolderName = incompleteFolderName.Replace(c, '_');
+            }
+            return incompleteFolderName;
+        }
+
+        private static string GetLockedFileName(SearchResponse item)
+        {
+            try
+            {
+                Soulseek.File f = item.LockedFiles.First();
+                return f.Filename;
+            }
+            catch
+            {
+                return "";
+            }
+        }
+        private static string GetUnlockedFileName(SearchResponse item)
+        {
+            try
+            {
+                Soulseek.File f = item.Files.First();
+                return f.Filename;
+            }
+            catch
+            {
+                return "";
+            }
+        }
+
+        /// <summary>
+        /// This will prepend the lock when applicable..
+        /// </summary>
+        /// <returns></returns>
+        public static string GetFolderNameForSearchResult(SearchResponse item)
+        {
+            if (item.FileCount > 0)
+            {
+                return SimpleHelpers.GetFolderNameFromFile(GetUnlockedFileName(item)).ToString();
+            }
+            else if (item.LockedFileCount > 0)
+            {
+                return LOCK_EMOJI + SimpleHelpers.GetFolderNameFromFile(GetLockedFileName(item)).ToString();
+            }
+            else
+            {
+                return "\\Locked\\";
+            }
+        }
+
+        public static bool IsFileUri(string uriString)
+        {
+            if (uriString.StartsWith("file:"))
+            {
+                return true;
+            }
+            else if (uriString.StartsWith("content:"))
+            {
+                return false;
+            }
+            else
+            {
+                throw new Exception("IsFileUri failed: " + uriString);
+            }
+        }
+
+        [Flags]
+        public enum SpecialMessageType : short
+        {
+            None = 0,
+            SlashMe = 1,
+            MagnetLink = 2,
+            SlskLink = 4,
+        }
+
+        /// <summary>
+        /// true if '/me ' message
+        /// </summary>
+        /// <returns>true if special message</returns>
+        public static bool IsSpecialMessage(string msg, out SpecialMessageType specialMessageType)
+        {
+            specialMessageType = SpecialMessageType.None;
+            if (string.IsNullOrEmpty(msg))
+            {
+                return false;
+            }
+            if (msg.StartsWith(@"/me "))
+            {
+                specialMessageType = SpecialMessageType.SlashMe;
+                return true;
+            }
+            if (msg.Contains(@"magnet:?xt=urn:"))
+            {
+                specialMessageType = SpecialMessageType.MagnetLink;
+                return true;
+            }
+            if (msg.Contains(@"slsk://"))
+            {
+                specialMessageType = SpecialMessageType.SlskLink;
+                return true;
+            }
+            return false;
+        }
+
+        public static readonly Regex MagnetLinkRegex = new Regex(@"magnet:\?xt=urn:[^ ""]+", RegexOptions.None, TimeSpan.FromMilliseconds(2000));
+        public static readonly Regex SlskLinkRegex = new Regex(@"slsk://[^ ""]+", RegexOptions.None, TimeSpan.FromMilliseconds(2000));
+
+        public static string ParseSpecialMessage(string msg)
+        {
+            if (IsSpecialMessage(msg, out SpecialMessageType specialMessageType))
+            {
+                //if slash me dont include other special links, too excessive.
+                if (specialMessageType == SpecialMessageType.SlashMe)
+                {
+                    //"/me goes to the store"
+                    //"goes to the store" + style
+                    return msg.Substring(4, msg.Length - 4);
+                }
+                else
+                {
+                    return msg;
+                }
+            }
+            else
+            {
+                return msg;
+
+            }
+        }
+
+        public static DateTime GetDateTimeNowSafe()
+        {
+            try
+            {
+                return DateTime.Now;
+            }
+            catch (System.TimeZoneNotFoundException)
+            {
+                return DateTime.UtcNow;
+            }
+        }
+
+        public static DateTime ToLocalTimeSafe(DateTime dateTime)
+        {
+            try
+            {
+                return dateTime.ToLocalTime();
+            }
+            catch (System.TimeZoneNotFoundException)
+            {
+                return dateTime;
+            }
+        }
+
+        public static (RecentTimeUnit Unit, int Count) GetRecentTimeBucket(TimeSpan timeSpan)
+        {
+            if (timeSpan.TotalSeconds < 60)
+            {
+                return (RecentTimeUnit.JustNow, 0);
+            }
+            if (timeSpan.TotalMinutes < 60)
+            {
+                return (RecentTimeUnit.Minutes, timeSpan.Minutes);
+            }
+            if (timeSpan.TotalHours < 24)
+            {
+                return (RecentTimeUnit.Hours, timeSpan.Hours);
+            }
+            if (timeSpan.TotalDays < 30)
+            {
+                return (RecentTimeUnit.Days, timeSpan.Days);
+            }
+            return (RecentTimeUnit.AbsoluteDate, 0);
+        }
+
+        public const string NoDocumentOpenTreeToHandle = "No Activity found to handle Intent";
+
+        public static bool IsUploadCompleteOrAborted(TransferStates state)
+        {
+            return (state.HasFlag(TransferStates.Succeeded) || state.HasFlag(TransferStates.Cancelled) || state.HasFlag(TransferStates.Errored) || state.HasFlag(TransferStates.TimedOut) || state.HasFlag(TransferStates.Completed) || state.HasFlag(TransferStates.Rejected));
+        }
+
+        public static string SlskLinkClickedData = null;
+        public static bool ShowSlskLinkContextMenu = false;
+
+        public static string GetTransferSpeedString(double bytesPerSecond)
+        {
+            if (bytesPerSecond > 1048576) //more than 1MB
+            {
+                return string.Format("{0:F1} MB/s", bytesPerSecond / 1048576.0);
+            }
+            else
+            {
+                return string.Format("{0:F1} KB/s", bytesPerSecond / 1024.0);
+            }
+        }
+
+        // "1d 4h" / "1h 2m" / "2m 3s" / "9s" - i.e. 2 units only
+        public static string FormatTimeRemaining(TimeSpan remaining)
+        {
+            long totalSeconds = (long)Math.Max(0, remaining.TotalSeconds);
+            long days = totalSeconds / 86400;
+            long hours = (totalSeconds % 86400) / 3600;
+            long minutes = (totalSeconds % 3600) / 60;
+            long seconds = totalSeconds % 60;
+            if (days > 0)
+            {
+                return $"{days}d {hours}h";
+            }
+            if (hours > 0)
+            {
+                return $"{hours}h {minutes}m";
+            }
+            if (minutes > 0)
+            {
+                return $"{minutes}m {seconds}s";
+            }
+            return $"{seconds}s";
+        }
+
+        public static string GetDateTimeSinceAbbrev(DateTime dtThen)
+        {
+            var dtNow = GetDateTimeNowSafe(); //2.5 microseconds
+            if (dtNow.Day == dtThen.Day)
+            {
+                //if on same day then show time. 24 hour time? maybe option to change?
+                //ex. 2:45, 20:34
+                //hh:mm
+                return dtThen.ToString("H:mm");
+            }
+            else if (dtNow.Year == dtThen.Year)
+            {
+                //if different day but same year show month day
+                //ex. Jan 4
+                return dtThen.ToString("MMM d"); // d = 7 or 17.
+            }
+            else
+            {
+                //if different year show full.
+                //ex. Dec 30 2021
+                return dtThen.ToString("MMM d yyyy");
+            }
+        }
+
+        public static string GetSubHeaderText(SearchResponse searchResponse)
+        {
+            int numFiles = 0;
+            long totalBytes = -1;
+            if (PreferencesState.HideLockedResultsInSearch)
+            {
+                numFiles = searchResponse.FileCount;
+                totalBytes = searchResponse.Files.Sum(f => f.Size);
+            }
+            else
+            {
+                numFiles = searchResponse.FileCount + searchResponse.LockedFileCount;
+                totalBytes = searchResponse.Files.Sum(f => f.Size) + searchResponse.LockedFiles.Sum(f => f.Size);
+            }
+
+            string sizeString = GetHumanReadableSize(totalBytes);
+
+            var filesWithLength = searchResponse.Files.Where(f => f.Length.HasValue);
+            if (!PreferencesState.HideLockedResultsInSearch)
+            {
+                filesWithLength = filesWithLength.Concat(searchResponse.LockedFiles.Where(f => f.Length.HasValue));
+            }
+            string timeString = string.Empty;
+            if (filesWithLength.Count() > 0)
+            {
+                timeString = GetHumanReadableTime(filesWithLength.Sum(f => f.Length.Value), true);
+            }
+            if (string.IsNullOrEmpty(timeString))
+            {
+                return string.Format("{0} files • {1}", numFiles, sizeString);
+            }
+            else
+            {
+                return string.Format("{0} files • {1} • {2}", numFiles, sizeString, timeString);
+            }
+
+
+        }
+
+        public static string GetSizeLengthAttrString(Soulseek.File f)
+        {
+
+            string sizeString = GetHumanReadableSize(f.Size);
+            string lengthString = f.Length.HasValue ? GetHumanReadableTime(f.Length.Value, true) : string.Empty;
+            string attrString = GetHumanReadableAttributesForSingleItem(f);
+            if (string.IsNullOrEmpty(attrString) && string.IsNullOrEmpty(lengthString))
+            {
+                return sizeString;
+            }
+            else if (string.IsNullOrEmpty(attrString))
+            {
+                return String.Format("{0} • {1}", sizeString, lengthString);
+            }
+            else if (string.IsNullOrEmpty(lengthString))
+            {
+                return String.Format("{0} • {1}", sizeString, attrString);
+            }
+            else
+            {
+                return String.Format("{0} • {1} • {2}", sizeString, lengthString, attrString);
+            }
+        }
+
+
+        public static string GetHumanReadableAttributesForSingleItem(Soulseek.File f)
+        {
+            int bitRate = -1;
+            int bitDepth = -1;
+            double sampleRate = double.NaN;
+            foreach (var attr in f.Attributes)
+            {
+                switch (attr.Type)
+                {
+                    case FileAttributeType.BitRate:
+                        bitRate = attr.Value;
+                        break;
+                    case FileAttributeType.BitDepth:
+                        bitDepth = attr.Value;
+                        break;
+                    case FileAttributeType.SampleRate:
+                        sampleRate = attr.Value / 1000.0;
+                        break;
+                }
+            }
+            if (bitRate == -1 && bitDepth == -1 && double.IsNaN(sampleRate))
+            {
+                return string.Empty; //nothing to add
+            }
+            else if (bitDepth != -1 && !double.IsNaN(sampleRate))
+            {
+                return bitDepth + ", " + sampleRate + SimpleHelpers.STRINGS_KHZ;
+            }
+            else if (!double.IsNaN(sampleRate))
+            {
+                return sampleRate + SimpleHelpers.STRINGS_KHZ;
+            }
+            else if (bitRate != -1)
+            {
+                return bitRate + SimpleHelpers.STRINGS_KBS;
+            }
+            else
+            {
+                return string.Empty;
+            }
+        }
+
+        public const double TOTAL_BYTES_KB = 1024;
+        public const double TOTAL_BYTES_MB = 1048576;
+        public const double TOTAL_BYTES_GB = 1073741824;
+        public const double TOTAL_BYTES_TB = 1099511627776;
+
+        private static (double Scale, string Unit) GetSizeUnit(long bytes)
+        {
+            if (bytes > TOTAL_BYTES_TB)
+            {
+                return (TOTAL_BYTES_TB, "TB");
+            }
+            else if (bytes > TOTAL_BYTES_GB)
+            {
+                return (TOTAL_BYTES_GB, "GB");
+            }
+            else if (bytes > TOTAL_BYTES_MB)
+            {
+                return (TOTAL_BYTES_MB, "MB");
+            }
+            else if (bytes > TOTAL_BYTES_KB)
+            {
+                return (TOTAL_BYTES_KB, "KB");
+            }
+            else
+            {
+                return (1, "B");
+            }
+        }
+
+        // for 3 total sigfigs
+        private static int GetSizeDecimals(double scaled, string unit)
+        {
+            if (unit == "B")
+            {
+                return 0;
+            }
+            else if (scaled < 10)
+            {
+                return 2;
+            }
+            else if (scaled < 100)
+            {
+                return 1;
+            }
+            else
+            {
+                return 0;
+            }
+        }
+
+        public static string GetHumanReadableSize(long totalBytes)
+        {
+            var (scale, unit) = GetSizeUnit(totalBytes);
+            double scaled = totalBytes / scale;
+            int decimals = GetSizeDecimals(scaled, unit);
+            // trim trailing zeros
+            string format = decimals == 0 ? "0" : "0." + new string('#', decimals);
+            return scaled.ToString(format) + " " + unit;
+        }
+
+        public static string GetHumanReadableProgressSize(long currentBytes, long totalBytes)
+        {
+            var (scale, unit) = GetSizeUnit(totalBytes);
+            double total = totalBytes / scale;
+            string format = "F" + GetSizeDecimals(total, unit);
+            return (currentBytes / scale).ToString(format) + " / " + total.ToString(format) + " " + unit;
+        }
+
+        public static string GetHumanReadableTime(int totalSeconds, bool withSpace = false)
+        {
+            int sec = totalSeconds % 60;
+            int minutes = (totalSeconds % 3600) / 60;
+            int hours = (totalSeconds / 3600);
+            string space = withSpace ? " " : string.Empty;
+            if (minutes == 0 && hours == 0 && sec == 0)
+            {
+                return string.Empty;
+            }
+            else if (minutes == 0 && hours == 0)
+            {
+                return string.Format("{1}s", space, sec);
+            }
+            else if (hours == 0)
+            {
+                return string.Format("{1}m{0}{2}s", space, minutes, sec);
+            }
+            else
+            {
+                return string.Format("{1}h{0}{2}m{0}{3}s", space, hours, minutes, sec);
+            }
+        }
+
+
+        /// <summary>
+        /// Get all BUT the filename
+        /// </summary>
+        public static string GetDirectoryRequestFolderName(string filename)
+        {
+            try
+            {
+                int end = filename.LastIndexOf('\\');
+                string clipped = filename.Substring(0, end);
+                return clipped;
+            }
+            catch
+            {
+                return "";
+            }
+        }
+
+        /// <summary>
+        /// The last path segment - i.e. the file name
+        /// </summary>
+        public static ReadOnlySpan<char> GetFileNameFromFile(ReadOnlySpan<char> path)
+        {
+            return path.Slice(path.LastIndexOf('\\') + 1);
+        }
+
+        /// <summary>
+        /// Replaces d.Name.Contains(prevDirName) which fails for Mu, Music
+        /// </summary>
+        /// <param name="possibleChild"></param>
+        /// <param name="possibleParent"></param>
+        /// <returns></returns>
+        public static bool IsChildDirString(string possibleChild, string possibleParent, bool rootCase)
+        {
+            if (rootCase)
+            {
+                if (possibleChild.LastIndexOf('\\') == -1 && possibleParent.LastIndexOf('\\') == -1)
+                {
+                    if (possibleParent.IndexOf(':') == (possibleParent.Length - 1)) //i.e. primary:
+                    {
+                        return possibleChild.Contains(possibleParent);
+                    }
+                    else if (possibleChild.Equals(possibleParent))
+                    {
+                        return true; //else the primary:music case fails.
+                    }
+                }
+            }
+            int pathSep = possibleChild.LastIndexOf('\\');
+            if (pathSep == -1)
+            {
+                return false;
+            }
+            else
+            {
+                //fails in possibleChild="Music (1)\\test" possibleParent="Music" case
+                //return possibleChild.Substring(0, pathSep).Contains(possibleParent);
+
+                return possibleChild.Substring(0, pathSep + 1).StartsWith(possibleParent + "\\", StringComparison.Ordinal) || possibleChild.Substring(0, pathSep) == possibleParent || possibleParent == String.Empty;
+            }
+        }
+
+        public static string GetAllButLast(string path) 
+        {
+            int end = path.LastIndexOf('\\');
+            string clipped = path.Substring(0, end);
+            return clipped;
+        }
+
+        /// <summary>
+        /// The folders containing the file, <paramref name="levels"/> deep. For levels = 2,
+        /// Folder1\Folder2\Folder3\File.mp3 returns Folder2\Folder3. A path with fewer folders
+        /// than requested returns all of them
+        /// </summary>
+        public static ReadOnlySpan<char> GetFolderNameFromFile(ReadOnlySpan<char> path, int levels = 1)
+        {
+            int end = path.LastIndexOf('\\'); // strip the file name
+            if (end == -1 || levels <= 0)
+            {
+                return ReadOnlySpan<char>.Empty;
+            }
+            int start = end;
+            for (int i = 0; i < levels; i++)
+            {
+                int previous = path.Slice(0, start).LastIndexOf('\\');
+                if (previous == -1)
+                {
+                    return path.Slice(0, end);
+                }
+                start = previous;
+            }
+            return path.Slice(start + 1, end - start - 1);
+        }
+
+        public static ReadOnlySpan<char> GetParentFolderNameFromFile(ReadOnlySpan<char> path)
+        {
+            int end = path.LastIndexOf('\\');
+            if (end == -1)
+            {
+                return ReadOnlySpan<char>.Empty;
+            }
+            return GetFolderNameFromFile(path.Slice(0, end));
+        }
+
+        public static IUserListService UserListService;
+        //this is a cache for localized strings accessed in tight loops...
+        private static string strings_kbs;
+        public static string STRINGS_KBS
+        {
+            get
+            {
+                return strings_kbs;
+            }
+            set
+            {
+                strings_kbs = value;
+            }
+        }
+
+        private static string strings_kHz;
+        public static string STRINGS_KHZ
+        {
+            get
+            {
+                return strings_kHz;
+            }
+            set
+            {
+                strings_kHz = value;
+            }
+        }
+
+        public static UserData UserStatisticsToUserData(UserStatistics stats)
+        {
+            return new UserData(stats.Username, UserPresence.Online, stats.AverageSpeed, stats.UploadCount, stats.FileCount, stats.DirectoryCount, null);
+        }
+
+        static SimpleHelpers()
+        {
+            KNOWN_TYPES = new List<string>() { ".mp3", ".flac", ".wav", ".aiff", ".wma", ".aac" }.AsReadOnly();
+        }
+
+        public static ReadOnlyCollection<string> KNOWN_TYPES;
+
+    }
+}

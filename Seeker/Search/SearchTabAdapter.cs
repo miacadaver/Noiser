@@ -1,0 +1,249 @@
+﻿using Android.App;
+using Android.Content;
+using Android.OS;
+using Android.Runtime;
+using Android.Views;
+using Android.Widget;
+using AndroidX.RecyclerView.Widget;
+using Common.Search;
+using Seeker.Helpers;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+
+namespace Seeker
+{
+    public class SearchTabItemRecyclerAdapter : RecyclerView.Adapter
+    {
+        private List<int> localDataSet; //tab id's
+        public override int ItemCount => localDataSet.Count;
+        public bool ForWishlist = false;
+        public override RecyclerView.ViewHolder OnCreateViewHolder(ViewGroup parent, int viewType) //so view Type is a real thing that the recycler adapter knows about.
+        {
+
+            SearchTabView view = SearchTabView.Create(parent);
+            // .inflate(R.layout.text_row_item, viewGroup, false);
+            (view as SearchTabView).searchTabLayout.Click += SearchTabLayout_Click;
+            (view as SearchTabView).removeSearch.Click += RemoveSearch_Click;
+            return new SearchTabViewHolder(view as View);
+
+
+        }
+
+        public override void OnBindViewHolder(RecyclerView.ViewHolder holder, int position)
+        {
+            (holder as SearchTabViewHolder).searchTabView.setItem(localDataSet[position]);
+        }
+
+        private void RemoveSearch_Click(object sender, EventArgs e)
+        {
+            int tabToRemove = (sender as View).FindAncestor<SearchTabView>().SearchTabId;
+            int position = localDataSet.IndexOf(tabToRemove);
+            if (position < 0) //stale click — item already removed
+            {
+                return;
+            }
+            if (!SearchTabHelper.SearchTabCollection.ContainsKey(tabToRemove))
+            {
+                return;
+            }
+            bool isWishlist = (SearchTabHelper.SearchTabCollection[tabToRemove].SearchTarget == SearchTarget.Wishlist);
+            SearchTabHelper.SearchTabCollection[tabToRemove].CancellationTokenSource?.Cancel();
+            if (isWishlist)
+            {
+                if (tabToRemove == SearchTabHelper.CurrentTab)
+                {
+                    //remove it for real
+                    SearchTabHelper.SearchTabCollection.Remove(tabToRemove, out _);
+                    localDataSet.RemoveAt(position);
+                    SearchTabDialog.Instance.recycleWishesAdapter.NotifyItemRemoved(position);
+
+
+                    //go to search tab instead (there is always one)
+                    string listOfKeys2 = System.String.Join(",", SearchTabHelper.SearchTabCollection.Keys);
+                    Logger.InfoFirebase("list of Keys: " + listOfKeys2);
+                    int tabToGoTo = SearchTabHelper.SearchTabCollection.Keys.Where(key => key >= 0).First();
+                    SearchFragment.Instance.GoToTab(tabToGoTo, true);
+                }
+                else
+                {
+                    //remove it for real
+                    SearchTabHelper.SearchTabCollection.Remove(tabToRemove, out _);
+                    localDataSet.RemoveAt(position);
+                    SearchTabDialog.Instance.recycleWishesAdapter.NotifyItemRemoved(position);
+                }
+            }
+            else
+            {
+                if (tabToRemove == SearchTabHelper.CurrentTab)
+                {
+                    SearchTabHelper.SearchTabCollection[tabToRemove] = new SearchTab(); //clear it..
+                    SearchFragment.Instance.GoToTab(tabToRemove, true);
+                    SearchTabDialog.Instance.recycleSearchesAdapter.NotifyItemChanged(position);
+                }
+                else
+                {
+
+                    if (SearchTabHelper.SearchTabCollection.Keys.Where(key => key >= 0).Count() == 1)
+                    {
+                        //it is the only non wishlist tab, so just clear it...  this can happen if we are on a wishlist tab and we clear all the normal tabs.
+                        SearchTabHelper.SearchTabCollection[tabToRemove] = new SearchTab();
+                        SearchTabDialog.Instance.recycleSearchesAdapter.NotifyItemChanged(position);
+                    }
+                    else
+                    {
+                        //remove it for real
+                        SearchTabHelper.SearchTabCollection.Remove(tabToRemove, out _);
+                        localDataSet.RemoveAt(position);
+                        SearchTabDialog.Instance.recycleSearchesAdapter.NotifyItemRemoved(position);
+                    }
+                }
+            }
+            if (isWishlist)
+            {
+                SearchTabHelper.SaveHeadersToSharedPrefs();
+                SearchTabHelper.RemoveTabFromSharedPrefs(tabToRemove, SeekerState.ActiveActivityRef);
+            }
+            SearchFragment.Instance.SetCustomViewTabNumberImageViewState();
+        }
+
+        private void SearchTabLayout_Click(object sender, EventArgs e)
+        {
+            int tabToGoTo = (sender as View).FindAncestor<SearchTabView>().SearchTabId;
+            if (!SearchTabHelper.SearchTabCollection.ContainsKey(tabToGoTo))
+            {
+                return;
+            }
+            SearchFragment.Instance.GoToTab(tabToGoTo, false);
+            SearchTabDialog.Instance.Dismiss();
+        }
+
+        public SearchTabItemRecyclerAdapter(List<int> ti)
+        {
+            localDataSet = ti;
+        }
+
+    }
+
+    public class SearchTabViewHolder : RecyclerView.ViewHolder
+    {
+        public SearchTabView searchTabView;
+
+
+        public SearchTabViewHolder(View view) : base(view)
+        {
+            //super(view);
+            // Define click listener for the ViewHolder's View
+
+            searchTabView = (SearchTabView)view;
+            searchTabView.ViewHolder = this;
+            //(ChatroomOverviewView as View).SetOnCreateContextMenuListener(this);
+        }
+
+        public SearchTabView getUnderlyingView()
+        {
+            return searchTabView;
+        }
+    }
+
+    public class SearchTabView : LinearLayout
+    {
+        public LinearLayout searchTabLayout;
+        public ImageView removeSearch;
+        private TextView lastSearchTerm;
+        private TextView numResults;
+        private TextView unseenBadge;
+        private View pillIndicator;
+        private View rowBackground;
+        public SearchTabViewHolder ViewHolder;
+        public int SearchTabId = int.MaxValue;
+        public SearchTabView(Context context) : base(context)
+        {
+            LayoutInflater.From(context).Inflate(Resource.Layout.tab_page_item, this, true);
+            setupChildren();
+        }
+        public static SearchTabView Create(ViewGroup parent)
+        {
+            var itemView = new SearchTabView(parent.Context);
+            itemView.LayoutParameters = new RecyclerView.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            return itemView;
+        }
+        public void setupChildren()
+        {
+            lastSearchTerm = FindViewById<TextView>(Resource.Id.lastSearchTerm);
+            numResults = FindViewById<TextView>(Resource.Id.resultsText);
+            unseenBadge = FindViewById<TextView>(Resource.Id.unseenBadge);
+            removeSearch = FindViewById<ImageView>(Resource.Id.searchTabItemRemove);
+            searchTabLayout = FindViewById<LinearLayout>(Resource.Id.searchTabItemMain);
+            pillIndicator = FindViewById<View>(Resource.Id.tabPillIndicator);
+            rowBackground = FindViewById<View>(Resource.Id.searchTabRowBg);
+        }
+
+        public void setItem(int searchTabId)
+        {
+            SearchTabId = searchTabId;
+            SearchTab searchTab = SearchTabHelper.SearchTabCollection[searchTabId];
+            if (searchTab.SearchTarget == SearchTarget.Wishlist)
+            {
+                string timeString = string.Empty;
+                if (WishlistUtil.IsFull(searchTab))
+                {
+                    timeString = " · " + this.Context.GetString(Resource.String.wishlist_max_results_reached);
+                }
+                else if (searchTab.LastRanTime != DateTime.MinValue)
+                {
+                    timeString = " · " + CommonHelpers.GetRecentTimeNiceFormated(searchTab.LastRanTime, DateTime.UtcNow.Subtract(searchTab.LastRanTime));
+                }
+                else
+                {
+                    timeString = this.Context.GetString(Resource.String.wishlist_never_run);
+                }
+                var resultsString = string.Format(this.Context.GetString(Resource.String.wishlist_results_count), searchTab.LastSearchResultsCount);
+                numResults.Text = resultsString + timeString;
+                if (searchTab.UnseenCount > 0)
+                {
+                    int n = searchTab.UnseenCount;
+                    unseenBadge.Text = n > 99 ? "99+" : n.ToString();
+                    unseenBadge.Visibility = ViewStates.Visible;
+                }
+                else
+                {
+                    unseenBadge.Visibility = ViewStates.Gone;
+                }
+            }
+            else
+            {
+                numResults.Text = string.Format(this.Context.GetString(Resource.String.wishlist_results_count), searchTab.LastSearchResultsCount);
+                unseenBadge.Visibility = ViewStates.Gone;
+            }
+            string lastTerm = searchTab.LastSearchTerm;
+            if (lastTerm != string.Empty && lastTerm != null)
+            {
+                lastSearchTerm.Text = searchTab.LastSearchTerm;
+                lastSearchTerm.SetTypeface(lastSearchTerm.Typeface, Android.Graphics.TypefaceStyle.Normal);
+            }
+            else
+            {
+                lastSearchTerm.SetText(Resource.String.new_search_tab, TextView.BufferType.Normal);
+                lastSearchTerm.SetTypeface(lastSearchTerm.Typeface, Android.Graphics.TypefaceStyle.Italic);
+            }
+
+            bool isActive = (searchTabId == SearchTabHelper.CurrentTab);
+            pillIndicator.SetBackgroundResource(isActive
+                ? Resource.Drawable.search_tab_pill_active
+                : Resource.Drawable.search_tab_pill_inactive);
+            if (isActive)
+            {
+                rowBackground.SetBackgroundResource(Resource.Drawable.search_tab_row_bg);
+                rowBackground.Background.Mutate();
+                rowBackground.Background.Alpha = 40;
+            }
+            else
+            {
+                rowBackground.Background = null;
+            }
+        }
+    }
+
+}

@@ -1,0 +1,90 @@
+﻿using Seeker.Search;
+using Soulseek;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+
+using Common;
+namespace Seeker
+{
+    public class SearchTab
+    {
+        public List<SearchResponse> SearchResponses = new List<SearchResponse>();
+        public HashSet<SearchResponse> UnseenResults = new HashSet<SearchResponse>(new SearchResponseComparer(PreferencesState.HideLockedResultsInSearch));
+        public int UnseenCount = 0;
+        public Task DiskLoadTask = null;
+        public bool DiskLoadInProgress => DiskLoadTask != null && !DiskLoadTask.IsCompleted;
+        public readonly object DiskLoadLock = new object();
+        public SortedSet<SearchResponse> SortHelper = new SortedSet<SearchResponse>(new SearchResultComparable(PreferencesState.DefaultSearchResultSortAlgorithm));
+        public SearchResultSorting SortHelperSorting = PreferencesState.DefaultSearchResultSortAlgorithm;
+        public object SortHelperLockObject = new object();
+        public TextFilter TextFilter = new TextFilter(supportsSpecialFlags: true);
+        public bool FilterSticky = false;
+        public List<SearchResponse> UI_SearchResponses = new List<SearchResponse>();
+        public SearchTarget SearchTarget = SearchTarget.AllUsers;
+        public bool CurrentlySearching = false;
+        public string SearchTargetChosenRoom = string.Empty;
+        public string SearchTargetChosenUser = string.Empty;
+        public int LastSearchResponseCount = -1; //this tell us how many we have filtered.  since we only filter when its the Current UI Tab.
+        public CancellationTokenSource CancellationTokenSource = null;
+        public DateTime LastRanTime = DateTime.MinValue;
+
+        public string LastSearchTerm = string.Empty;
+        public int LastSearchResultsCount = 0;
+        public string LastSearchError = string.Empty;
+
+        public List<ChipDataItem> ChipDataItems;
+        public ChipFilter ChipsFilter;
+
+        public bool IsLoaded()
+        {
+            return this.SearchResponses != null;
+        }
+
+        public void UpdateChips(PreferencesState.SmartFilterState smartFilterState, bool hideLocked)
+        {
+            this.ChipDataItems = ChipsHelper.CalculateChipItems(this.SearchResponses, this.LastSearchTerm, smartFilterState, hideLocked);
+        }
+
+
+        public SearchTab Clone(bool forWishlist)
+        {
+            SearchTab clone = new SearchTab();
+            clone.SearchResponses = this.SearchResponses.ToList();
+            SortedSet<SearchResponse> cloned = new SortedSet<SearchResponse>(new SearchResultComparableWishlist(clone.SortHelperSorting));
+            //without lock, extremely easy to reproduce "collection was modified" exception if creating wishlist tab while searching.
+            lock (this.SortHelperLockObject) //lock the sort helper we are copying from
+            {
+                foreach (var entry in SortHelper)
+                {
+                    cloned.Add(entry);
+                }
+            }
+            clone.SortHelper = cloned;
+            clone.FilterSticky = this.FilterSticky;
+            if (this.TextFilter.IsFiltered)
+            {
+                clone.TextFilter.Set(this.TextFilter.FilterString);
+            }
+            clone.UI_SearchResponses = this.UI_SearchResponses.ToList();
+            clone.CurrentlySearching = this.CurrentlySearching;
+            clone.SearchTarget = this.SearchTarget;
+            clone.SearchTargetChosenRoom = this.SearchTargetChosenRoom;
+            clone.SearchTargetChosenUser = this.SearchTargetChosenUser;
+            clone.LastSearchResponseCount = this.LastSearchResponseCount;
+            clone.LastSearchTerm = this.LastSearchTerm;
+            clone.LastSearchResultsCount = this.LastSearchResultsCount;
+            clone.LastRanTime = this.LastRanTime;
+            clone.ChipDataItems = this.ChipDataItems;
+            clone.ChipsFilter = this.ChipsFilter;
+            foreach (var r in this.UnseenResults)
+            {
+                clone.UnseenResults.Add(r);
+            }
+            clone.UnseenCount = this.UnseenCount;
+            return clone;
+        }
+    }
+}

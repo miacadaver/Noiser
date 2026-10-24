@@ -1,0 +1,1265 @@
+﻿/*
+ * Copyright 2021 Seeker
+ *
+ * This file is part of Seeker
+ *
+ * Seeker is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Seeker is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Seeker. If not, see <http://www.gnu.org/licenses/>.
+ */
+using Android;
+using Android.App;
+using Android.Content;
+using Android.Content.PM;
+using Android.OS;
+using Android.Provider;
+using Android.Runtime;
+using Android.Views;
+using Android.Widget;
+using AndroidX.Activity;
+using AndroidX.Core.App;
+using AndroidX.Core.Content;
+using AndroidX.DocumentFile.Provider;
+using AndroidX.Lifecycle;
+using Common;
+using Google.Android.Material.BottomNavigation;
+using Seeker.Helpers;
+using Seeker.Search;
+using Seeker.Services;
+using Soulseek;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net;
+using System.Threading.Tasks;
+using ActivityFlags = Android.Content.ActivityFlags;
+
+//using System.IO;
+//readme:
+//dotnet add package Soulseek --version 1.0.0-rc3.1
+//xamarin
+//Had to rewrite this one from .csproj
+//<Import Project="C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\MSBuild
+//\Xamarin\Android\Xamarin.Android.CSharp.targets" />
+namespace Seeker
+{
+    [Activity(Label = "@string/app_name", Theme = "@style/AppTheme.NoActionBar", LaunchMode = Android.Content.PM.LaunchMode.SingleTop, MainLauncher = true, Exported = true, WindowSoftInputMode = Android.Views.SoftInput.AdjustPan)]
+    public partial class MainActivity :
+        ThemeableActivity, 
+        ActivityCompat.IOnRequestPermissionsResultCallback, 
+        BottomNavigationView.IOnNavigationItemSelectedListener
+    {
+
+
+
+        public static EventHandler<bool> KeyBoardVisibilityChanged;
+
+
+        public void KeyboardChanged(object sender, bool isShown)
+        {
+            if (isShown)
+            {
+                SeekerState.MainActivityRef.FindViewById<BottomNavigationView>(Resource.Id.navigation).Animate().Alpha(0f).SetDuration(250).SetListener(new BottomNavigationViewAnimationListener());
+                //it will be left at 0% opacity! even when unhiding it!
+
+                //SeekerState.MainActivityRef.FindViewById<BottomNavigationView>(Resource.Id.navigation).Visibility = ViewStates.Gone;
+            }
+            else
+            {
+                //SeekerState.MainActivityRef.FindViewById<BottomNavigationView>(Resource.Id.navigation).Animate().Alpha(100).SetDuration(250).SetListener(new BottomNavigationViewAnimationListener());
+                SeekerState.MainActivityRef.FindViewById<BottomNavigationView>(Resource.Id.navigation).Visibility = ViewStates.Visible;
+                SeekerState.MainActivityRef.FindViewById<BottomNavigationView>(Resource.Id.navigation).Animate().Alpha(1f).SetDuration(300).SetListener(null);
+                //SeekerState.MainActivityRef.FindViewById<BottomNavigationView>(Resource.Id.navigation).Visibility = ViewStates.Visible;
+            }
+        }
+
+
+
+
+        /// <summary>
+        /// Presentable Filename, Uri.ToString(), length
+        /// </summary>
+        /// <param name="dir"></param>
+        /// <param name="directoryCount"></param>
+        /// <returns></returns>
+        private void traverseToGetDirectories(DocumentFile dir, List<Android.Net.Uri> dirUris)
+        {
+            if (dir.IsDirectory)
+            {
+                DocumentFile[] files = dir.ListFiles(); //doesnt need to be sorted
+                for (int i = 0; i < files.Length; ++i)
+                {
+                    DocumentFile file = files[i];
+                    if (file.IsDirectory)
+                    {
+                        dirUris.Add(file.Uri);
+                        traverseToGetDirectories(file, dirUris);
+                    }
+                }
+            }
+        }
+
+        private void SoulseekClient_SearchResponseDeliveryFailed(object sender, SearchRequestResponseEventArgs e)
+        {
+            //throw new NotImplementedException();
+        }
+
+        private void SoulseekClient_SearchResponseDelivered(object sender, SearchRequestResponseEventArgs e)
+        {
+
+        }
+
+        public const string SETTINGS_INTENT = "com.example.seeker.SETTINGS";
+
+        private const int WRITE_EXTERNAL_LEGACY = 0x427;
+        private const int NEW_WRITE_EXTERNAL = 0x428;
+        private const int MUST_SELECT_A_DIRECTORY_WRITE_EXTERNAL = 0x429;
+        private const int NEW_WRITE_EXTERNAL_VIA_LEGACY = 0x42A;
+        private const int MUST_SELECT_A_DIRECTORY_WRITE_EXTERNAL_VIA_LEGACY = 0x42B;
+        private const int NEW_WRITE_EXTERNAL_VIA_LEGACY_Settings_Screen = 0x42C;
+        private const int MUST_SELECT_A_DIRECTORY_WRITE_EXTERNAL_VIA_LEGACY_Settings_Screen = 0x42D;
+        private const int POST_NOTIFICATION_PERMISSION = 0x42E;
+        public const int SETTINGS_EXTERNAL = 0x430;
+
+        private AndroidX.ViewPager2.Widget.ViewPager2 pager = null;
+
+
+
+        private GenericOnBackPressedCallback backPressedCallback;
+
+        /// <summary>
+        /// Enables our custom back pressed callback when we are in a state to consume it
+        ///   i.e. inside of browse folder or transfer folder
+        /// </summary>
+        public void RefreshBackCallbackState()
+        {
+            if (backPressedCallback == null)
+            {
+                return;
+            }
+            var pager = FindViewById<AndroidX.ViewPager2.Widget.ViewPager2>(Resource.Id.pager);
+            bool consumable = false;
+            if (pager != null)
+            {
+                if (pager.CurrentItem == 3)
+                {
+                    consumable = BrowseFragment.BrowseActionMode != null
+                                 || (BrowseFragment.Instance?.HasBackStackToConsume() ?? false);
+                }
+                else if (pager.CurrentItem == 2)
+                {
+                    consumable = TransfersViewState.Instance.GetCurrentlySelectedFolder() != null;
+                }
+            }
+            backPressedCallback.Enabled = consumable;
+        }
+
+        protected override void OnCreate(Bundle savedInstanceState)
+        {
+            bool reborn = savedInstanceState != null;
+            Logger.Debug($"Main Activity On Create reborn? {reborn}");
+
+            base.OnCreate(savedInstanceState);
+            //System.Threading.Thread.CurrentThread.Name = "Main Activity Thread";
+            SetContentView(Resource.Layout.activity_main);
+
+            // in horizontal mode this prevents content under the 3-button navigation bar
+            AndroidX.Core.View.ViewCompat.SetOnApplyWindowInsetsListener(
+                FindViewById(Resource.Id.main_root), new HorizontalInsetsListener());
+
+            BottomNavigationView navigation = FindViewById<BottomNavigationView>(Resource.Id.navigation);
+            navigation.SetOnNavigationItemSelectedListener(this);
+
+
+            AndroidX.AppCompat.Widget.Toolbar myToolbar = (AndroidX.AppCompat.Widget.Toolbar)FindViewById(Resource.Id.toolbar);
+            myToolbar.Title = this.GetString(Resource.String.home_tab);
+            SetSupportActionBar(myToolbar);
+
+            backPressedCallback = new GenericOnBackPressedCallback(false, onBackPressedAction);
+            OnBackPressedDispatcher.AddCallback(backPressedCallback);
+
+            System.Console.WriteLine("Testing.....");
+
+            //set the activity refs BEFORE the adapter, because ViewPager2 with OffscreenPageLimit=3
+            //eagerly creates all four tab fragments, whose OnCreateView read SeekerState.MainActivityRef.
+            SeekerState.MainActivityRef = this;
+            SeekerState.ActiveActivityRef = this;
+
+            this.SupportActionBar.SetCustomView(Resource.Layout.custom_menu_layout);
+            SearchFragment.ConfigureSupportCustomView(this.SupportActionBar.CustomView);
+
+            pager = (AndroidX.ViewPager2.Widget.ViewPager2)FindViewById(Resource.Id.pager);
+            TabsPagerAdapter adapter = new TabsPagerAdapter(this);
+
+            pager.Adapter = adapter;
+            //keep all four tab fragments resident (FragmentPagerAdapter never destroyed them); the app
+            //relies on long-lived fragments via SearchFragment.Instance / BrowseFragment.Instance etc.
+            pager.OffscreenPageLimit = 3;
+            pager.RegisterOnPageChangeCallback(new OnPageChangeLister1());
+            //this is a relatively safe way that prevents rotates from redoing the intent.
+            bool alreadyHandled = Intent.GetBooleanExtra("ALREADY_HANDLED", false);
+            Intent = Intent.PutExtra("ALREADY_HANDLED", true);
+
+            if (Intent != null)
+            {
+                if (Intent.GetIntExtra(DownloadForegroundService.FromTransferString, -1) == 2)
+                {
+                    pager.SetCurrentItem(2, false);
+                }
+                else if (Intent.GetBooleanExtra(FolderAlertExtra, false))
+                {
+                    pager.SetCurrentItem(2, false);
+                }
+                else if (Intent.GetBooleanExtra(GoToAccountExtra, false) && !alreadyHandled) //else every rotation returns to the account tab
+                {
+                    pager.SetCurrentItem(0, false);
+                }
+                else if (Intent.GetBooleanExtra(GoToBrowseExtra, false))
+                {
+                    pager.SetCurrentItem(3, false);
+                }
+                else if (Intent.GetBooleanExtra(GoToSearchExtra, false))
+                {
+                    pager.SetCurrentItem(1, false);
+                }
+                else if (Intent.GetIntExtra(IntentSearchRoomExtra, -1) == 1)
+                {
+                    pager.SetCurrentItem(1, false);
+                }
+                else if (Intent.GetIntExtra(WishlistController.FromWishlistString, -1) == 1 && !reborn) //if its not reborn then the OnNewIntent will handle it...
+                {
+                    HandleWishlistIntent();
+                }
+                else if ((Intent.GetBooleanExtra(GoToUploadsForegroundExtra, false) || Intent.GetBooleanExtra(GoToUploadsExtra, false)) && !alreadyHandled) //else every rotation will change Downloads to Uploads.
+                {
+                    HandleFromNotificationUploadIntent();
+                }
+                else if (Intent.GetBooleanExtra(GoToBrowseSelfExtra, false))
+                {
+                    Logger.InfoFirebase("from browse self");
+                    pager.SetCurrentItem(3, false);
+                }
+                else if (SearchSendIntentHelper.IsFromActionSend(Intent) && !reborn) //this will always create a new instance, so if its reborn then its an old intent that we already followed.
+                {
+                    Logger.Debug("MainActivity action send intent");
+                    //give us a new fresh tab if the current one has a search in it...
+                    if (!string.IsNullOrEmpty(SearchTabHelper.LastSearchTerm))
+                    {
+                        Logger.Debug("lets go to a new fresh tab");
+                        int newTabToGoTo = SearchTabHelper.AddSearchTab();
+
+                        Logger.Debug("search fragment null? " + (SearchFragment.Instance == null).ToString());
+
+                        if (SearchFragment.Instance?.IsResumed ?? false)
+                        {
+                            //if resumed is true
+                            SearchFragment.Instance.GoToTab(newTabToGoTo, false, true);
+                        }
+                        else
+                        {
+                            Logger.Debug("we are on the search page but we need to wait for OnResume search frag");
+                            goToSearchTab = newTabToGoTo; //we read this we resume
+                        }
+                    }
+
+                    //go to search tab
+                    Logger.Debug("prev search term: " + SearchDialog.SearchTerm);
+                    SearchDialog.SearchTerm = Intent.GetStringExtra(Intent.ExtraText);
+                    SearchDialog.IsFollowingLink = false;
+                    pager.SetCurrentItem(1, false);
+                    if (SearchSendIntentHelper.TryParseIntent(Intent, out string searchTermFound))
+                    {
+                        //we are done parsing the intent
+                        SearchDialog.SearchTerm = searchTermFound;
+                    }
+                    else if (SearchSendIntentHelper.FollowLinkTaskIfApplicable(Intent))
+                    {
+                        SearchDialog.IsFollowingLink = true;
+                    }
+                    //close previous instance
+                    if (SearchDialog.Instance != null)
+                    {
+                        Logger.Debug("previous instance exists");
+                        //SearchDialog.Instance.Dismiss(); //throws exception, cannot perform this action after onSaveInstanceState
+                    }
+                    var searchDialog = new SearchDialog(SearchDialog.SearchTerm, SearchDialog.IsFollowingLink);
+                    searchDialog.Show(SupportFragmentManager, "Search Dialog");
+                }
+            }
+
+            //Sync the chrome to the landed tab once the pager is laid out. Needed (a) because a deep
+            //link above may have moved off home via SetCurrentItem before layout, which ViewPager2
+            //doesn't dispatch OnPageSelected for, and (b) so the initial page's menu visibility is
+            //gated from the start (otherwise every resident fragment's menu shows until the first swipe).
+            pager.Post(() => SyncToPage(pager.CurrentItem));
+
+
+            // Document files are initialized once per process in SeekerApplication.OnCreate.
+            // Here we only handle the things that require an Activity context.
+            if (PlatformInfo.UseLegacyStorage())
+            {
+                if (ContextCompat.CheckSelfPermission(this, Manifest.Permission.WriteExternalStorage) == Android.Content.PM.Permission.Denied)
+                {
+                    ActivityCompat.RequestPermissions(this, new string[] { Manifest.Permission.WriteExternalStorage }, WRITE_EXTERNAL_LEGACY);
+                }
+            }
+            else if (StorageState.RootDocumentFile == null)
+            {
+                // StorageState.LoadFromPreferences could not write the download directory —
+                // permission was revoked. Ask the user to re-select one.
+                Android.Net.Uri res = string.IsNullOrEmpty(PreferencesState.SaveDataDirectoryUri)
+                    ? Android.Net.Uri.Parse(StorageState.DefaultMusicUri)
+                    : Android.Net.Uri.Parse(PreferencesState.SaveDataDirectoryUri);
+                var dialogBuilder = new Google.Android.Material.Dialog.MaterialAlertDialogBuilder(this);
+                dialogBuilder.SetTitle(this.GetString(Resource.String.seeker_needs_dl_dir));
+                dialogBuilder.SetMessage(this.GetString(Resource.String.seeker_needs_dl_dir_content));
+                EventHandler<DialogClickEventArgs> eventHandler = new EventHandler<DialogClickEventArgs>((object sender, DialogClickEventArgs okayArgs) =>
+                {
+                    var storageManager = Android.OS.Storage.StorageManager.FromContext(this);
+                    var intent = storageManager.PrimaryStorageVolume.CreateOpenDocumentTreeIntent();
+                    intent.PutExtra(DocumentsContract.ExtraInitialUri, res);
+                    intent.AddFlags(ActivityFlags.GrantPersistableUriPermission | ActivityFlags.GrantReadUriPermission | ActivityFlags.GrantWriteUriPermission | ActivityFlags.GrantPrefixUriPermission);
+                    try
+                    {
+                        this.StartActivityForResult(intent, NEW_WRITE_EXTERNAL);
+                    }
+                    catch (Exception ex)
+                    {
+                        if (ex.Message.Contains(SimpleHelpers.NoDocumentOpenTreeToHandle))
+                        {
+                            FallbackFileSelectionEntry(false);
+                        }
+                        else
+                        {
+                            throw;
+                        }
+                    }
+                });
+                dialogBuilder.SetPositiveButton(Resource.String.okay, eventHandler);
+                dialogBuilder.SetCancelable(false);
+                dialogBuilder.Show();
+            }
+        }
+
+
+        private void HandleWishlistIntent()
+        {
+            Logger.InfoFirebase("is resumed: " + (SearchFragment.Instance?.IsResumed ?? false).ToString());
+            Logger.InfoFirebase("from wishlist clicked");
+            int currentPage = pager.CurrentItem;
+            int tabID = Intent.GetIntExtra(WishlistController.FromWishlistStringID, int.MaxValue);
+            if (currentPage == 1) //this is the case even if process previously got am state killed.
+            {
+                Logger.InfoFirebase("from wishlist clicked - current page");
+                if (tabID == int.MaxValue)
+                {
+                    Logger.Firebase("tabID == int.MaxValue");
+                }
+                else if (!SearchTabHelper.SearchTabCollection.ContainsKey(tabID))
+                {
+                    Logger.Firebase("doesnt contain key");
+                    SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.wishlist_tab_error), ToastLength.Long);
+                }
+                else
+                {
+                    if (SearchFragment.Instance?.Activity == null || !(SearchFragment.Instance?.IsResumed ?? false))
+                    {
+                        Logger.Debug("we are on the search page but we need to wait for OnResume search frag");
+                        goToSearchTab = tabID; //we read this we resume
+                    }
+                    else
+                    {
+                        SearchFragment.Instance.GoToTab(tabID, false, true);
+                    }
+                }
+            }
+            else
+            {
+                Logger.InfoFirebase("from wishlist clicked - different page");
+                //when we move to the page, lets move to our tab, if its not the current one..
+                goToSearchTab = tabID; //we read this when we move tab...
+                pager.SetCurrentItem(1, false);
+            }
+        }
+
+        public void FallbackFileSelection(int requestCode)
+        {
+            //Create FolderOpenDialog
+            SimpleFileDialog fileDialog = new SimpleFileDialog(SeekerState.ActiveActivityRef, SimpleFileDialog.FileSelectionMode.FolderChoose);
+            fileDialog.GetFileOrDirectoryAsync(Android.OS.Environment.ExternalStorageDirectory.AbsolutePath).ContinueWith(
+                (Task<string> t) =>
+                {
+                    if (t.Result == null || t.Result == string.Empty)
+                    {
+                        this.OnActivityResult(requestCode, Result.Canceled, new Intent());
+                        return;
+                    }
+                    else
+                    {
+                        var intent = new Intent();
+                        DocumentFile f = DocumentFile.FromFile(new Java.IO.File(t.Result));
+                        intent.SetData(f.Uri);
+                        this.OnActivityResult(requestCode, Result.Ok, intent);
+                    }
+                });
+        }
+
+        public static Action<Task> GetPostNotifPermissionTask()
+        {
+            return new Action<Task>((task) =>
+            {
+                if (task.IsCompletedSuccessfully)
+                {
+                    RequestPostNotificationPermissionsIfApplicable();
+                }
+            });
+
+        }
+
+        private static bool postNotficationAlreadyRequestedInSession = false;
+        /// <summary>
+        /// As far as where to place this, doing it on launch is no good (as they will already
+        ///   see yet another though more important permission in the background behind them).
+        /// Doing this on login (i.e. first session login) seems decent.
+        /// </summary>
+        private static void RequestPostNotificationPermissionsIfApplicable()
+        {
+            if (postNotficationAlreadyRequestedInSession)
+            {
+                return;
+            }
+            postNotficationAlreadyRequestedInSession = true;
+
+            if (!OperatingSystem.IsAndroidVersionAtLeast(33))
+            {
+                return;
+            }
+
+            try
+            {
+                if (ContextCompat.CheckSelfPermission(SeekerState.ActiveActivityRef, Manifest.Permission.PostNotifications) == Android.Content.PM.Permission.Denied)
+                {
+                    bool alreadyShown = SeekerState.SharedPreferences.GetBoolean(KeyConsts.M_PostNotificationRequestAlreadyShown, false);
+                    if (alreadyShown)
+                    {
+                        return;
+                    }
+
+                    if (SeekerApplication.OnUIThread())
+                    {
+                        RequestNotifPermissionsLogic();
+                    }
+                    else
+                    {
+                        SeekerState.ActiveActivityRef.RunOnUiThread(RequestNotifPermissionsLogic);
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Logger.Firebase("RequestPostNotificationPermissionsIfApplicable error: " + e.Message + e.StackTrace);
+            }
+        }
+
+        // recommended way, if user only denies once then next time (ShouldShowRequestPermissionRationale lets us know this)
+        //   then show a blurb on what the permissions are used for and ask a second (and last) time.
+        private static void RequestNotifPermissionsLogic()
+        {
+            try
+            {
+                void setAlreadyShown()
+                {
+                    PreferencesManager.SavePostNotificationShown();
+                }
+
+                ActivityCompat.RequestPermissions(SeekerState.ActiveActivityRef, new string[] { Manifest.Permission.PostNotifications }, POST_NOTIFICATION_PERMISSION);
+                setAlreadyShown();
+
+                // better to not bother the user.. they know what notifications are and they know how to turn them on in settings after the fact.
+                // also the dialog asking someone "okay" to then show the android "yes"/"no" dialog feels weird (even if recommended way).
+                //if (ActivityCompat.ShouldShowRequestPermissionRationale(SeekerState.ActiveActivityRef, Manifest.Permission.PostNotifications))
+                //{
+                //    var b = new AndroidX.AppCompat.App.AlertDialog.Builder(SeekerState.ActiveActivityRef, Resource.Style.MyAlertDialogTheme);
+                //    b.SetTitle("Allow Notifications?");
+                //    b.SetMessage("Seeker provides push notifications to keep you updated on file uploads/downloads and incoming user messages.");
+                //    ManualResetEvent mre = new ManualResetEvent(false);
+
+                //    // make sure we never prompt the user for these permissions again
+
+                //    EventHandler<DialogClickEventArgs> eventHandler = new EventHandler<DialogClickEventArgs>((object sender, DialogClickEventArgs okayArgs) =>
+                //    {
+                //        ActivityCompat.RequestPermissions(SeekerState.ActiveActivityRef, new string[] { Manifest.Permission.PostNotifications }, POST_NOTIFICATION_PERMISSION);
+                //        setAlreadyShown();
+                //    });
+                //    b.SetPositiveButton(Resource.String.okay, eventHandler);
+
+                //    EventHandler<DialogClickEventArgs> eventHandlerCancel = new EventHandler<DialogClickEventArgs>((object sender, DialogClickEventArgs noArgs) =>
+                //    {
+                //        setAlreadyShown();
+                //    });
+                //    b.SetNegativeButton("No thanks", eventHandlerCancel);
+
+                //    b.SetCancelable(false);
+                //    b.Show();
+                //}
+            }
+            catch (Exception e)
+            {
+                Logger.Firebase("RequestPostNotificationPermissionsIfApplicable error: " + e.Message + e.StackTrace);
+            }
+        }
+
+        protected override void OnStart()
+        {
+            //this fixes a bug as follows:
+            //previously we only set MainActivityRef on Create.
+            //therefore if one launches MainActivity via a new intent (i.e. go to user list, then search users files) it will be set with the new search user activity.
+            //then if you press back twice you will see the original activity but the MainActivityRef will still be set to the now destroyed activity since it was last to call onCreate.
+            //so then the FragmentManager will be null among other things...
+            SeekerState.MainActivityRef = this;
+            base.OnStart();
+        }
+        public static bool fromNotificationMoveToUploads = false;
+        protected override void OnNewIntent(Intent intent)
+        {
+            Logger.Debug("OnNewIntent");
+            base.OnNewIntent(intent);
+            Intent = intent.PutExtra("ALREADY_HANDLED", true);
+            if (Intent.GetIntExtra(WishlistController.FromWishlistString, -1) == 1)
+            {
+                HandleWishlistIntent();
+            }
+            else if ((Intent.GetBooleanExtra(GoToUploadsForegroundExtra, false) || Intent.GetBooleanExtra(GoToUploadsExtra, false))) //else every rotation will change Downloads to Uploads.
+            {
+                HandleFromNotificationUploadIntent();
+            }
+            else if (Intent.GetBooleanExtra(GoToBrowseSelfExtra, false))
+            {
+                Logger.InfoFirebase("from browse self");
+                pager.SetCurrentItem(3, false);
+            }
+            else if (Intent.GetBooleanExtra(GoToBrowseExtra, false))
+            {
+                pager.SetCurrentItem(3, false);
+            }
+            else if (Intent.GetBooleanExtra(GoToSearchExtra, false))
+            {
+                //var navigator = SeekerState.MainActivityRef?.FindViewById<BottomNavigationView>(Resource.Id.navigation);
+                //navigator.NavigationItemReselected += Navigator_NavigationItemReselected;
+                //navigator.NavigationItemSelected += Navigator_NavigationItemSelected;
+                //navigator.ViewAttachedToWindow += Navigator_ViewAttachedToWindow;
+                pager.SetCurrentItem(1, false);
+            }
+            else if (Intent.GetIntExtra(DownloadForegroundService.FromTransferString, -1) == 2)
+            {
+                pager.SetCurrentItem(2, false);
+            }
+            else if (Intent.GetBooleanExtra(FolderAlertExtra, false))
+            {
+                pager.SetCurrentItem(2, false);
+            }
+            else if (Intent.GetBooleanExtra(GoToAccountExtra, false))
+            {
+                pager.SetCurrentItem(0, false);
+            }
+        }
+
+        private void HandleFromNotificationUploadIntent()
+        {
+            //either we change to uploads mode now (if resumed), or we wait for on resume to do it.
+
+            Logger.InfoFirebase("from uploads clicked");
+            int currentPage = pager.CurrentItem;
+            if (currentPage == 2)
+            {
+                if (StaticHacks.TransfersFrag?.Activity == null || (StaticHacks.TransfersFrag?.IsResumed ?? false))
+                {
+                    Logger.InfoFirebase("we need to wait for on resume");
+                    fromNotificationMoveToUploads = true; //we read this in onresume
+                }
+                else
+                {
+                    //we can change to uploads mode now
+                    Logger.Debug("go to upload now");
+                    StaticHacks.TransfersFrag.MoveToUploadForNotif();
+                }
+            }
+            else
+            {
+                fromNotificationMoveToUploads = true; //we read this in onresume
+                pager.SetCurrentItem(2, false);
+            }
+        }
+
+        public override bool OnOptionsItemSelected(IMenuItem item)
+        {
+            switch (item.ItemId)
+            {
+                case Resource.Id.user_list_action:
+                    Intent intent = new Intent(SeekerState.MainActivityRef, typeof(UserListActivity));
+                    SeekerState.MainActivityRef.StartActivityForResult(intent, 141);
+                    return true;
+                case Resource.Id.messages_action:
+                    Intent intentMessages = new Intent(SeekerState.MainActivityRef, typeof(MessagesActivity));
+                    SeekerState.MainActivityRef.StartActivityForResult(intentMessages, 142);
+                    return true;
+                case Resource.Id.chatroom_action:
+                    Intent intentChatroom = new Intent(SeekerState.MainActivityRef, typeof(ChatroomActivity));
+                    SeekerState.MainActivityRef.StartActivityForResult(intentChatroom, 143);
+                    return true;
+                case Resource.Id.settings_action:
+                    Intent intent2 = new Intent(SeekerState.MainActivityRef, typeof(SettingsActivity));
+                    SeekerState.MainActivityRef.StartActivityForResult(intent2, 140);
+                    return true;
+                case Resource.Id.shutdown_action:
+                    Intent intent3 = new Intent(this, typeof(CloseActivity));
+                    //Clear all activities and start new task
+                    //ClearTask - causes any existing task that would be associated with the activity 
+                    // to be cleared before the activity is started. can only be used in conjunction with NewTask.
+                    // basically it clears all activities in the current task.
+                    intent3.SetFlags(ActivityFlags.ClearTask | ActivityFlags.NewTask);
+                    this.StartActivity(intent3);
+                    this.FinishAndRemoveTask();
+                    return true;
+                case Resource.Id.about_action:
+                    Seeker.Settings.Rows.AboutBottomSheet.Show(this);
+                    return true;
+            }
+
+            return base.OnOptionsItemSelected(item);
+        }
+
+        // Intent extra keys — all intent extras targeting MainActivity are defined here.
+        public const string GoToBrowseExtra = "GoToBrowse";
+        public const string GoToAccountExtra = "GoToAccount";
+        public const string GoToSearchExtra = "GoToSearch";
+        public const string GoToUploadsExtra = "GoToUploads";
+        public const string GoToUploadsForegroundExtra = "GoToUploadsForeground";
+        public const string GoToBrowseSelfExtra = "GoToBrowseSelf";
+        public const string FolderAlertExtra = "FolderAlert";
+        public const string FolderAlertUsernameExtra = "FolderAlertUsername";
+        public const string FolderAlertFoldernameExtra = "FolderAlertFoldername";
+        public const string IntentSearchRoomExtra = "SearchRoom";
+
+        /// <summary>
+        ///     Creates and returns an <see cref="IEnumerable{T}"/> of <see cref="Soulseek.Directory"/> in response to a remote request.
+        /// </summary>
+        /// <param name="username">The username of the requesting user.</param>
+        /// <param name="endpoint">The IP endpoint of the requesting user.</param>
+        /// <returns>A Task resolving an IEnumerable of Soulseek.Directory.</returns>
+
+
+        public bool OnBrowseTab()
+        {
+            try
+            {
+                var pager = (AndroidX.ViewPager2.Widget.ViewPager2)FindViewById(Resource.Id.pager);
+                return pager.CurrentItem == 3;
+            }
+            catch
+            {
+                Logger.Firebase("OnBrowseTab failed");
+            }
+            return false;
+        }
+
+
+        /// <summary>
+        /// 
+        /// </summary>
+        private void onBackPressedAction(OnBackPressedCallback callback)
+        {
+            try
+            {
+                var pager = (AndroidX.ViewPager2.Widget.ViewPager2)FindViewById(Resource.Id.pager);
+                if (pager.CurrentItem == 3) //browse tab
+                {
+                    BrowseFragment.Instance?.BackButton();
+                }
+                else if (pager.CurrentItem == 2) //transfer tab
+                {
+                    if (TransfersViewState.Instance.GetCurrentlySelectedFolder() != null)
+                    {
+                        if (TransfersViewState.Instance.InUploadsMode)
+                        {
+                            TransfersViewState.Instance.CurrentlySelectedUploadFolder = null;
+                        }
+                        else
+                        {
+                            TransfersViewState.Instance.CurrentlySelectedDLFolder = null;
+                        }
+                        SetTransferSupportActionBarState();
+                        this.InvalidateOptionsMenu();
+                        StaticHacks.TransfersFrag.SetRecyclerAdapter();
+                        StaticHacks.TransfersFrag.RestoreScrollPosition();
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                //During Back Button: Attempt to invoke virtual method 'java.lang.Object android.content.Context.getSystemService(java.lang.String)' on a null object reference
+                Logger.Firebase("During Back Button: " + e.Message);
+            }
+            RefreshBackCallbackState();
+        }
+
+
+        public void RecreateFragment(AndroidX.Fragment.App.Fragment f)
+        {
+            if (OperatingSystem.IsAndroidVersionAtLeast(24))
+            {
+                SupportFragmentManager.BeginTransaction().Detach(f).CommitNowAllowingStateLoss();//hisbeginTransaction().detach(fragment).commitNow()
+                SupportFragmentManager.BeginTransaction().Attach(f).CommitNowAllowingStateLoss();
+            }
+            else
+            {
+                //SupportFragmentManager
+                SupportFragmentManager.BeginTransaction().Detach(f).Attach(f).CommitNow();
+                //supportFragmentManager.beginTransaction().detach(fragment).attach(fragment).commitNow()
+            }
+        }
+
+        protected override void OnActivityResult(int requestCode, [GeneratedEnum] Result resultCode, Intent data)
+        {
+            base.OnActivityResult(requestCode, resultCode, data);
+
+            if (NEW_WRITE_EXTERNAL == requestCode || NEW_WRITE_EXTERNAL_VIA_LEGACY == requestCode || NEW_WRITE_EXTERNAL_VIA_LEGACY_Settings_Screen == requestCode)
+            {
+                Action showDirectoryButton = new Action(() =>
+                {
+                    SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.seeker_needs_dl_dir_error), ToastLength.Long);
+                    var loginFrag = SeekerState.LoginFragmentRef;
+                    if (loginFrag == null || loginFrag.View == null)
+                    {
+                        SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.seeker_needs_dl_dir_choose_settings), ToastLength.Long);
+                        Logger.Firebase("LoginFragmentRef or its View is null");
+                        return;
+                    }
+                    if (!PreferencesState.CurrentlyLoggedIn)
+                    {
+                        loginFrag.ShowLoginForm(prefill: true);
+                    }
+                    loginFrag.ShowMustSelectDirectoryButton(MustSelectDirectoryClick);
+                });
+
+                if (NEW_WRITE_EXTERNAL_VIA_LEGACY_Settings_Screen == requestCode)
+                {
+                    //the resultCode will always be Cancelled for this since you have to back out of it.
+                    //so instead we check Android.OS.Environment.IsExternalStorageManager
+                    if (SettingsActivity.DoWeHaveProperPermissionsForInternalFilePicker())
+                    {
+                        //phase 2 - actually pick a file.
+                        FallbackFileSelection(NEW_WRITE_EXTERNAL_VIA_LEGACY);
+                        return;
+                    }
+                    else
+                    {
+                        if (SeekerApplication.OnUIThread())
+                        {
+                            showDirectoryButton();
+                        }
+                        else
+                        {
+                            RunOnUiThread(showDirectoryButton);
+                        }
+                        return;
+                    }
+                }
+
+
+                if (resultCode == Result.Ok && data?.Data == null)
+                {
+                    Logger.Firebase("OnActivityResult Result.Ok but data?.Data is null (NEW_WRITE_EXTERNAL)");
+                }
+
+                if (resultCode == Result.Ok && data?.Data != null)
+                {
+                    if (NEW_WRITE_EXTERNAL == requestCode)
+                    {
+                        StorageState.SetRootDownloadDirectory(this, data.Data, isFromTree: true);
+                    }
+                    else if (NEW_WRITE_EXTERNAL_VIA_LEGACY == requestCode)
+                    {
+                        StorageState.SetRootDownloadDirectory(this, data.Data, isFromTree: false);
+                    }
+                }
+                else
+                {
+
+                    if (SeekerApplication.OnUIThread())
+                    {
+                        showDirectoryButton();
+                    }
+                    else
+                    {
+                        RunOnUiThread(showDirectoryButton);
+                    }
+
+                    //throw new Exception("Seeker requires access to a directory where it can store files.");
+                }
+            }
+            else if (MUST_SELECT_A_DIRECTORY_WRITE_EXTERNAL == requestCode ||
+                MUST_SELECT_A_DIRECTORY_WRITE_EXTERNAL_VIA_LEGACY == requestCode ||
+                MUST_SELECT_A_DIRECTORY_WRITE_EXTERNAL_VIA_LEGACY_Settings_Screen == requestCode)
+            {
+
+                Action reiterate = new Action(() =>
+                {
+                    SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.seeker_needs_dl_dir_error), ToastLength.Long);
+                });
+
+                Action hideButton = new Action(() =>
+                {
+                    SeekerState.LoginFragmentRef?.HideMustSelectDirectoryButton();
+                });
+
+                if (MUST_SELECT_A_DIRECTORY_WRITE_EXTERNAL_VIA_LEGACY_Settings_Screen == requestCode)
+                {
+                    //the resultCode will always be Cancelled for this since you have to back out of it.
+                    //so instead we check Android.OS.Environment.IsExternalStorageManager
+                    if (SettingsActivity.DoWeHaveProperPermissionsForInternalFilePicker())
+                    {
+                        //phase 2 - actually pick a file.
+                        FallbackFileSelection(MUST_SELECT_A_DIRECTORY_WRITE_EXTERNAL_VIA_LEGACY);
+                        return;
+                    }
+                    else
+                    {
+                        if (SeekerApplication.OnUIThread())
+                        {
+                            reiterate();
+                        }
+                        else
+                        {
+                            RunOnUiThread(reiterate);
+                        }
+                        return;
+                    }
+                }
+
+
+                if (resultCode == Result.Ok && data?.Data == null)
+                {
+                    Logger.Firebase("OnActivityResult Result.Ok but data?.Data is null (MUST_SELECT_A_DIRECTORY)");
+                }
+
+                if (resultCode == Result.Ok && data?.Data != null)
+                {
+                    if (MUST_SELECT_A_DIRECTORY_WRITE_EXTERNAL_VIA_LEGACY == requestCode)
+                    {
+                        StorageState.SetRootDownloadDirectory(this, data.Data, isFromTree: false);
+                    }
+                    else if (MUST_SELECT_A_DIRECTORY_WRITE_EXTERNAL == requestCode)
+                    {
+                        StorageState.SetRootDownloadDirectory(this, data.Data, isFromTree: true);
+                    }
+
+                    //hide the button
+
+                    if (SeekerApplication.OnUIThread())
+                    {
+                        hideButton();
+                    }
+                    else
+                    {
+                        RunOnUiThread(hideButton);
+                    }
+                }
+                else
+                {
+                    if (SeekerApplication.OnUIThread())
+                    {
+                        reiterate();
+                    }
+                    else
+                    {
+                        RunOnUiThread(reiterate);
+                    }
+
+                    //throw new Exception("Seeker requires access to a directory where it can store files.");
+                }
+            }
+            else if (SETTINGS_EXTERNAL == requestCode)
+            {
+                if (resultCode == Result.Ok)
+                {
+                    //get settings and set our things.
+                }
+                else if (resultCode == Result.Canceled)
+                {
+                    //do nothing...
+                }
+            }
+            //else
+            //{
+            //    base.OnActivityResult(requestCode, resultCode, data);
+            //}
+        }
+
+        private void MustSelectDirectoryClick(object sender, EventArgs e)
+        {
+            var storageManager = Android.OS.Storage.StorageManager.FromContext(this);
+            var intent = storageManager.PrimaryStorageVolume.CreateOpenDocumentTreeIntent();
+            intent.AddFlags(ActivityFlags.GrantPersistableUriPermission | ActivityFlags.GrantReadUriPermission | ActivityFlags.GrantWriteUriPermission | ActivityFlags.GrantPrefixUriPermission);
+            Android.Net.Uri res = null; //var y = MediaStore.Audio.Media.ExternalContentUri.ToString();
+            if (string.IsNullOrEmpty(PreferencesState.SaveDataDirectoryUri))
+            {
+                //try
+                //{
+                //    //storage/emulated/0/music
+                //    Java.IO.File f = new Java.IO.File(@"/storage/emulated/0/Music");///Android.OS.Environment.GetExternalStoragePublicDirectory(Android.OS.Environment.DirectoryMusic);
+                //    //res = f.ToURI();
+                //    res = Android.Net.Uri.FromFile(f);//Parse(f.ToURI().ToString());
+                //}
+                //catch
+                //{
+                //    res = Android.Net.Uri.Parse(StorageState.DefaultMusicUri);//TryCreate("content://com.android.externalstorage.documents/tree/primary%3AMusic", UriKind.Absolute,out res);
+                //}
+                res = Android.Net.Uri.Parse(StorageState.DefaultMusicUri);
+            }
+            else
+            {
+                res = Android.Net.Uri.Parse(PreferencesState.SaveDataDirectoryUri);
+            }
+            intent.PutExtra(DocumentsContract.ExtraInitialUri, res);
+            try
+            {
+                this.StartActivityForResult(intent, MUST_SELECT_A_DIRECTORY_WRITE_EXTERNAL);
+                //if(1==1)
+                //{
+                //    throw new Exception(Helpers.NoDocumentOpenTreeToHandle);
+                //}
+
+            }
+            catch (Exception ex)
+            {
+                if (ex.Message.Contains(SimpleHelpers.NoDocumentOpenTreeToHandle))
+                {
+                    FallbackFileSelectionEntry(true);
+                }
+                else
+                {
+                    throw;
+                }
+            }
+        }
+
+        private void FallbackFileSelectionEntry(bool mustSelectDirectoryButton)
+        {
+            bool hasManageAllFilesManisfestPermission = false;
+
+#if IzzySoft
+            hasManageAllFilesManisfestPermission = true;
+#endif
+
+            if (PlatformInfo.RequiresEitherOpenDocumentTreeOrManageAllFiles() && hasManageAllFilesManisfestPermission && !Android.OS.Environment.IsExternalStorageManager) //this is "step 1"
+            {
+                Intent allFilesPermission = new Intent(Android.Provider.Settings.ActionManageAppAllFilesAccessPermission);
+                Android.Net.Uri packageUri = Android.Net.Uri.FromParts("package", this.PackageName, null);
+                allFilesPermission.SetData(packageUri);
+                this.StartActivityForResult(allFilesPermission, mustSelectDirectoryButton ? MUST_SELECT_A_DIRECTORY_WRITE_EXTERNAL_VIA_LEGACY_Settings_Screen : NEW_WRITE_EXTERNAL_VIA_LEGACY_Settings_Screen);
+            }
+            else if (SettingsActivity.DoWeHaveProperPermissionsForInternalFilePicker())
+            {
+                FallbackFileSelection(mustSelectDirectoryButton ? MUST_SELECT_A_DIRECTORY_WRITE_EXTERNAL_VIA_LEGACY : NEW_WRITE_EXTERNAL_VIA_LEGACY);
+            }
+            else
+            {
+
+
+                if (PlatformInfo.RequiresEitherOpenDocumentTreeOrManageAllFiles() && !hasManageAllFilesManisfestPermission)
+                {
+                    UiHelpers.ShowSimpleAlertDialog(this, Resource.String.error_no_file_manager_dir_manage_storage, Resource.String.okay);
+                }
+                else
+                {
+                    SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.error_no_file_manager_dir), ToastLength.Long);
+                }
+
+
+                //Note:
+                //If your app targets Android 12 (API level 31) or higher, its toast is limited to two lines of text and shows the application icon next to the text.
+                //Be aware that the line length of this text varies by screen size, so it's good to make the text as short as possible.
+                //on Pixel 5 emulator this limit is around 78 characters.
+                //^It must BOTH target Android 12 AND be running on Android 12^
+            }
+        }
+
+        protected override void OnSaveInstanceState(Bundle outState)
+        {
+            base.OnSaveInstanceState(outState);
+        }
+
+        public static int goToSearchTab = int.MaxValue;
+        public void SyncToPage(int position)
+        {
+            if (position < 0)
+            {
+                return;
+            }
+            var navigator = FindViewById<BottomNavigationView>(Resource.Id.navigation);
+            if (navigator != null)
+            {
+                navigator.Menu.GetItem(position).SetCheckable(true); //necessary if side scrolling...
+                navigator.Menu.GetItem(position).SetChecked(true);
+            }
+            //Gate options-menu visibility to the current tab. FragmentStateAdapter (unlike
+            //FragmentPagerAdapter) does not call setMenuVisibility per primary item, so without this
+            //every resident tab fragment contributes its OnCreateOptionsMenu to the action bar at once.
+            int tabCount = pager?.Adapter?.ItemCount ?? 0;
+            for (int i = 0; i < tabCount; i++)
+            {
+                SupportFragmentManager.FindFragmentByTag("f" + i)?.SetMenuVisibility(i == position);
+            }
+            InvalidateOptionsMenu();
+            OnPagerPageSelected(position);
+        }
+
+        public void OnPagerPageSelected(int position)
+        {
+            //if we are changing modes and the transfers action mode is not null (i.e. is active)
+            //then we need to get out of it.
+            if (TransfersFragment.TransfersActionMode != null)
+            {
+                TransfersFragment.TransfersActionMode.Finish();
+            }
+            if (BrowseFragment.BrowseActionMode != null)
+            {
+                BrowseFragment.BrowseActionMode.Finish();
+            }
+            // Hide download dialog when leaving search tab (i.e. clicking browse user -> go to browse response), show when returning
+            if (position != 1)
+            {
+                if (SearchFragment.dlDialogShown)
+                {
+                    var dlg = SupportFragmentManager.FindFragmentByTag(DownloadDialog.DOWNLOAD_DIALOG_FRAGMENT) as DownloadDialog;
+                    dlg?.Dialog?.Hide();
+                }
+            }
+            else
+            {
+                if (SearchFragment.dlDialogShown)
+                {
+                    var dlg = SupportFragmentManager.FindFragmentByTag(DownloadDialog.DOWNLOAD_DIALOG_FRAGMENT) as DownloadDialog;
+                    dlg?.Dialog?.Show();
+                }
+            }
+            //in addition each fragment is responsible for expanding their menu...
+            switch (position)
+            {
+                case 0:
+                    this.SupportActionBar.SetDisplayHomeAsUpEnabled(false);
+                    this.SupportActionBar.SetHomeButtonEnabled(false);
+
+                    this.SupportActionBar.SetDisplayShowCustomEnabled(false);
+                    this.SupportActionBar.SetDisplayShowTitleEnabled(true);
+                    this.SupportActionBar.Title = this.GetString(Resource.String.home_tab);
+                    this.SupportActionBar.SubtitleFormatted = null;
+                    break;
+                case 1:
+                    this.SupportActionBar.SetDisplayHomeAsUpEnabled(false);
+                    this.SupportActionBar.SetHomeButtonEnabled(false);
+
+                    this.SupportActionBar.SetDisplayShowCustomEnabled(true);
+                    this.SupportActionBar.SetDisplayShowTitleEnabled(false);
+                    if (goToSearchTab != int.MaxValue)
+                    {
+                        if (SearchFragment.Instance?.Activity == null || !(SearchFragment.Instance.Activity.Lifecycle.CurrentState.IsAtLeast(Lifecycle.State.Started))) //this happens if we come from settings activity. Main Activity has NOT been started. SearchFragment has the .Actvity ref of an OLD activity.  so we are not ready yet. 
+                        {
+                            //let onresume go to the search tab..
+                            Logger.Debug("Delay Go To Wishlist Search Fragment for OnResume");
+                        }
+                        else
+                        {
+                            //can we do this now??? or should we pass this down to the search fragment for when it gets created...  maybe we should put this in a like "OnResume"
+                            Logger.Debug("Do Go To Wishlist in page selected");
+                            SearchFragment.Instance.GoToTab(goToSearchTab, false, true);
+                            goToSearchTab = int.MaxValue;
+                        }
+                    }
+                    break;
+                case 2:
+                    this.SupportActionBar.SetDisplayShowCustomEnabled(false);
+                    this.SupportActionBar.SetDisplayShowTitleEnabled(true);
+
+                    SetTransferSupportActionBarState();
+                    break;
+                case 3:
+                    this.SupportActionBar.SetDisplayHomeAsUpEnabled(false);
+                    this.SupportActionBar.SetHomeButtonEnabled(false);
+
+                    this.SupportActionBar.SetDisplayShowCustomEnabled(false);
+                    this.SupportActionBar.SetDisplayShowTitleEnabled(true);
+                    BrowseFragment.SetActionBarTitle();
+                    break;
+            }
+            RefreshBackCallbackState();
+        }
+
+        public void SetTransferSupportActionBarState()
+        {
+            if (TransfersViewState.Instance.InUploadsMode)
+            {
+                if (TransfersViewState.Instance.CurrentlySelectedUploadFolder == null)
+                {
+                    this.SupportActionBar.Title = this.GetString(Resource.String.Uploads);
+                    this.SupportActionBar.SubtitleFormatted = null;
+                    this.SupportActionBar.SetDisplayHomeAsUpEnabled(false);
+                    this.SupportActionBar.SetHomeButtonEnabled(false);
+                }
+                else
+                {
+                    this.SupportActionBar.Title = TransfersViewState.Instance.CurrentlySelectedUploadFolder.GetDisplayFolderName();
+                    this.SupportActionBar.SubtitleFormatted = GetFolderSubtitle(TransfersViewState.Instance.CurrentlySelectedUploadFolder);
+                    this.SupportActionBar.SetDisplayHomeAsUpEnabled(true);
+                    this.SupportActionBar.SetHomeButtonEnabled(true);
+                }
+            }
+            else
+            {
+                if (TransfersViewState.Instance.CurrentlySelectedDLFolder == null)
+                {
+                    this.SupportActionBar.Title = this.GetString(Resource.String.Downloads);
+                    this.SupportActionBar.SubtitleFormatted = null;
+                    this.SupportActionBar.SetDisplayHomeAsUpEnabled(false);
+                    this.SupportActionBar.SetHomeButtonEnabled(false);
+                }
+                else
+                {
+                    this.SupportActionBar.Title = TransfersViewState.Instance.CurrentlySelectedDLFolder.GetDisplayFolderName();
+                    this.SupportActionBar.SubtitleFormatted = GetFolderSubtitle(TransfersViewState.Instance.CurrentlySelectedDLFolder);
+                    this.SupportActionBar.SetDisplayHomeAsUpEnabled(true);
+                    this.SupportActionBar.SetHomeButtonEnabled(true);
+                }
+            }
+        }
+
+        private static Android.Text.SpannableString GetFolderSubtitle(FolderItem folder)
+        {
+            int numFiles = folder.TransferItems.Count;
+            long totalBytes = folder.GetFolderProgress().totalBytes;
+            string sizeStr = SimpleHelpers.GetHumanReadableSize(totalBytes);
+            string subtitle = string.Format("{0} \u00b7 {1} files \u00b7 {2}", folder.Username, numFiles, sizeStr);
+            var s = new Android.Text.SpannableString(subtitle);
+            s.SetSpan(new Android.Text.Style.RelativeSizeSpan(0.8f), 0, s.Length(), Android.Text.SpanTypes.ExclusiveExclusive);
+            return s;
+        }
+
+        public override bool OnCreateOptionsMenu(IMenu menu)
+        {
+            //MenuInflater.Inflate(Resource.Menu.menu_main, menu);
+            return base.OnCreateOptionsMenu(menu);
+        }
+
+        public override void OnRequestPermissionsResult(int requestCode, string[] permissions, [GeneratedEnum] Android.Content.PM.Permission[] grantResults)
+        {
+            switch (requestCode)
+            {
+                case POST_NOTIFICATION_PERMISSION:
+                    break;
+                default:
+                    if (!(grantResults.Length > 0 && grantResults[0] == Permission.Granted))
+                    {
+                        Logger.Debug("Permission denied for request code " + requestCode + "; continuing.");
+                    }
+                    break;
+            }
+            base.OnRequestPermissionsResult(requestCode, permissions, grantResults);
+        }
+
+        public bool OnNavigationItemSelected(IMenuItem item)
+        {
+            switch (item.ItemId)
+            {
+                case Resource.Id.navigation_home:
+                    pager.SetCurrentItem(0, false);
+                    break;
+                case Resource.Id.navigation_search:
+                    pager.SetCurrentItem(1, false);
+                    break;
+                case Resource.Id.navigation_transfers:
+                    pager.SetCurrentItem(2, false);
+                    break;
+                case Resource.Id.navigation_browse:
+                    pager.SetCurrentItem(3, false);
+                    break;
+            }
+            return true;
+        }
+
+        #if DEBUG
+        public override bool DispatchKeyEvent(KeyEvent e)
+        {
+            if (e.KeyCode == Keycode.VolumeUp)
+            {
+                TestEnqueueSharedFolder();
+            }
+            else if (e.KeyCode == Keycode.VolumeDown)
+            {
+#if MOCK
+                Seeker.Debug.MockTransferStress.Toggle();
+#else
+                SeekerState.SoulseekClient.ConnectAsync("slowtest", "slowpass");
+#endif
+            }
+            return base.DispatchKeyEvent(e);
+        }
+
+#if MOCK
+        private static int testEnqueueCount;
+#endif
+
+        private void TestEnqueueSharedFolder()
+        {
+            var cache = SharedFileService.SharedFileCache;
+            if (cache?.PresentableNameToFullFileInfo == null || cache.PresentableNameToFullFileInfo.Count == 0)
+            {
+                Logger.Debug("TestEnqueue: no shared files");
+                return;
+            }
+
+            // group files by directory (everything before the last backslash)
+            var filesByDir = cache.PresentableNameToFullFileInfo.Keys
+                .GroupBy(f => f.Substring(0, f.LastIndexOf('\\')))
+                .ToList();
+
+            var rand = new Random();
+            var chosenDir = filesByDir[rand.Next(filesByDir.Count)];
+            string fakeUsername = "testuser_" + rand.Next(1000, 9999);
+#if MOCK
+            // every third one is privileged (the mock server lists them at login), to watch them go first
+            if (testEnqueueCount++ % 3 == 2)
+            {
+                var privileged = MockSoulseekClient.PrivilegedTestUploaders;
+                fakeUsername = privileged[rand.Next(privileged.Length)];
+            }
+#endif
+            var fakeEndpoint = new IPEndPoint(IPAddress.Loopback, 0);
+
+            Logger.Debug($"TestEnqueue: dir '{chosenDir.Key}' ({chosenDir.Count()} files) user '{fakeUsername}'");
+
+            foreach (string filename in chosenDir)
+            {
+                try
+                {
+                    UploadService.EnqueueDownloadAction(fakeUsername, fakeEndpoint, filename);
+                    Logger.Debug($"TestEnqueue: enqueued '{filename}'");
+                }
+                catch (Exception ex)
+                {
+                    Logger.Debug($"TestEnqueue: failed '{filename}': {ex.Message}");
+                }
+            }
+        }
+        #endif
+    }
+}

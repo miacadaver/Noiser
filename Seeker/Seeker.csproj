@@ -1,0 +1,168 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AndroidHttpClientHandlerType>Xamarin.Android.Net.AndroidMessageHandler</AndroidHttpClientHandlerType>
+    <AndroidAapt2LinkExtraArgs>--no-version-vectors</AndroidAapt2LinkExtraArgs>
+    <AndroidManagedSymbols>true</AndroidManagedSymbols>
+    <TargetFramework>net10.0-android36.0</TargetFramework>
+    <SupportedOSPlatformVersion>23</SupportedOSPlatformVersion>
+    <AssemblyTitle>AndriodApp1</AssemblyTitle>
+    <Product>AndriodApp1</Product>
+    <Copyright>Copyright ©  2018</Copyright>
+    <AssemblyVersion>1.1.0.0</AssemblyVersion>
+    <FileVersion>1.1.0.0</FileVersion>
+	<NoWarn>$(NoWarn);SYSLIB0011</NoWarn>
+	<Configurations>Debug;Debug Mock;Release;Release Mock;Release IzzySoft</Configurations>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <EmbedAssembliesIntoApk>False</EmbedAssembliesIntoApk>
+    <EnableLLVM>false</EnableLLVM>
+    <AndroidEnableProfiledAot>false</AndroidEnableProfiledAot>
+    <AndroidCreatePackagePerAbi>false</AndroidCreatePackagePerAbi>
+    <MandroidI18n />
+    <AndroidEnableMultiDex>true</AndroidEnableMultiDex>
+    <RuntimeIdentifiers>android-arm;android-x86;android-x64;android-arm64</RuntimeIdentifiers>
+    <DefineConstants>TRACE;ADB_LOGCAT</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug Mock|AnyCPU' ">
+    <EmbedAssembliesIntoApk>False</EmbedAssembliesIntoApk>
+    <EnableLLVM>false</EnableLLVM>
+    <AndroidEnableProfiledAot>false</AndroidEnableProfiledAot>
+    <AndroidCreatePackagePerAbi>false</AndroidCreatePackagePerAbi>
+    <MandroidI18n />
+    <AndroidEnableMultiDex>true</AndroidEnableMultiDex>
+    <RuntimeIdentifiers>android-arm;android-x86;android-x64;android-arm64</RuntimeIdentifiers>
+    <DefineConstants>DEBUG;MOCK;TRACE;ADB_LOGCAT</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <AndroidProguardMappingFile>$(OutputPath)mapping.txt</AndroidProguardMappingFile>
+    <EnableLLVM>false</EnableLLVM>
+    <AndroidCreatePackagePerAbi>false</AndroidCreatePackagePerAbi>
+    <AndroidNativeDebugSymbolCompressionFormat>zip</AndroidNativeDebugSymbolCompressionFormat>
+    <RuntimeIdentifiers>android-arm;android-x86;android-x64;android-arm64</RuntimeIdentifiers>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release Mock|AnyCPU' ">
+    <AndroidProguardMappingFile>$(OutputPath)mapping.txt</AndroidProguardMappingFile>
+    <EnableLLVM>false</EnableLLVM>
+    <AndroidCreatePackagePerAbi>false</AndroidCreatePackagePerAbi>
+    <RuntimeIdentifiers>android-arm;android-x86;android-x64;android-arm64</RuntimeIdentifiers>
+    <DefineConstants>MOCK</DefineConstants>
+  </PropertyGroup>
+	<PropertyGroup>
+		<AndroidKeyStore>true</AndroidKeyStore>
+		<AndroidSigningKeyStore>$(AndroidSigningKeyStore)</AndroidSigningKeyStore>
+		<AndroidSigningKeyAlias>$(AndroidSigningKeyAlias)</AndroidSigningKeyAlias>
+		<AndroidSigningKeyPass>$(AndroidSigningKeyPass)</AndroidSigningKeyPass>
+		<AndroidSigningStorePass>$(AndroidSigningStorePass)</AndroidSigningStorePass>
+	</PropertyGroup>
+	<PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Release IzzySoft|AnyCPU'">
+	  <AndroidProguardMappingFile>$(OutputPath)mapping.txt</AndroidProguardMappingFile>
+	  <EmbedAssembliesIntoApk>True</EmbedAssembliesIntoApk>
+	  <EnableLLVM>false</EnableLLVM>
+	  <AndroidCreatePackagePerAbi>false</AndroidCreatePackagePerAbi>
+	  <RuntimeIdentifiers>android-arm;android-x86;android-x64;android-arm64</RuntimeIdentifiers>
+	  <DefineConstants>IzzySoft</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="$(Configuration.StartsWith('Release'))">
+    <!-- Frequent Release "How can an object and a reference inside it not be in the same block?" that point to SGen -->
+	<AndroidEnableSGenConcurrent>false</AndroidEnableSGenConcurrent>
+	<AndroidLinkTool>r8</AndroidLinkTool>
+	<RunAOTCompilation>true</RunAOTCompilation>
+	<AndroidEnableProfiledAot>true</AndroidEnableProfiledAot>
+	<AndroidUseDefaultAotProfile>false</AndroidUseDefaultAotProfile>
+	<Optimize>true</Optimize>
+	<PublishTrimmed>true</PublishTrimmed>
+	<AndroidLinkMode>SdkOnly</AndroidLinkMode>
+    <AndroidKeyStore>true</AndroidKeyStore>
+	<AndroidSigningKeyStore>$(AndroidSigningKeyStore)</AndroidSigningKeyStore>
+	<AndroidSigningKeyAlias>$(AndroidSigningKeyAlias)</AndroidSigningKeyAlias>
+	<AndroidSigningKeyPass>$(AndroidSigningKeyPass)</AndroidSigningKeyPass>
+	<AndroidSigningStorePass>$(AndroidSigningStorePass)</AndroidSigningStorePass>
+  </PropertyGroup>
+	<PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Release IzzySoft|AnyCPU'">
+	<AndroidKeyStore>true</AndroidKeyStore>
+	<AndroidSigningKeyStore Condition="'$(AndroidSigningKeyStore)' == '' And Exists('C:\Users\jack\AppData\Local\Xamarin\Mono for Android\Keystore\Jack\Jack.keystore')">C:\Users\jack\AppData\Local\Xamarin\Mono for Android\Keystore\Jack\Jack.keystore</AndroidSigningKeyStore>
+	<AndroidSigningKeyAlias Condition="'$(AndroidSigningKeyAlias)' == ''">jack</AndroidSigningKeyAlias>
+  </PropertyGroup>
+	<ItemGroup>
+    <GoogleServicesJson Include="google-services.json" Condition="Exists('google-services.json') And '$(Configuration)|$(Platform)' != 'Release IzzySoft|AnyCPU'" />
+  </ItemGroup>
+  <ItemGroup Condition=" '$(AndroidEnableProfiledAot)' == 'true' and '$(AndroidUseCustomAotProfile)' != 'false' ">
+    <AndroidAotProfile Include="$(MSBuildProjectDirectory)\custom.aprof" />
+  </ItemGroup>
+	<Choose>
+    <When Condition=" '$(Configuration)'!='Release IzzySoft' ">
+      <ItemGroup>
+        <PackageReference Include="Xamarin.Firebase.Crashlytics" Version="120.0.6" />
+      </ItemGroup>
+    </When>
+  </Choose>
+  <ItemGroup>
+    <PackageReference Include="Xamarin.AndroidX.Media3.ExoPlayer" Version="1.11.1" />
+    <PackageReference Include="Microsoft.NET.StringTools">
+      <Version>18.3.3</Version>
+    </PackageReference>
+    <PackageReference Include="System.Text.Json">
+      <Version>10.0.3</Version>
+    </PackageReference>
+    <PackageReference Include="Xamarin.AndroidX.ConstraintLayout">
+      <Version>2.2.1.4</Version>
+    </PackageReference>
+    <PackageReference Include="Xamarin.AndroidX.SwipeRefreshLayout">
+      <Version>1.2.0.1</Version>
+    </PackageReference>
+    <PackageReference Include="Xamarin.Google.Android.Material" Version="1.13.0.1" />
+    <PackageReference Include="Xamarin.AndroidX.Legacy.Support.Core.Utils" Version="1.0.0.35" />
+    <PackageReference Include="Xamarin.AndroidX.DocumentFile">
+      <Version>1.1.0.2</Version>
+    </PackageReference>
+    <PackageReference Include="Xamarin.AndroidX.Fragment">
+      <Version>1.8.9.2</Version>
+    </PackageReference>
+    <PackageReference Include="Xamarin.AndroidX.RecyclerView">
+      <Version>1.4.0.4</Version>
+    </PackageReference>
+    <PackageReference Include="Xamarin.AndroidX.CoordinatorLayout">
+      <Version>1.3.0.4</Version>
+    </PackageReference>
+    <PackageReference Include="Xamarin.AndroidX.Lifecycle.LiveData" Version="2.10.0.1" />
+    <!-- https://github.com/dotnet/android-libraries/issues/1341 - .Jvm and .Android both contain Immutable.class -->
+    <PackageReference Include="Xamarin.AndroidX.Compose.Runtime.Annotation.Jvm" Version="1.10.0.1" ExcludeAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Common\Common.csproj" />
+    <ProjectReference Include="Mono.Nat-master\Mono.Nat\Mono.Nat.csproj" />
+    <ProjectReference Include="Soulseek.NET-master\src\Soulseek.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Remove="Mono.Nat-master\**" />
+    <Compile Remove="Soulseek.NET-master\**" />
+  </ItemGroup>
+  <PropertyGroup />
+  <!-- Adds MANAGE_EXTERNAL_STORAGE for non Playstore -->
+  <ItemGroup Condition="'$(Configuration)' == 'Release IzzySoft'">
+    <AndroidManifestOverlay Include="Properties\AndroidManifest.IzzySoft.xml" />
+  </ItemGroup>
+  <Target Name="GenerateDebugSecrets" BeforeTargets="CoreCompile" Condition="'$(Configuration)'=='Debug' Or '$(Configuration)'=='Debug Mock'">
+    <PropertyGroup>
+      <_SeekerDebugCaptureKey>$([System.Environment]::GetEnvironmentVariable('SeekerEncryptKey'))</_SeekerDebugCaptureKey>
+      <_DebugSecretsFile>$(IntermediateOutputPath)DebugSecrets.g.cs</_DebugSecretsFile>
+    </PropertyGroup>
+    <MakeDir Directories="$(IntermediateOutputPath)" />
+    <ItemGroup>
+      <_DebugSecretsLines Include="// &lt;auto-generated&gt; Regenerated from SEEKER_DEBUG_CAPTURE_KEY. Do not edit." />
+      <_DebugSecretsLines Include="namespace Seeker.Debug" />
+      <_DebugSecretsLines Include="{" />
+      <_DebugSecretsLines Include="    internal static class DebugSecrets" />
+      <_DebugSecretsLines Include="    {" />
+      <_DebugSecretsLines Include="        public const string SeekerEncryptKey = &quot;$(SeekerEncryptKey)&quot;%3B" />
+      <_DebugSecretsLines Include="    }" />
+      <_DebugSecretsLines Include="}" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(_DebugSecretsFile)" Lines="@(_DebugSecretsLines)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <Compile Include="$(_DebugSecretsFile)" />
+      <FileWrites Include="$(_DebugSecretsFile)" />
+    </ItemGroup>
+  </Target>
+</Project>

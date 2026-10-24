@@ -1,0 +1,407 @@
+/*
+ * Copyright 2021 Seeker
+ *
+ * This file is part of Seeker
+ *
+ * Seeker is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Seeker is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Seeker. If not, see <http://www.gnu.org/licenses/>.
+ */
+using Android.Content;
+using Android.Widget;
+using Common;
+using Seeker.Helpers;
+using Seeker.Services;
+using Soulseek;
+using System;
+using System.Linq;
+using System.Threading.Tasks;
+
+namespace Seeker
+{
+    public class UserListService : IUserListService
+    {
+        public static UserListService Instance { get; } = new UserListService();
+        private UserListService() { }
+
+        public static event EventHandler<UserListChangedEventArgs> UserListChanged;
+        public static event EventHandler<UserListChangedEventArgs> IgnoreListChanged;
+        public static event EventHandler<string> UserRowChanged;
+
+        internal static void RaiseUserRowChanged(string username)
+        {
+            UserRowChanged?.Invoke(null, username);
+        }
+
+        public bool ContainsUser(string username)
+        {
+            lock (CommonState.UserList)
+            {
+                if (CommonState.UserList == null)
+                {
+                    return false;
+                }
+                return CommonState.UserList.FirstOrDefault((userlistinfo) => { return userlistinfo.Username == username; }) != null;
+            }
+        }
+
+        /// <summary>
+        /// Updates an existing UserList item's UserData and/or UserStatus.
+        /// Used when status/data updates arrive for users already in the list (status changes,
+        /// statistics pushed from server). Does not add new users — first-add goes through
+        /// <see cref="AddUser"/>.
+        /// </summary>
+        /// <returns>true if the user was found in the list.</returns>
+        public bool UpdateExistingUser(string username, UserData userData, UserStatus userStatus, out bool transitionedOfflineToOnline)
+        {
+            UserPresence? prevStatus = UserPresence.Offline;
+            bool found = false;
+            lock (CommonState.UserList)
+            {
+                foreach (UserListItem item in CommonState.UserList)
+                {
+                    if (item.Username == username)
+                    {
+                        found = true;
+                        if (userData != null)
+                        {
+                            item.UserData = userData;
+                        }
+                        if (userStatus != null)
+                        {
+                            prevStatus = item.UserStatus?.Presence ?? UserPresence.Offline;
+                            item.UserStatus = userStatus;
+                        }
+                        break;
+                    }
+                }
+            }
+            transitionedOfflineToOnline = found && (!prevStatus.HasValue || prevStatus.Value == UserPresence.Offline && (userStatus != null && userStatus.Presence != UserPresence.Offline));
+            return found;
+        }
+
+        public bool SetDoesNotExist(string username)
+        {
+            bool found = false;
+            lock (CommonState.UserList)
+            {
+                foreach (UserListItem item in CommonState.UserList)
+                {
+                    if (item.Username == username)
+                    {
+                        found = true;
+                        item.DoesNotExist = true;
+                        break;
+                    }
+                }
+            }
+            if (found)
+            {
+                PersistUserList();
+            }
+            return found;
+        }
+
+        private static void PersistUserList()
+        {
+            string serialized;
+            lock (CommonState.UserList)
+            {
+                serialized = SerializationHelper.SaveUserListToString(CommonState.UserList);
+            }
+            PreferencesManager.SaveUserList(serialized);
+        }
+
+        private static void PersistIgnoreList()
+        {
+            string serialized;
+            lock (CommonState.IgnoreUserList)
+            {
+                serialized = SerializationHelper.SaveUserListToString(CommonState.IgnoreUserList);
+            }
+            PreferencesManager.SaveIgnoreUserList(serialized);
+        }
+
+        /// <summary>
+        /// This is for adding new users...
+        /// </summary>
+        /// <returns>true if user was already added</returns>
+        public bool AddUser(UserData userData, UserPresence? status = null)
+        {
+            UserListItem addedItem = null;
+            bool found;
+            lock (CommonState.UserList)
+            {
+                found = false;
+                foreach (UserListItem item in CommonState.UserList)
+                {
+                    if (item.Username == userData.Username)
+                    {
+                        found = true;
+                        if (userData != null)
+                        {
+                            if (status != null)
+                            {
+                                var oldStatus = item.UserStatus;
+                                item.UserStatus = new UserStatus(item.Username, status.Value, oldStatus?.IsPrivileged ?? false);
+                            }
+                            item.UserData = userData;
+                            item.DoesNotExist = false;
+                        }
+                        break;
+                    }
+                }
+                if (!found)
+                {
+                    var item = new UserListItem(userData.Username);
+                    item.UserData = userData;
+
+                    if (this.IsUserInIgnoreList(userData.Username))
+                    {
+                        this.RemoveFromIgnoreList(userData.Username);
+                    }
+
+                    CommonState.UserList.Add(item);
+                    addedItem = item;
+                }
+            }
+            if (addedItem != null)
+            {
+                UserListChanged?.Invoke(null, new UserListChangedEventArgs(userData.Username, addedItem, UserListChangeType.Added));
+                PersistUserList();
+                return false;
+            }
+            return true;
+        }
+
+        public static void AddUserLogic(Context c, string username, Action UIaction, bool massImportCase = false)
+        {
+            if (!massImportCase)
+            {
+                SeekerApplication.Toaster.ShowToast(string.Format(SeekerApplication.GetString(Resource.String.adding_user_), username), ToastLength.Short);
+            }
+
+            Action<Task<Soulseek.UserData>> continueWithAction = (Task<Soulseek.UserData> t) =>
+            {
+                if (t == null || t.IsFaulted)
+                {
+                    //failed to add user
+                    if (t.Exception != null && t.Exception.Message != null && t.Exception.Message.Contains("the wait timed out", StringComparison.OrdinalIgnoreCase))
+                    {
+                        SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.error_adding_user_timeout), ToastLength.Short);
+                    }
+                    else if (t.Exception != null && t.Exception != null && t.Exception.InnerException is Soulseek.UserNotFoundException)
+                    {
+                        if (!massImportCase)
+                        {
+                            SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.error_adding_user_not_found), ToastLength.Short);
+                        }
+                        else
+                        {
+                            SeekerApplication.Toaster.ShowToast(String.Format("Error adding {0}: user not found", username), ToastLength.Short);
+                        }
+                    }
+                }
+                else
+                {
+                    Instance.AddUser(t.Result); //AddUser persists the list when a user is actually added
+                    if (UIaction != null)
+                    {
+                        SeekerState.ActiveActivityRef.RunOnUiThread(UIaction);
+                    }
+                }
+            };
+
+            //Add User Logic...
+            // otherwise WatchUserAsync can throw syncronously (on loggedin precheck) which can crash the thread
+            //   now we treat it like any other failure
+            Task<Soulseek.UserData> watchUserTask;
+            try
+            {
+                watchUserTask = SeekerState.SoulseekClient.WatchUserAsync(username);
+            }
+            catch (Exception e)
+            {
+                watchUserTask = Task.FromException<Soulseek.UserData>(e);
+            }
+            watchUserTask.ContinueWith(continueWithAction);
+        }
+
+        /// <summary>
+        /// Adds a user to the user list locally, without requiring a login or a server round trip.
+        /// For the mass import case (import wizard) so that in cases where we are logged out / 
+        /// have network issues we do not drop all the added users (bug report).
+        /// We still call watch if logged in.
+        /// </summary>
+        public static void AddUserMassImport(string username)
+        {
+            if (string.IsNullOrEmpty(username) || Instance.ContainsUser(username))
+            {
+                return;
+            }
+            lock (CommonState.UserList)
+            {
+                CommonState.UserList.Add(new UserListItem(username, UserRole.Friend));
+            }
+            if (PreferencesState.CurrentlyLoggedIn)
+            {
+                // otherwise WatchUserAsync can throw syncronously (on loggedin precheck) which can crash the thread
+                //   now we treat it like any other failure
+                Task<Soulseek.UserData> watchUserTask;
+                try
+                {
+                    watchUserTask = SeekerState.SoulseekClient.WatchUserAsync(username);
+                }
+                catch (Exception e)
+                {
+                    watchUserTask = Task.FromException<Soulseek.UserData>(e);
+                }
+                watchUserTask.ContinueWith((task) => SeekerApplication.UpdateUserInfo(task, username));
+            }
+        }
+
+        public static void AddUserAPI(Context c, string username, Action UIaction, bool massImportCase = false)
+        {
+
+            if (username == string.Empty || username == null)
+            {
+                SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.must_type_a_username_to_add), ToastLength.Short);
+                return;
+            }
+
+            if (!PreferencesState.CurrentlyLoggedIn)
+            {
+                SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.must_be_logged_to_add_or_remove_user), ToastLength.Short);
+                return;
+            }
+
+            if (Instance.ContainsUser(username))
+            {
+                SeekerApplication.Toaster.ShowToast(string.Format(SeekerApplication.GetString(Resource.String.already_added_user_), username), ToastLength.Short);
+                return;
+            }
+
+            Action<Task> actualActionToPerform = new Action<Task>((Task t) =>
+            {
+                if (t.IsFaulted)
+                {
+                    //only show once for the original fault.
+                    Logger.Debug("task is faulted, prop? " + (t.Exception.InnerException is FaultPropagationException)); //t.Exception is always Aggregate Exception..
+                    if (!(t.Exception.InnerException is FaultPropagationException))
+                    {
+                        SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.failed_to_connect), ToastLength.Short);
+                    }
+                    throw new FaultPropagationException();
+                }
+                SeekerState.ActiveActivityRef.RunOnUiThread(() => { AddUserLogic(c, username, UIaction, massImportCase); });
+            });
+
+            SessionService.Instance.RunWithReconnect(actualActionToPerform, "User will be added once login is complete.");
+        }
+
+        /// <summary>
+        /// Remove user from user list.
+        /// </summary>
+        /// <returns>true if user was found (if false then bad..)</returns>
+        public bool RemoveUser(string username)
+        {
+            UserListItem removedItem = null;
+            lock (CommonState.UserList)
+            {
+                foreach (UserListItem item in CommonState.UserList)
+                {
+                    if (item.Username == username)
+                    {
+                        removedItem = item;
+                        break;
+                    }
+                }
+                if (removedItem == null)
+                {
+                    return false;
+                }
+                CommonState.UserList.Remove(removedItem);
+            }
+            UserListChanged?.Invoke(null, new UserListChangedEventArgs(username, removedItem, UserListChangeType.Removed));
+            PersistUserList();
+            return true;
+        }
+
+        public bool AddToIgnoreList(string username)
+        {
+            // user list and ignore list are mutually exclusive — ignoring a friend removes them from the friend list.
+            if (this.ContainsUser(username))
+            {
+                this.RemoveUser(username);
+            }
+
+            UserListItem addedItem = null;
+            lock (CommonState.IgnoreUserList)
+            {
+                if (CommonState.IgnoreUserList.Exists(userListItem => { return userListItem.Username == username; }))
+                {
+                    return false;
+                }
+                addedItem = new UserListItem(username, UserRole.Ignored);
+                CommonState.IgnoreUserList.Add(addedItem);
+            }
+            IgnoreListChanged?.Invoke(null, new UserListChangedEventArgs(username, addedItem, UserListChangeType.Added));
+            PersistIgnoreList();
+            return true;
+        }
+
+        public bool RemoveFromIgnoreList(string username)
+        {
+            UserListItem removedItem = null;
+            lock (CommonState.IgnoreUserList)
+            {
+                removedItem = CommonState.IgnoreUserList.FirstOrDefault(userListItem => { return userListItem.Username == username; });
+                if (removedItem == null)
+                {
+                    return false;
+                }
+                CommonState.IgnoreUserList = CommonState.IgnoreUserList.Where(userListItem => { return userListItem.Username != username; }).ToList();
+            }
+            IgnoreListChanged?.Invoke(null, new UserListChangedEventArgs(username, removedItem, UserListChangeType.Removed));
+            PersistIgnoreList();
+            return true;
+        }
+
+        public bool IsUserInIgnoreList(string username)
+        {
+            lock (CommonState.IgnoreUserList)
+            {
+                return CommonState.IgnoreUserList.Exists(userListItem => { return userListItem.Username == username; });
+            }
+        }
+
+        public static void AddToIgnoreListFeedback(Context c, string username)
+        {
+            if (Instance.AddToIgnoreList(username))
+            {
+                SeekerApplication.Toaster.ShowToast(string.Format(SeekerApplication.GetString(Resource.String.added_to_ignore), username), ToastLength.Short);
+            }
+            else
+            {
+                SeekerApplication.Toaster.ShowToast(string.Format(SeekerApplication.GetString(Resource.String.already_added_to_ignore), username), ToastLength.Short);
+            }
+        }
+
+        public static void RemoveFromIgnoreListFeedback(Context c, string username)
+        {
+            if (Instance.RemoveFromIgnoreList(username))
+            {
+                SeekerApplication.Toaster.ShowToast(string.Format(SeekerApplication.GetString(Resource.String.removed_user_from_ignored_list), username), ToastLength.Short);
+            }
+        }
+    }
+}

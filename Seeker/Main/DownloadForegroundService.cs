@@ -1,0 +1,128 @@
+﻿using Android.App;
+using Android.Content;
+using Android.OS;
+using Android.Runtime;
+using Android.Views;
+using Android.Widget;
+using AndroidX.Lifecycle;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using Seeker.Helpers;
+using Seeker.Services;
+using static Seeker.Helpers.ServiceExtensions;
+
+namespace Seeker
+{
+    //Services are natural singletons. There will be 0 or 1 instance of your service at any given time.
+    [Service(Name = "com.companyname.andriodapp1.DownloadService", ForegroundServiceType = Android.Content.PM.ForegroundService.TypeDataSync | Android.Content.PM.ForegroundService.TypeSpecialUse)]
+    [MetaData(Constants.AndroidForegroundSpecialUseMetadata, Value = Constants.AndroidForegroundSpecialUseDescription)]
+    public class DownloadForegroundService : Service
+    {
+        public const int NOTIF_ID = 111;
+        public const string FromTransferString = "FromTransfer";
+        public const int NonZeroRequestCode = 7672;
+
+        public override IBinder OnBind(Intent intent)
+        {
+            return null; //does not allow binding. 
+        }
+
+        public static Notification CreateNotification(Context context, String contentText)
+        {
+            Intent notifIntent = new Intent(context, typeof(MainActivity));
+            notifIntent.AddFlags(ActivityFlags.SingleTop);
+            notifIntent.PutExtra(FromTransferString, 2);
+            PendingIntent pendingIntent =
+                PendingIntent.GetActivity(context, NonZeroRequestCode, notifIntent, CommonHelpers.AppendMutabilityIfApplicable((PendingIntentFlags)0, true));
+            //no such method takes args CHANNEL_ID in API 25. API 26 = 8.0 which requires channel ID.
+            //a "channel" is a category in the UI to the end user.
+            return CommonHelpers.CreateNotification(context, pendingIntent, AppNotifications.CHANNEL_ID_DOWNLOAD_FOREGROUND, context.GetString(Resource.String.download_in_progress), contentText, true, true);
+        }
+
+        public static string PluralDownloadsRemaining
+        {
+            get
+            {
+                return SeekerState.ActiveActivityRef.GetString(Resource.String.downloads_remaining);
+            }
+        }
+
+        public static string SingularDownloadRemaining
+        {
+            get
+            {
+                return SeekerState.ActiveActivityRef.GetString(Resource.String.download_remaining);
+            }
+        }
+
+
+        [return: GeneratedEnum]
+        public override StartCommandResult OnStartCommand(Intent intent, [GeneratedEnum] StartCommandFlags flags, int startId)
+        {
+            ServiceLifecycle.DownloadKeepAliveServiceRunning = true;
+
+            CommonHelpers.CreateNotificationChannel(this, AppNotifications.CHANNEL_ID_DOWNLOAD_FOREGROUND, AppNotifications.CHANNEL_NAME_DOWNLOAD_FOREGROUND);//in android 8.1 and later must create a notif channel else get Bad Notification for startForeground error.
+            Notification notification = null;
+            int cnt = SeekerApplication.ActiveDownloadCount;
+            if (cnt <= 0)
+            {
+                Logger.Firebase("started download service with 0 transfers");
+                notification = CreateNotification(this, this.GetString(Resource.String.transfers_in_progress));
+            }
+            else
+            {
+                if (cnt == 1)
+                {
+                    notification = CreateNotification(this, string.Format(SingularDownloadRemaining, 1));
+                }
+                else
+                {
+                    notification = CreateNotification(this, string.Format(PluralDownloadsRemaining, cnt));
+                }
+            }
+
+            try
+            {
+                SeekerApplication.AcquireTransferLocksAndResetTimer();
+            }
+            catch (System.Exception e)
+            {
+                Logger.Firebase("timer issue: " + e.Message + e.StackTrace);
+            }
+
+            try
+            {
+                this.StartForegroundWrapper(NOTIF_ID, notification);
+            }
+            catch(System.Exception e)
+            {
+                // its okay to just not promote this service to foreground.
+                // next time it gets hit, it can get promoted then
+                Logger.FirebaseError($"Download service failed promoting to foreground. background: {ForegroundLifecycleTracker.IsBackground()}", e);
+
+            }
+            //runs indefinitely until stop.
+
+            // If we get killed there is no point in restarting automatically, instead on startup
+            // TransfersController.InitializeService will requeue any pending transfers after login.
+            return StartCommandResult.NotSticky;
+        }
+
+        public override void OnDestroy()
+        {
+            ServiceLifecycle.DownloadKeepAliveServiceRunning = false;
+            SeekerApplication.ReleaseTransferLocksIfServicesComplete();
+            //save once complete
+            TransferPersistenceWrapper.SaveTransferItems();
+            base.OnDestroy();
+        }
+
+        public override void OnCreate()
+        {
+            base.OnCreate();
+        }
+    }
+
+}

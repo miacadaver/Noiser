@@ -1,0 +1,70 @@
+<RelativeLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context="android.PageFragment"
+    android:id="@+id/messagesOverviewLayout"
+>
+    <androidx.recyclerview.widget.RecyclerView
+        android:minWidth="25px"
+        android:minHeight="25px"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:clipToPadding="false"
+        android:id="@+id/recyclerViewOverview"
+    />
+    <LinearLayout
+        android:id="@+id/noMessagesView"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center_horizontal"
+        android:layout_centerInParent="true"
+        android:translationY="-48dp"
+        android:visibility="gone">
+
+        <ImageView
+            android:layout_width="96dp"
+            android:layout_height="96dp"
+            android:src="@drawable/chat_bubble_40dp"
+            android:tint="?attr/cellTextColorSubdued" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:maxWidth="320dp"
+            android:gravity="center"
+            android:breakStrategy="balanced"
+            android:text="@string/no_messages"
+            android:textSize="18sp"
+            android:textColor="?attr/cellTextColor"
+            android:layout_marginTop="12dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:maxWidth="320dp"
+            android:gravity="center"
+            android:breakStrategy="balanced"
+            android:text="@string/no_messages_subtitle"
+            android:textSize="14sp"
+            android:textColor="?attr/cellTextColorSubdued"
+            android:layout_marginTop="4dp" />
+
+    </LinearLayout>
+
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/fabNewMessage"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:layout_alignParentEnd="true"
+        android:layout_marginBottom="24dp"
+        android:layout_marginEnd="16dp"
+        android:src="@drawable/new_message_48dp"
+        android:contentDescription="@string/msg_user"
+        app:backgroundTint="?attr/mainPurple"
+        app:tint="@android:color/white" />
+</RelativeLayout>

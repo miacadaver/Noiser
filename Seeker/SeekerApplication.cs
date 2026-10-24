@@ -1,0 +1,1123 @@
+﻿/*
+ * Copyright 2021 Seeker
+ *
+ * This file is part of Seeker
+ *
+ * Seeker is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Seeker is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Seeker. If not, see <http://www.gnu.org/licenses/>.
+ */
+using Android.App;
+using Android.Content;
+using Android.Content.PM;
+using Android.Net;
+using Android.OS;
+using Android.Runtime;
+using Android.Util;
+using Android.Views;
+using Android.Widget;
+using AndroidX.AppCompat.App;
+using AndroidX.Core.App;
+using AndroidX.DocumentFile.Provider;
+using Common;
+using Common.Share;
+using Seeker.Browse;
+using Seeker.Chatroom;
+using Seeker.Helpers;
+using Seeker.Managers;
+using Seeker.Messages;
+using Seeker.Search;
+using Seeker.Services;
+using Seeker.Transfers;
+using Seeker.UPnP;
+using Soulseek;
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Net;
+using System.Net.Sockets;
+using System.Threading;
+using System.Threading.Tasks;
+using static Android.Provider.ContactsContract;
+
+namespace Seeker
+{
+    [Application()]
+    public partial class SeekerApplication : Application
+    {
+        public static Context ApplicationContext = null;
+
+        public static PowerManager.WakeLock CpuKeepAlive_Transfer = null;
+        public static Android.Net.Wifi.WifiManager.WifiLock WifiKeepAlive_Transfer = null;
+        public static System.Timers.Timer KeepAliveInactivityKillTimer = null;
+
+        public static void KeepAliveInactivityKillTimerEllapsed(object sender, System.Timers.ElapsedEventArgs e)
+        {
+            if (CpuKeepAlive_Transfer != null)
+            {
+                CpuKeepAlive_Transfer.Release();
+            }
+            if (WifiKeepAlive_Transfer != null)
+            {
+                WifiKeepAlive_Transfer.Release();
+            }
+            KeepAliveInactivityKillTimer.Stop();
+        }
+        public SeekerApplication(IntPtr javaReference, Android.Runtime.JniHandleOwnership transfer) : base(javaReference, transfer)
+        {
+        }
+
+        private static readonly ConnectionOptions ServerConnectionOptionsWithKeepAlive =
+            new ConnectionOptions(configureSocket: ConfigureTcpKeepAlive);
+
+        private static void ConfigureTcpKeepAlive(Socket socket)
+        {
+            try
+            {
+                // 15s idle, retry every 5s, consider dead after 4 unanswered (~35s)
+                socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
+                socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveTime, 15);
+                socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveInterval, 5);
+                socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveRetryCount, 4);
+            }
+            catch (Exception e)
+            {
+                Logger.Debug("failed to configure server keepalive: " + e.Message);
+            }
+
+            if (OperatingSystem.IsAndroid() || OperatingSystem.IsLinux())
+            {
+                try
+                {
+                    // keepalive does not probe while sent data is unacked.  after 45s unacked consider dead.
+                    // TCP_USER_TIMEOUT (IPPROTO_TCP 6, option 18), milliseconds
+                    socket.SetRawSocketOption(6, 18, BitConverter.GetBytes(ServerUserTimeoutMs));
+                }
+                catch (Exception e)
+                {
+                    Logger.Debug("failed to configure server TCP_USER_TIMEOUT: " + e.Message);
+                }
+            }
+        }
+
+        private const int ServerUserTimeoutMs = 45000;
+
+        public enum DnsLookupResult
+        {
+            Success,
+            Failed,
+            TimedOut
+        }
+
+        public static DnsLookupResult DnsLookupStatus = DnsLookupResult.Success;
+
+        public static Exception DnsLookupException;
+
+        private const int DnsTimeoutMs = 3000;
+
+        private const string ServerHost = "server.slsknet.org";
+        private const int ServerPort = 2271;
+
+        public static Task<IPAddress> ResolveServerAddressAsync()
+        {
+#if MOCK
+            return Task.Delay(1000).ContinueWith(task => IPAddress.Loopback);
+#else
+            return ResolveAddressAsync(ServerHost);
+#endif
+        }
+
+        private static async Task<IPAddress> ResolveAddressAsync(string address)
+        {
+            DnsLookupStatus = DnsLookupResult.Success;
+            DnsLookupException = null;
+            // server.slsknet.org has only A record, no AAAA record. If we dont pass InterNetwork then 
+            //   we end up calling getaddrinfo with AF_UNSPEC which waits until it gets a response from 
+            //   both queries. Some resolvers timeout when no AAAA record and its requested.  In our logs we 
+            //   see 20% of users timeout.  Therefore, we force IPv4 here.
+            var dnsTask = Dns.GetHostAddressesAsync(address, AddressFamily.InterNetwork);
+
+            var completed = await Task.WhenAny(dnsTask, Task.Delay(DnsTimeoutMs)).ConfigureAwait(false);
+
+            if (completed == dnsTask && dnsTask.Status == TaskStatus.RanToCompletion && dnsTask.Result.Length > 0)
+            {
+                return dnsTask.Result[0];
+            }
+
+            if (completed == dnsTask)
+            {
+                DnsLookupStatus = DnsLookupResult.Failed;
+                DnsLookupException = dnsTask.Exception?.InnerException ?? (Exception)dnsTask.Exception
+                    ?? new SocketException((int)SocketError.NoData);
+            }
+            else
+            {
+                DnsLookupStatus = DnsLookupResult.TimedOut;
+            }
+            Logger.Debug("DNS lookup of " + address + " " + DnsLookupStatus + " " + DescribeDnsException(DnsLookupException) + " - falling back to hardcoded IP");
+            return IPAddress.Parse("208.76.170.59");
+        }
+
+        public static string DescribeDnsException(Exception e)
+        {
+            if (e == null)
+            {
+                return string.Empty;
+            }
+            if (e is SocketException se)
+            {
+                return se.SocketErrorCode + " (" + se.ErrorCode + "): " + se.Message;
+            }
+            return e.GetType().Name + ": " + e.Message;
+        }
+
+        public const bool AUTO_CONNECT_ON = true;
+
+        public static AndroidToaster Toaster { get; private set; }
+        public override void OnCreate()
+        {
+            base.OnCreate();
+            ApplicationContext = this;
+            Toaster = new AndroidToaster();
+            Services.SessionService.Instance = new Services.SessionService();
+            Services.ReconnectService.Instance = new Services.ReconnectService();
+            Services.FileSystemService.Instance = new Services.FileSystemService();
+
+            var loggerBackend = new AndroidLoggerBackend();
+#if !IzzySoft
+            Firebase.FirebaseApp app = Firebase.FirebaseApp.InitializeApp(this);
+            if (app == null)
+            {
+                loggerBackend.CrashlyticsEnabled = false;
+            }
+#endif
+            Logger.Backend = loggerBackend;
+            MicroTagReader.Instance = new MicroTagReader(loggerBackend);
+
+            Services.DownloadService.Instance = new Services.DownloadService(Toaster, Services.FileSystemService.Instance, Services.SessionService.Instance, new Services.MainThreadRunner(), () => SeekerState.SoulseekClient, loggerBackend, new Services.AndroidNetworkStatus());
+            Services.UserInfoPictureCacheService.Instance = new Services.UserInfoPictureCacheService();
+            Playback.StreamingPlaybackController.CleanAbandonedCache(CacheDir.AbsolutePath);
+
+#if DEBUG
+            Android.OS.StrictMode.SetThreadPolicy(
+                new Android.OS.StrictMode.ThreadPolicy.Builder()
+                    .DetectDiskReads()
+                    .DetectDiskWrites()
+                    .DetectNetwork()
+                    .DetectCustomSlowCalls()
+                    .PenaltyLog()
+                    .PenaltyFlashScreen()
+                    .PenaltyDeathOnNetwork()
+                    .Build());
+
+            Android.OS.StrictMode.SetVmPolicy(
+                new Android.OS.StrictMode.VmPolicy.Builder()
+                    .DetectLeakedClosableObjects()
+                    .DetectLeakedSqlLiteObjects()
+                    .DetectActivityLeaks()
+                    .PenaltyLog()
+                    .Build());
+#endif
+
+            this.RegisterActivityLifecycleCallbacks(new ForegroundLifecycleTracker());
+            AndroidX.Core.Content.ContextCompat.RegisterReceiver(
+                this,
+                new ConnectionReceiver(),
+                new IntentFilter(ConnectivityManager.ConnectivityAction),
+                AndroidX.Core.Content.ContextCompat.ReceiverNotExported);
+            var sharedPrefs = this.GetSharedPreferences(Constants.SharedPrefFile, 0);
+            SeekerState.SharedPreferences = sharedPrefs;
+
+            //SerializationTests.PopulateSharedPreferencesFromFile(this, sharedPrefs);
+
+            RestoreSeekerState(sharedPrefs, this);
+            StorageState.LoadFromPreferences(this);
+            PreferencesManager.RestoreListeningStateLocked();
+            UPnpManager.RestoreUpnpState();
+
+            // warm up cache (takes ~100+ ms), subsequent calls to GetDateTimeNowSafe() will be fast (~0ms)
+            Task.Run(() => _ = SimpleHelpers.GetDateTimeNowSafe());
+
+            SeekerState.SystemLanguage = LocaleHelper.LocaleToString(Resources.Configuration.Locale);
+
+            if (LocaleHelper.HasProperPerAppLanguageSupport())
+            {
+                if (!PreferencesState.LegacyLanguageMigrated)
+                {
+                    PreferencesState.LegacyLanguageMigrated = true;
+                    PreferencesManager.SaveLegacyLanguageMigrated();
+                    LocaleHelper.SetLanguage(PreferencesState.Language);
+                }
+            }
+            else
+            {
+                LocaleHelper.SetLanguageLegacy(PreferencesState.Language, false);
+            }
+
+            //LogDebug("Default Night Mode: " + AppCompatDelegate.DefaultNightMode); //-100 = night mode unspecified, default on my Pixel 2. also on api22 emulator it is -100.
+            //though setting it to -1 does not seem to recreate the activity or have any negative side effects..
+            //this does not restart Android.App.Application. so putting it here is a much better place... in MainActivity.OnCreate it would restart the activity every time.
+            if (AppCompatDelegate.DefaultNightMode != PreferencesState.DayNightMode)
+            {
+                AppCompatDelegate.DefaultNightMode = PreferencesState.DayNightMode;
+            }
+
+            //SeekerState.SharedPreferences = sharedPrefs;
+
+            if (SeekerKeepAliveService.CpuKeepAlive_FullService == null)
+            {
+                SeekerKeepAliveService.CpuKeepAlive_FullService = ((PowerManager)this.GetSystemService(Context.PowerService)).NewWakeLock(WakeLockFlags.Partial, "Seeker Keep Alive Service Cpu");
+            }
+
+            if (SeekerKeepAliveService.WifiKeepAlive_FullService == null)
+            {
+                SeekerKeepAliveService.WifiKeepAlive_FullService = ((Android.Net.Wifi.WifiManager)this.GetSystemService(Context.WifiService)).CreateWifiLock(Android.Net.WifiMode.FullHighPerf, "Seeker Keep Alive Service Wifi");
+            }
+
+            try
+            {
+                if (CpuKeepAlive_Transfer == null)
+                {
+                    CpuKeepAlive_Transfer = ((PowerManager)this.GetSystemService(Context.PowerService)).NewWakeLock(WakeLockFlags.Partial, "Seeker Download CPU_Keep_Alive");
+                    CpuKeepAlive_Transfer.SetReferenceCounted(false);
+                }
+                if (WifiKeepAlive_Transfer == null)
+                {
+                    WifiKeepAlive_Transfer = ((Android.Net.Wifi.WifiManager)this.GetSystemService(Context.WifiService)).CreateWifiLock(Android.Net.WifiMode.FullHighPerf, "Seeker Download Wifi_Keep_Alive");
+                    WifiKeepAlive_Transfer.SetReferenceCounted(false);
+                }
+            }
+            catch (Exception e)
+            {
+                Logger.Firebase("error init keepalives: " + e.Message + e.StackTrace);
+            }
+            if (KeepAliveInactivityKillTimer == null)
+            {
+                KeepAliveInactivityKillTimer = new System.Timers.Timer(60 * 1000 * 10); //kill after 10 mins of no activity..
+                                                                                        //remember that this is a fallback. for when foreground service is still running but nothing is happening otherwise.
+                KeepAliveInactivityKillTimer.Elapsed += KeepAliveInactivityKillTimerEllapsed;
+                KeepAliveInactivityKillTimer.AutoReset = false;
+            }
+
+            NetworkStateService.SetNetworkState(this);
+
+            //need search response and enqueue download action...
+            //SeekerState.SoulseekClient = new SoulseekClient(new SoulseekClientOptions(messageTimeout: 30000, enableListener: false, autoAcknowledgePrivateMessages: false, acceptPrivateRoomInvitations:PreferencesState.AllowPrivateRoomInvitations)); //Enable Listener is False.  Default is True.
+            #if DEBUG
+                var _capRoot = Application.Context.GetExternalFilesDir(null)?.AbsolutePath;
+                if (_capRoot != null)
+                {
+                    Seeker.Debug.SearchCaptureStore.Configure(
+                        System.IO.Path.Combine(_capRoot, "search_captures"),
+                        Seeker.Debug.DebugSecrets.SeekerEncryptKey);
+                }
+            #endif
+            #if MOCK
+                SeekerState.SoulseekClient = new MockSoulseekClient();
+                SharingService.TurnOnSharing();
+                if (Seeker.Debug.MockTransferStress.AutoStartOnLaunch)
+                {
+                    Seeker.Debug.MockTransferStress.StartDelayed();
+                }
+            #else
+                SeekerState.SoulseekClient = new SoulseekClient(
+                    128,
+                    new SoulseekClientOptions(
+#if ADB_LOGCAT
+                        minimumDiagnosticLevel: Soulseek.Diagnostics.DiagnosticLevel.Debug,
+#else
+                        minimumDiagnosticLevel: PreferencesState.LogDiagnostics ? Soulseek.Diagnostics.DiagnosticLevel.Debug : Soulseek.Diagnostics.DiagnosticLevel.Info,
+#endif
+                        messageTimeout: 30000,
+                        enableListener: PreferencesState.ListenerEnabled,
+                        autoAcknowledgePrivateMessages: false,
+                        acceptPrivateRoomInvitations: PreferencesState.AllowPrivateRoomInvitations,
+                        listenPort: PreferencesState.ListenerPort,
+                        maximumConcurrentDownloads: PreferencesState.LimitSimultaneousDownloads ? PreferencesState.MaxSimultaneousLimit : int.MaxValue,
+                        // UploadService's queue owns the upload slots (ahead of global semaphore)
+                        maximumConcurrentUploads: int.MaxValue,
+                        maximumConcurrentSearches: 5,
+                        serverConnectionOptions: ServerConnectionOptionsWithKeepAlive,
+                        userInfoResolver: UserInfoResponder.HandleRequest));
+            #endif
+            NetworkStateService.RegisterDefaultNetworkCallback(this);
+            SetDiagnosticState(PreferencesState.LogDiagnostics);
+            SeekerState.SoulseekClient.UserStatisticsChanged += SoulseekClient_UserDataReceived;
+            SeekerState.SoulseekClient.UserStatusChanged += UserStatusDeduplicator.Instance.OnUserStatusChanged;
+            UserStatusDeduplicator.Instance.Deduplicated += SoulseekClient_UserStatusChanged;
+            //SeekerState.SoulseekClient.TransferProgressUpdated += Upload_TransferProgressUpdated;
+            Seeker.Transfers.TransferEventRouter.Wire(SeekerState.SoulseekClient);
+
+            SeekerState.SoulseekClient.Connected += SoulseekClient_Connected;
+            SeekerState.SoulseekClient.StateChanged += SoulseekClient_StateChanged;
+            SeekerState.SoulseekClient.LoggedIn += SoulseekClient_LoggedIn;
+            SeekerState.SoulseekClient.Disconnected += SoulseekClient_Disconnected;
+            SeekerState.SoulseekClient.ServerInfoReceived += SoulseekClient_ServerInfoReceived;
+            BrowseService.BrowseResponseReceived += BrowseFragment.OnBrowseResponseReceived;
+
+            SeekerState.SoulseekClient.PrivilegedUserListReceived += SoulseekClient_PrivilegedUserListReceived;
+            SeekerState.SoulseekClient.PrivilegeNotificationReceived += SoulseekClient_PrivilegeNotificationReceived;
+            SeekerState.SoulseekClient.UserStatusChanged += SoulseekClient_UserStatusPrivilegeChanged;
+            SeekerState.SoulseekClient.ExcludedSearchPhrasesReceived += SoulseekClient_ExcludedSearchPhrasesReceived;
+            ServerMessageService.Initialize(sharedPrefs);
+            SeekerState.SoulseekClient.GlobalMessageReceived += ServerMessageService.OnGlobalMessageReceived;
+
+            MessageController.Initialize();
+            ChatroomController.Initialize();
+
+
+
+            UPnpManager.Context = this;
+            UPnpManager.Instance.SearchAndSetMappingIfRequired();
+            SimpleHelpers.STRINGS_KBS = TryGetStringOr(Resource.String.kilobytes_per_second, "kbps");
+            SimpleHelpers.STRINGS_KHZ = TryGetStringOr(Resource.String.kilohertz, "kHz");
+
+            SimpleHelpers.UserListService = UserListService.Instance;
+        }
+
+        /// <summary>
+        /// Otherwise on below API 33 ApplicationContext.GetString will resolve the system language,
+        /// not the override.
+        /// </summary>
+        public override void OnConfigurationChanged(Android.Content.Res.Configuration newConfig)
+        {
+            base.OnConfigurationChanged(newConfig);
+            if (LocaleHelper.HasProperPerAppLanguageSupport())
+            {
+                return;
+            }
+            SeekerState.SystemLanguage = LocaleHelper.LocaleToString(newConfig.Locale);
+            string before = LocaleHelper.LocaleToString(Resources.Configuration.Locale);
+            LocaleHelper.SetLanguageLegacy(PreferencesState.Language, false);
+        }
+
+        private void SoulseekClient_ExcludedSearchPhrasesReceived(object sender, IReadOnlyCollection<string> exludedPhrasesList)
+        {
+            SearchUtil.ExcludedSearchPhrases = exludedPhrasesList;
+        }
+
+
+        public static void SetDiagnosticState(bool log_diagnostics)
+        {
+            if (log_diagnostics)
+            {
+                DiagnosticFileWriter.Subscribe();
+                AndroidEnvironment.UnhandledExceptionRaiser += AndroidEnvironment_UnhandledExceptionRaiser;
+            }
+            else
+            {
+                DiagnosticFileWriter.Unsubscribe();
+                AndroidEnvironment.UnhandledExceptionRaiser -= AndroidEnvironment_UnhandledExceptionRaiser;
+            }
+        }
+
+        private static void AndroidEnvironment_UnhandledExceptionRaiser(object sender, RaiseThrowableEventArgs e)
+        {
+            //by default e.Handled == false. and this does go on to crash the process (which is good imo, I only want this for logging purposes).
+            Logger.Debug(e.Exception.Message);
+            Logger.Debug(e.Exception.StackTrace);
+        }
+
+        private void SoulseekClient_Disconnected(object sender, SoulseekClientDisconnectedEventArgs e)
+        {
+            Logger.Debug("disconnected");
+            lock (OurCurrentLoginTaskSyncObject)
+            {
+                CurrentLoginTask = null;
+            }
+        }
+
+        public static void AcquireTransferLocksAndResetTimer()
+        {
+            if (CpuKeepAlive_Transfer != null && !CpuKeepAlive_Transfer.IsHeld)
+            {
+                CpuKeepAlive_Transfer.Acquire();
+            }
+            if (WifiKeepAlive_Transfer != null && !WifiKeepAlive_Transfer.IsHeld)
+            {
+                WifiKeepAlive_Transfer.Acquire();
+            }
+
+            if (KeepAliveInactivityKillTimer != null)
+            {
+                KeepAliveInactivityKillTimer.Stop(); //can be null
+                KeepAliveInactivityKillTimer.Start(); //reset the timer..
+            }
+            else
+            {
+                KeepAliveInactivityKillTimer = new System.Timers.Timer(60 * 1000 * 10); //kill after 10 mins of no activity..
+                                                                                                     //remember that this is a fallback. for when foreground service is still running but nothing is happening otherwise.
+                KeepAliveInactivityKillTimer.Elapsed += KeepAliveInactivityKillTimerEllapsed;
+                KeepAliveInactivityKillTimer.AutoReset = false;
+            }
+        }
+
+        public static void ReleaseTransferLocksIfServicesComplete()
+        {
+            //if all transfers are done..
+            if (!ServiceLifecycle.UploadKeepAliveServiceRunning && !ServiceLifecycle.DownloadKeepAliveServiceRunning)
+            {
+                if (CpuKeepAlive_Transfer != null)
+                {
+                    CpuKeepAlive_Transfer.Release();
+                }
+                if (WifiKeepAlive_Transfer != null)
+                {
+                    WifiKeepAlive_Transfer.Release();
+                }
+                if (KeepAliveInactivityKillTimer != null)
+                {
+                    KeepAliveInactivityKillTimer.Stop();
+                }
+            }
+        }
+
+        internal static int _activeUploadCount = 0;
+        public static int ActiveUploadCount => _activeUploadCount;
+
+        internal static int _activeDownloadCount = 0;
+        public static int ActiveDownloadCount => _activeDownloadCount;
+
+        /// <summary>
+        /// A transfer can start while we are backgrounded (a peer requesting a file, a queued
+        /// download resuming), where API 26+ forbids StartService. OnUpload/DownloadCountChanged
+        /// skip the start in that case, so the transfer would otherwise run for the rest of the
+        /// session with no foreground service — no wake lock, no process priority, killable
+        /// mid-transfer. Called from ForegroundLifecycleTracker once an activity resumes.
+        /// </summary>
+        public static void RetryStartTransferServicesIfNeeded(Context context)
+        {
+            if (context == null)
+            {
+                return;
+            }
+
+            try
+            {
+                if (ActiveUploadCount > 0 && !ServiceLifecycle.UploadKeepAliveServiceRunning)
+                {
+                    Logger.Debug("Retrying upload service start on foreground");
+                    context.StartService(new Intent(context, typeof(UploadForegroundService)));
+                }
+            }
+            catch (System.Exception e)
+            {
+                Logger.FirebaseError("Retry upload service start failed", e);
+            }
+
+            try
+            {
+                if (ActiveDownloadCount > 0 && !ServiceLifecycle.DownloadKeepAliveServiceRunning)
+                {
+                    Logger.Debug("Retrying download service start on foreground");
+                    context.StartService(new Intent(context, typeof(DownloadForegroundService)));
+                }
+            }
+            catch (System.Exception e)
+            {
+                Logger.FirebaseError("Retry download service start failed", e);
+            }
+        }
+
+        internal static void NotifyUploadCountChanged(int count)
+        {
+            if (Android.App.Application.Context is SeekerApplication app)
+            {
+                app.OnUploadCountChanged(count);
+            }
+        }
+
+        internal static void NotifyDownloadCountChanged(int count)
+        {
+            if (Android.App.Application.Context is SeekerApplication app)
+            {
+                app.OnDownloadCountChanged(count);
+            }
+        }
+
+        public static void KickKeepAliveTimer()
+        {
+            try
+            {
+                KeepAliveInactivityKillTimer?.Stop();
+                KeepAliveInactivityKillTimer?.Start();
+            }
+            catch (System.Exception err)
+            {
+                Logger.Firebase("timer issue2: " + err.Message + err.StackTrace); //remember at worst the locks will get released early which is fine.
+            }
+        }
+
+        private void OnUploadCountChanged(int count)
+        {
+            bool abortAll = TransferDebouncer.AbortAll.IsActive();
+            if (count <= 0 || abortAll)
+            {
+                Intent uploadServiceIntent = new Intent(this, typeof(UploadForegroundService));
+                Logger.Debug("Stop Service (upload keep-alive)");
+                this.StopService(uploadServiceIntent);
+                ServiceLifecycle.UploadKeepAliveServiceRunning = false;
+            }
+            else if (!ServiceLifecycle.UploadKeepAliveServiceRunning)
+            {
+                Intent uploadServiceIntent = new Intent(this, typeof(UploadForegroundService));
+                if (OperatingSystem.IsAndroidVersionAtLeast(26))
+                {
+                    bool? isForeground = SeekerState.ActiveActivityRef?.IsResumed();
+                    if (isForeground ?? false)
+                    {
+                        this.StartService(uploadServiceIntent);
+                    }
+                }
+                else
+                {
+                    this.StartService(uploadServiceIntent);
+                }
+            }
+            else
+            {
+                string msg = count == 1
+                    ? string.Format(UploadForegroundService.SingularUploadRemaining, count)
+                    : string.Format(UploadForegroundService.PluralUploadsRemaining, count);
+                var notif = UploadForegroundService.CreateNotification(this, msg);
+                NotificationManager manager = GetSystemService(Context.NotificationService) as NotificationManager;
+                manager.Notify(UploadForegroundService.NOTIF_ID, notif);
+            }
+        }
+
+        private void OnDownloadCountChanged(int count)
+        {
+            bool cancelAndClear = TransferDebouncer.CancelAndClearAll.IsActive();
+            if (count <= 0 || cancelAndClear)
+            {
+                Intent downloadServiceIntent = new Intent(this, typeof(DownloadForegroundService));
+                Logger.Debug("Stop Service (download keep-alive, no downloads in progress)");
+                this.StopService(downloadServiceIntent);
+                ServiceLifecycle.DownloadKeepAliveServiceRunning = false;
+            }
+            else if (!ServiceLifecycle.DownloadKeepAliveServiceRunning)
+            {
+                Intent downloadServiceIntent = new Intent(this, typeof(DownloadForegroundService));
+                if (OperatingSystem.IsAndroidVersionAtLeast(26))
+                {
+                    bool? isForeground = SeekerState.ActiveActivityRef?.IsResumed();
+                    if (isForeground ?? false)
+                    {
+                        this.StartService(downloadServiceIntent);
+                    }
+                }
+                else
+                {
+                    this.StartService(downloadServiceIntent);
+                }
+            }
+            else
+            {
+                string msg = count == 1
+                    ? string.Format(DownloadForegroundService.SingularDownloadRemaining, count)
+                    : string.Format(DownloadForegroundService.PluralDownloadsRemaining, count);
+                var notif = DownloadForegroundService.CreateNotification(this, msg);
+                NotificationManager manager = GetSystemService(Context.NotificationService) as NotificationManager;
+                manager.Notify(DownloadForegroundService.NOTIF_ID, notif);
+            }
+        }
+
+
+        private void SoulseekClient_PrivilegedUserListReceived(object sender, IReadOnlyCollection<string> privilegedUsers)
+        {
+            PrivilegesManager.Instance.SetPrivilegedList(privilegedUsers);
+        }
+
+        private void SoulseekClient_PrivilegeNotificationReceived(object sender, PrivilegeNotificationReceivedEventArgs e)
+        {
+            if (!e.Id.HasValue)
+            {
+                PrivilegesManager.Instance.SetUserPrivileged(e.Username, true);
+            }
+        }
+
+        private void SoulseekClient_UserStatusPrivilegeChanged(object sender, UserStatus e)
+        {
+            PrivilegesManager.Instance.SetUserPrivileged(e.Username, e.IsPrivileged);
+        }
+
+        private void SoulseekClient_ServerInfoReceived(object sender, ServerInfo e)
+        {
+            if (e.WishlistInterval.HasValue)
+            {
+                WishlistController.SearchIntervalMilliseconds = e.WishlistInterval.Value * 1000;
+                WishlistController.Initialize();
+            }
+            else
+            {
+                Logger.Debug("wishlist interval is null");
+            }
+        }
+
+        //I only care about the Connected, LoggedIn to Disconnecting case.  
+        //the next case is Disconnecting to Disconnected.
+
+        //then for failed retries you get
+        //disconnected to connecting
+        //connecting to disconnecting
+        //disconnecting to disconnected.
+        //so be wary of the disconnected event...
+
+        private void SoulseekClient_StateChanged(object sender, SoulseekClientStateChangedEventArgs e)
+        {
+            Logger.Debug("Prev: " + e.PreviousState.ToString() + " Next: " + e.State.ToString());
+            if (e.PreviousState.HasFlag(SoulseekClientStates.LoggedIn) && e.State.HasFlag(SoulseekClientStates.Disconnecting))
+            {
+                Logger.Debug("Changing from connected to disconnecting: " + (e.Message ?? "(no message)")
+                    + (e.Exception != null ? " (" + SimpleHelpers.DescribeException(e.Exception) + ")" : string.Empty));
+
+
+                if (e.Exception is KickedFromServerException)
+                {
+                    Logger.Debug("Kicked Kicked Kicked");
+                    if (SeekerState.ActiveActivityRef != null)
+                    {
+                        SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.kicked_due_to_other_client), ToastLength.Long);
+                    }
+                    return; //DO NOT RETRY!!! or will do an infinite loop!
+                }
+                if (e.Exception is System.ObjectDisposedException)
+                {
+                    return; //DO NOT RETRY!!! we are shutting down
+                }
+
+
+
+                //this is a "true" connected to disconnected
+                ChatroomController.ClearAndCacheJoined();
+                Logger.Debug("disconnected " + DateTime.UtcNow.ToString());
+                if (e.Message == LoginFragment.LogoutMessage)
+                {
+                    // User intentionally logged out — do not reconnect
+                }
+                else
+                {
+                    ReconnectService.Instance.RequestReconnectNow("disconnected");
+                }
+            }
+            else if (e.PreviousState.HasFlag(SoulseekClientStates.Disconnected))
+            {
+                Logger.Debug("!! changing from disconnected to trying to connect");
+            }
+            else if (e.State.HasFlag(SoulseekClientStates.LoggedIn) && e.State.HasFlag(SoulseekClientStates.Connected))
+            {
+                Logger.Debug("!! changing trying to connect to successfully connected");
+            }
+        }
+
+        private void SoulseekClient_LoggedIn(object sender, EventArgs e)
+        {
+            lock (OurCurrentLoginTaskSyncObject)
+            {
+                CurrentLoginTask = null;
+            }
+            ChatroomController.JoinAutoJoinRoomsAndPreviousJoined();
+            //ChatroomController.ConnectionLapse.Add(new Tuple<bool, DateTime>(true, DateTime.UtcNow)); //just testing obv remove later...
+            Logger.Debug("logged in " + DateTime.UtcNow.ToString());
+            Logger.Debug("Listening State: " + SeekerState.SoulseekClient.GetListeningState());
+            if (PreferencesState.ListenerEnabled && !SeekerState.SoulseekClient.GetListeningState())
+            {
+                if (SeekerState.ActiveActivityRef == null)
+                {
+                    Logger.Firebase("SeekerState.ActiveActivityRef null SoulseekClient_LoggedIn");
+                }
+                else
+                {
+                    SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.port_already_in_use), ToastLength.Short); //todo is this supposed to be here...
+                }
+            }
+        }
+
+        private void SoulseekClient_Connected(object sender, EventArgs e)
+        {
+            //ChatroomController.SetConnectionLapsedMessage(true);
+            Logger.Debug("connected " + DateTime.UtcNow.ToString());
+
+        }
+
+        public static string GetString(int resId)
+        {
+            return SeekerApplication.ApplicationContext.GetString(resId);
+        }
+
+        private static readonly Handler uiThreadHandler = new Handler(Looper.MainLooper);
+
+        public static bool OnUIThread()
+        {
+            return Looper.MainLooper.IsCurrentThread;
+        }
+
+        /// <summary>
+        /// Same as Activity.RunOnUiThread - if on UI thread run inline, else post
+        /// </summary>
+        public static void RunOnUIThread(Action action)
+        {
+            if (OnUIThread())
+            {
+                action();
+            }
+            else
+            {
+                uiThreadHandler.Post(action);
+            }
+        }
+
+        /// <summary>
+        /// Resolve a string resource, falling back to a hardcoded default if the lookup throws
+        /// (e.g. Resources.NotFoundException from a stale resource-ID mismatch after an incomplete
+        /// deploy / partial install). A trivial units string must never be allowed to crash
+        /// Application.OnCreate and brick app startup. We still log so the real frequency is visible.
+        /// </summary>
+        private string TryGetStringOr(int resId, string fallback)
+        {
+            try
+            {
+                return this.Resources.GetString(resId);
+            }
+            catch (Exception e)
+            {
+                Logger.Firebase("TryGetStringOr failed for resId 0x" + resId.ToString("x8") + ": " + e.Message);
+                return fallback;
+            }
+        }
+
+        public static void SetUpLoginContinueWith(Task t)
+        {
+            if (t == null)
+            {
+                return;
+            }
+            if (SharedFileService.MeetsSharingConditions())
+            {
+
+                Action<Task> getAndSetLoggedInInfoAction = new Action<Task>((Task t) =>
+                {
+                    //we want to
+                    //UpdateStatus ??
+                    //inform server if we are sharing..
+                    //get our upload speed..
+                    if (t.Status == TaskStatus.Faulted || t.IsFaulted || t.IsCanceled)
+                    {
+                        return;
+                    }
+                    SharedFileService.InformServerOfSharedFiles();
+                    SeekerState.SoulseekClient.GetUserStatisticsAsync(PreferencesState.Username);
+                });
+                t.ContinueWith(getAndSetLoggedInInfoAction);
+            }
+        }
+
+        // the full outer login task (including DNS resolution) or the task we chained on after
+        public static Task CurrentLoginTask = null;
+        // the inner SoulseekClient.ConnectAsync task
+        public static Task CurrentInnerConnectTask = null;
+        public static object OurCurrentLoginTaskSyncObject = new object();
+        public static Task ConnectAndPerformPostConnectTasks(IPAddress server, string username, string password)
+        {
+            Task t = SeekerState.SoulseekClient.ConnectAsync(server.ToString(), ServerPort, username, password);
+            lock (OurCurrentLoginTaskSyncObject)
+            {
+                CurrentInnerConnectTask = t;
+                // only overwrite the loginTask if it is null or completed
+                if (CurrentLoginTask == null || CurrentLoginTask.IsCompleted)
+                {
+                    CurrentLoginTask = t;
+                }
+            }
+            t.ContinueWith(PerformPostConnectTasks);
+            return t;
+        }
+
+        public static void PerformPostConnectTasks(Task t)
+        {
+            if (t.IsCompletedSuccessfully)
+            {
+                try
+                {
+                    lock (CommonState.UserList)
+                    {
+                        foreach (UserListItem item in CommonState.UserList)
+                        {
+                            Logger.Debug("adding user: " + item.Username);
+                            SeekerState.SoulseekClient.WatchUserAsync(item.Username).ContinueWith((Task<UserData> userDataTask) => UpdateUserInfo(userDataTask, item.Username));
+                        }
+                    }
+
+                    lock (TransferState.UsersWhereDownloadFailedDueToOffline)
+                    {
+                        foreach (string userDownloadOffline in TransferState.UsersWhereDownloadFailedDueToOffline.Keys)
+                        {
+                            Logger.Debug("adding user (due to a download we wanted from them when they were offline): " + userDownloadOffline);
+                            SeekerState.SoulseekClient.WatchUserAsync(userDownloadOffline).ContinueWith(UpdateUserOfflineDownload);
+                        }
+                    }
+
+                    //this is if we wanted to change the status earlier but could not. note that when we first login, our status is Online by default.
+                    //so no need to change it to online.
+                    if (SeekerState.PendingStatusChangeToAwayOnline == SeekerState.PendingStatusChange.OnlinePending)
+                    {
+                        //we just did this by logging in...
+                        Logger.Debug("online was pending");
+                        SeekerState.PendingStatusChangeToAwayOnline = SeekerState.PendingStatusChange.NothingPending;
+                    }
+                    else if (((SeekerState.PendingStatusChangeToAwayOnline == SeekerState.PendingStatusChange.AwayPending || SeekerState.OurCurrentStatusIsAway)))
+                    {
+                        Logger.Debug("a change to away was pending / our status is away. lets set it now");
+
+                        if (SeekerState.PendingStatusChangeToAwayOnline == SeekerState.PendingStatusChange.AwayPending)
+                        {
+                            Logger.Debug("pending that is....");
+                        }
+                        else
+                        {
+                            Logger.Debug("current that is...");
+                        }
+
+                        if (!ForegroundLifecycleTracker.IsBackground())
+                        {
+                            Logger.Debug("There is a hole in our logic!!! the pendingstatus and/or current status should not be away!!!");
+                        }
+                        else
+                        {
+                            SessionService.Instance.SetStatusApi(true);
+                        }
+                    }
+
+                    //if the number of directories is stale (meaning it changing when we werent logged in and so we could not update the server)
+                    //and we have not yet attempted to set up sharing (since after we attempt to set up sharing we will notify the server)
+                    //then tell the server here.
+                    //this makes it so that we tell the server once when Seeker first launches, and when things change, but not every time
+                    //we log in.
+                    if (SharedFileService.NumberOfSharedDirectoriesIsStale && SharedFileService.AttemptedToSetUpSharing)
+                    {
+                        Logger.Debug("stale and we already attempted to set up sharing, so lets do it here in post log in.");
+                        SharedFileService.InformServerOfSharedFiles();
+                    }
+
+                    TransfersController.InitializeService();
+                }
+                catch (Exception e)
+                {
+                    Logger.Firebase("PerformPostConnectTasks" + e.Message + e.StackTrace);
+                }
+            }
+        }
+
+
+        /// <summary>
+        /// UserStatusChanged will not get called until an actual change. hence this call..
+        /// </summary>
+        /// <param name="t"></param>
+        private static void UpdateUserOfflineDownload(Task<UserData> t)
+        {
+            if (t.IsCompletedSuccessfully)
+            {
+                Seeker.Services.DownloadService.Instance.RetryDownloadsIfUserBackOnline(t.Result.Username, t.Result.Status);
+            }
+        }
+
+        /// <summary>
+        /// UserStatusChanged will not get called until an actual change. hence this call..
+        /// </summary>
+        /// <param name="task"></param>
+        public static void UpdateUserInfo(Task<UserData> task, string suppliedUsername)
+        {
+            try
+            {
+                Logger.Debug("Update User Info Received");
+                if (task.IsCompletedSuccessfully)
+                {
+                    string username = task.Result.Username;
+                    Logger.Debug("Update User Info: " + username + " status: " + task.Result.Status.ToString());
+                    if (UserListService.Instance.ContainsUser(username))
+                    {
+                        UserListService.Instance.AddUser(task.Result, task.Result.Status);
+                    }
+
+
+                }
+                else if (task.Exception?.InnerException is UserNotFoundException)
+                {
+                    if (UserListService.Instance.ContainsUser(suppliedUsername))
+                    {
+                        UserListService.Instance.SetDoesNotExist(suppliedUsername);
+                    }
+                }
+                else
+                {
+                    //timeout
+                    Logger.Firebase("UpdateUserInfo case 3 " + task.Exception.Message);
+                }
+            }
+            catch (Exception e)
+            {
+                Logger.Firebase("UpdateUserInfo" + e.Message + e.StackTrace);
+            }
+        }
+
+        public static List<WeakReference<ThemeableActivity>> Activities = new List<WeakReference<ThemeableActivity>>();
+
+        public static void RecreateActivies()
+        {
+            foreach (var weakRef in Activities)
+            {
+                if (weakRef.TryGetTarget(out var themeableActivity))
+                {
+                    themeableActivity.Recreate();
+                }
+            }
+        }
+
+        public const string FromUserOnlineAlert = "FromUserOnlineAlert";
+
+        public static void RestoreSeekerState(ISharedPreferences sharedPreferences, Context c)
+        {
+            if (sharedPreferences != null)
+            {
+                // Restore all pure-data preferences via PreferencesManager
+                PreferencesManager.RestoreAll(sharedPreferences);
+                PreferencesManager.RestoreListeningState(sharedPreferences);
+
+                // Side-effect restores that depend on Android APIs
+                UploadDirectoryManager.RestoreFromSavedState(sharedPreferences);
+
+                CommonState.UserList = SerializationHelper.RestoreUserListFromString(sharedPreferences.GetString(KeyConsts.M_UserList, string.Empty));
+                RestoreRecentUsersManagerFromString(sharedPreferences.GetString(KeyConsts.M_RecentUsersList, string.Empty));
+                CommonState.IgnoreUserList = SerializationHelper.RestoreUserListFromString(sharedPreferences.GetString(KeyConsts.M_IgnoreUserList, string.Empty));
+
+                UserMetadataService.UserNotes = SerializationHelper.RestoreUserNotesFromString(sharedPreferences.GetString(KeyConsts.M_UserNotes, string.Empty));
+                UserMetadataService.UserOnlineAlerts = SerializationHelper.RestoreUserOnlineAlertsFromString(sharedPreferences.GetString(KeyConsts.M_UserOnlineAlerts, string.Empty));
+
+                SearchTabHelper.RestoreHeadersFromSharedPreferences();
+                SettingsActivity.RestoreAdditionalDirectorySettingsFromSharedPreferences();
+
+                if (TransferItems.TransferItemManagerDL == null)
+                {
+                    TransferPersistenceWrapper.RestoreDownloadTransferItems(sharedPreferences);
+                    TransferPersistenceWrapper.RestoreUploadTransferItems(sharedPreferences);
+                    TransferItems.TransferItemManagerWrapped = new TransferItemManagerWrapper(TransferItems.TransferItemManagerUploads, TransferItems.TransferItemManagerDL, TransferCleanup.PerformCleanupItem);
+                }
+            }
+        }
+
+        public static void RestoreSmartFilterState(ISharedPreferences sharedPreferences)
+        {
+            PreferencesManager.RestoreSmartFilterState(sharedPreferences);
+        }
+
+        public static void SaveSmartFilterState()
+        {
+            PreferencesManager.SaveSmartFilterState();
+        }
+
+        public static void RestoreRecentUsersManagerFromString(string xmlRecentUsersList)
+        {
+            //if empty then this is the first time creating it.  initialize it with our list of added users.
+            UserMetadataService.RecentUsersManager = new RecentUserManager();
+            if (xmlRecentUsersList == string.Empty)
+            {
+                int count = CommonState.UserList?.Count ?? 0;
+                if (count > 0)
+                {
+                    UserMetadataService.RecentUsersManager.SetRecentUserList(CommonState.UserList.Select(uli => uli.Username).ToList());
+                }
+                else
+                {
+                    UserMetadataService.RecentUsersManager.SetRecentUserList(new List<string>());
+                }
+            }
+            else
+            {
+                List<string> recentUsers = new List<string>();
+                using (var stream = new System.IO.StringReader(xmlRecentUsersList))
+                {
+                    var serializer = new System.Xml.Serialization.XmlSerializer(recentUsers.GetType()); //this happens too often not allowing new things to be properly stored..
+                    UserMetadataService.RecentUsersManager.SetRecentUserList(serializer.Deserialize(stream) as List<string>);
+                }
+            }
+        }
+
+        public static void SaveRecentUsers()
+        {
+            string recentUsersStr;
+            List<string> recentUsers = UserMetadataService.RecentUsersManager.GetRecentUserList();
+            using (var writer = new System.IO.StringWriter())
+            {
+                var serializer = new System.Xml.Serialization.XmlSerializer(recentUsers.GetType());
+                serializer.Serialize(writer, recentUsers);
+                recentUsersStr = writer.ToString();
+            }
+            PreferencesManager.SaveRecentUsers(recentUsersStr);
+        }
+
+        /// <summary>
+        /// This is from the server after sending it a UserData request.
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
+        private void SoulseekClient_UserDataReceived(object sender, UserStatistics e)
+        {
+            Logger.Debug("User Data Received: " + e.Username);
+            var userData = SimpleHelpers.UserStatisticsToUserData(e);
+            if (e.Username == PreferencesState.Username)
+            {
+                PreferencesState.UploadSpeed = e.AverageSpeed; //bytes
+            }
+            else
+            {
+                if (CommonState.UserList == null)
+                {
+                    Logger.Firebase("UserList is null on user data receive");
+                }
+                else
+                {
+                    UserListService.Instance.UpdateExistingUser(e.Username, userData, null, out _);
+                }
+
+                RequestedUserInfoHelper.AddIfRequestedUser(e.Username, userData, null, null);
+            }
+        }
+
+        public static EventHandler<string> UserStatusChangedUIEvent;
+        private void SoulseekClient_UserStatusChanged(object sender, UserStatus e)
+        {
+            if (e.Username == PreferencesState.Username)
+            {
+                //not sure this will ever happen
+                return;
+            }
+            //we get user status changed for those we are in the same room as us
+            if (CommonState.UserList != null)
+            {
+                var status = new UserStatus(e.Username, e.Presence, e.IsPrivileged);
+                bool found = UserListService.Instance.UpdateExistingUser(e.Username, null, status, out bool cameOnline);
+                if (found)
+                {
+                    Logger.Debug("friend status changed " + e.Username);
+                    SeekerApplication.UserStatusChangedUIEvent?.Invoke(null, e.Username);
+                    if (cameOnline && UserMetadataService.UserOnlineAlerts != null && UserMetadataService.UserOnlineAlerts.ContainsKey(e.Username))
+                    {
+                        AppNotifications.ShowNotificationForUserOnlineAlert(e.Username);
+                    }
+                }
+            }
+
+            Seeker.Services.DownloadService.Instance.RetryDownloadsIfUserBackOnline(e.Username, e.Presence);
+        }
+    }
+}

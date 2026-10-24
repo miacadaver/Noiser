@@ -1,0 +1,711 @@
+﻿using Android.Content;
+using Android.Widget;
+using Java.IO;
+using Soulseek;
+using System;
+using System.Collections.Generic;
+using System.Runtime.Serialization.Formatters.Binary;
+using System.Threading;
+using System.Threading.Tasks;
+using Seeker.Helpers;
+using Common;
+using Common.Search;
+
+namespace Seeker.Helpers
+{
+    public class SearchTabHelper
+    {
+        public static void RemoveTabFromSharedPrefs(int wishlistSearchResultsToRemove, Context c, bool legacy = false)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+
+            Java.IO.File wishlist_dir = new Java.IO.File(c.FilesDir, KeyConsts.M_wishlist_directory);
+            if (!wishlist_dir.Exists())
+            {
+                wishlist_dir.Mkdir();
+            }
+            string name = System.Math.Abs(wishlistSearchResultsToRemove) + (legacy ? KeyConsts.M_wishlist_tab_legacy : KeyConsts.M_wishlist_tab);
+            Java.IO.File fileForOurInternalStorage = new Java.IO.File(wishlist_dir, name);
+            if (!fileForOurInternalStorage.Delete())
+            {
+                Logger.Debug("HEADERS - Delete Search Results: FAILED TO DELETE");
+                Logger.Firebase("HEADERS - Delete Search Results: FAILED TO DELETE");
+            }
+
+            if (!legacy)
+            {
+                DeleteUnseenSidecar(wishlistSearchResultsToRemove, wishlist_dir);
+            }
+
+            sw.Stop();
+            Logger.Debug("HEADERS - Delete Search Results: " + sw.ElapsedMilliseconds);
+        }
+
+        private static void DeleteUnseenSidecar(int tabId, Java.IO.File wishlist_dir)
+        {
+            string unseenName = System.Math.Abs(tabId) + KeyConsts.M_wishlist_unseen;
+            Java.IO.File unseenFile = new Java.IO.File(wishlist_dir, unseenName);
+            if (unseenFile.Exists())
+            {
+                unseenFile.Delete();
+            }
+        }
+
+
+        public static void SaveAllSearchTabsToDisk(Context c)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            string stringToSave = string.Empty;
+            //we should only save things we need for the wishlist searches.
+            List<int> tabsToSave = SearchTabDialog.GetWishesTabIds();
+            if (tabsToSave.Count == 0)
+            {
+                Logger.Debug("Nothing to Save");
+            }
+            else
+            {
+                foreach (int tabIndex in tabsToSave)
+                {
+                    SaveSearchResultsToDisk(tabIndex, c);
+                }
+            }
+            sw.Stop();
+            Logger.Debug("HEADERS - Save ALL Search Results: " + sw.ElapsedMilliseconds);
+        }
+
+#if BinaryFormatterAvailable
+
+        /// <summary>
+        /// Restoring them when someone taps them is fast enough even for 1000 results...
+        /// So this method probably isnt needed.
+        /// </summary>
+        /// <param name="c"></param>
+        public static void MigrateAllSearchTabsFromDisk(Context c)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            string stringToSave = string.Empty;
+            //we should only save things we need for the wishlist searches.
+            List<int> tabsToSave = SearchTabDialog.GetWishesTabIds();
+            if (tabsToSave.Count == 0)
+            {
+                Logger.Debug("Nothing to Save");
+            }
+            else
+            {
+                foreach (int tabIndex in tabsToSave)
+                {
+                    List<SearchResponse> results = null;
+                    try
+                    {
+                        results = RestoreSearchResultsFromDisk_Imp(tabIndex, c, true);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Firebase("Error Migrating Seach Tabs: " + ex.Message + ex.StackTrace);
+                        RemoveTabFromSharedPrefs(tabIndex, c, true);
+                    }
+
+                    if (results != null)
+                    {
+                        RemoveTabFromSharedPrefs(tabIndex, c, true);
+                        SaveSearchResultsToDisk_Imp(tabIndex, c, results);
+                    }
+                }
+            }
+            sw.Stop();
+            Logger.Debug("HEADERS - Restore ALL Search Results: " + sw.ElapsedMilliseconds);
+        }
+#endif
+
+        public static void SaveSearchResultsToDisk_Imp(int wishlistSearchResultsToSave, Context c, List<SearchResponse> searchResultsToSave)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+
+            Java.IO.File wishlist_dir = new Java.IO.File(c.FilesDir, KeyConsts.M_wishlist_directory);
+            if (!wishlist_dir.Exists())
+            {
+                wishlist_dir.Mkdir();
+            }
+            string name = System.Math.Abs(wishlistSearchResultsToSave) + KeyConsts.M_wishlist_tab;
+
+            var arr = SerializationHelper.SaveSearchResponsesToByteArray(searchResultsToSave);
+            CommonHelpers.SaveToDisk(c, arr, wishlist_dir, name);
+        }
+
+
+        public static void SaveSearchResultsToDisk(int wishlistSearchResultsToSave, Context c)
+        {
+            var tab = SearchTabHelper.SearchTabCollection[wishlistSearchResultsToSave];
+            SaveSearchResultsToDisk_Imp(wishlistSearchResultsToSave, c, tab.SearchResponses);
+            SaveUnseenSidecarToDisk(wishlistSearchResultsToSave, c, tab);
+        }
+
+        private static void SaveUnseenSidecarToDisk(int tabId, Context c, SearchTab tab)
+        {
+            Java.IO.File wishlist_dir = new Java.IO.File(c.FilesDir, KeyConsts.M_wishlist_directory);
+            if (!wishlist_dir.Exists())
+            {
+                wishlist_dir.Mkdir();
+            }
+
+            int[] indices;
+            lock (tab.SortHelperLockObject)
+            {
+                if (tab.UnseenResults == null || tab.UnseenResults.Count == 0 || tab.SearchResponses == null)
+                {
+                    DeleteUnseenSidecar(tabId, wishlist_dir);
+                    return;
+                }
+                var responses = tab.SearchResponses;
+                var idxList = new List<int>(tab.UnseenResults.Count);
+                for (int i = 0; i < responses.Count; i++)
+                {
+                    if (tab.UnseenResults.Contains(responses[i]))
+                    {
+                        idxList.Add(i);
+                    }
+                }
+                indices = idxList.ToArray();
+            }
+
+            string name = System.Math.Abs(tabId) + KeyConsts.M_wishlist_unseen;
+            byte[] arr = SerializationHelper.SaveUnseenIndicesToByteArray(indices);
+            CommonHelpers.SaveToDisk(c, arr, wishlist_dir, name);
+        }
+
+        public static void ClearUnseenForTab(int tabId, Context c)
+        {
+            if (!SearchTabCollection.TryGetValue(tabId, out var tab))
+            {
+                return;
+            }
+            if (tab.SearchTarget != SearchTarget.Wishlist)
+            {
+                return;
+            }
+
+            bool changed;
+            lock (tab.SortHelperLockObject)
+            {
+                changed = tab.UnseenCount > 0 || tab.UnseenResults.Count > 0;
+                tab.UnseenResults.Clear();
+                tab.UnseenCount = 0;
+            }
+            if (!changed)
+            {
+                return;
+            }
+
+            SaveHeadersToSharedPrefs();
+
+            try
+            {
+                Java.IO.File wishlist_dir = new Java.IO.File(c.FilesDir, KeyConsts.M_wishlist_directory);
+                if (wishlist_dir.Exists())
+                {
+                    DeleteUnseenSidecar(tabId, wishlist_dir);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Firebase("ClearUnseenForTab sidecar delete fail: " + ex.Message);
+            }
+        }
+
+        private static int[] RestoreUnseenIndicesFromDisk_Imp(int tabId, Context c)
+        {
+            Java.IO.File wishlist_dir = new Java.IO.File(c.FilesDir, KeyConsts.M_wishlist_directory);
+            string name = System.Math.Abs(tabId) + KeyConsts.M_wishlist_unseen;
+            Java.IO.File unseenFile = new Java.IO.File(wishlist_dir, name);
+            if (!unseenFile.Exists())
+            {
+                return null;
+            }
+
+            try
+            {
+                using (System.IO.Stream inputStream = c.ContentResolver.OpenInputStream(AndroidX.DocumentFile.Provider.DocumentFile.FromFile(unseenFile).Uri))
+                {
+                    return SerializationHelper.RestoreUnseenIndicesFromStream(inputStream);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Firebase("FAILED to restore unseen indices: " + ex.Message);
+                return null;
+            }
+        }
+
+        public static List<SearchResponse> RestoreSearchResultsFromDisk_Imp(int wishlistSearchResultsToRestore, Context c)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+
+            Java.IO.File wishlist_dir = new Java.IO.File(c.FilesDir, KeyConsts.M_wishlist_directory);
+            //if (!wishlist_dir.Exists())
+            //{
+            //    wishlist_dir.Mkdir();
+            //}
+            string name = System.Math.Abs(wishlistSearchResultsToRestore) + KeyConsts.M_wishlist_tab;
+            Java.IO.File fileForOurInternalStorage = new Java.IO.File(wishlist_dir, name);
+
+            if (!fileForOurInternalStorage.Exists())
+            {
+                return null;
+            }
+
+            using (System.IO.Stream inputStream = c.ContentResolver.OpenInputStream(AndroidX.DocumentFile.Provider.DocumentFile.FromFile(fileForOurInternalStorage).Uri))
+            {
+                Logger.Debug("HEADERS - get file: " + sw.ElapsedMilliseconds);
+
+                Logger.Debug("HEADERS - read file: " + sw.ElapsedMilliseconds);
+
+                var restoredSearchResponses = SerializationHelper.RestoreSearchResponsesFromStream(inputStream);
+                return restoredSearchResponses;
+            }
+        }
+
+        public static Task EnsureLoadedAsync(int tabId, Context c)
+        {
+            var tab = SearchTabHelper.SearchTabCollection[tabId];
+            if (tab.IsLoaded())
+            {
+                return Task.CompletedTask;
+            }
+
+            lock (tab.DiskLoadLock)
+            {
+                if (tab.DiskLoadTask != null)
+                {
+                    return tab.DiskLoadTask;
+                }
+                if (tab.IsLoaded())
+                {
+                    return Task.CompletedTask;
+                }
+
+                var tcs = new TaskCompletionSource<bool>();
+                tab.DiskLoadTask = tcs.Task;
+                Task.Run(() =>
+                {
+                    try
+                    {
+                        RestoreSearchResultsFromDisk(tabId, c);
+                    }
+                    catch (System.Exception ex)
+                    {
+                        Logger.Firebase("async restore fail " + ex.Message);
+                    }
+                    finally
+                    {
+                        var newTab = SearchTabHelper.SearchTabCollection[tabId];
+                        if (newTab != tab)
+                        {
+                            newTab.DiskLoadTask = tcs.Task;
+                        }
+                        tcs.SetResult(true);
+                    }
+                });
+                return tcs.Task;
+            }
+        }
+
+        public static void RestoreSearchResultsFromDisk(int wishlistSearchResultsToRestore, Context c)
+        {
+            List<SearchResponse> restoredSearchResults = null;
+            try
+            {
+                restoredSearchResults = RestoreSearchResultsFromDisk_Imp(wishlistSearchResultsToRestore, c);
+            }
+            catch(Exception e)
+            {
+                Logger.Firebase("FAILED to restore search results from disk " + e.Message + e.StackTrace);
+            }
+
+
+            //there are two cases.
+            //  1) we imported the term.  In that case there are no results yet as it hasnt been ran.  Which is fine.  
+            //  2) its a bug.
+            int[] unseenIndices = restoredSearchResults != null ? RestoreUnseenIndicesFromDisk_Imp(wishlistSearchResultsToRestore, c) : null;
+
+            if (restoredSearchResults == null)
+            {
+                if (SearchTabHelper.SearchTabCollection[wishlistSearchResultsToRestore].LastSearchResultsCount == 0 || SearchTabHelper.SearchTabCollection[wishlistSearchResultsToRestore].LastRanTime == DateTime.MinValue)
+                {
+                    //nothing to do.  this is the good case..
+                }
+                else
+                {
+                    //log error... but still safely fix the state. otherwise the user wont even be able to load the app without crash...
+                    Logger.Firebase("search tab does not exist on disk but it should... ");
+                    SearchTabHelper.SearchTabCollection[wishlistSearchResultsToRestore].LastRanTime = DateTime.MinValue;
+                    SearchTabHelper.SearchTabCollection[wishlistSearchResultsToRestore].LastSearchResponseCount = 0;
+                    SearchTabHelper.SearchTabCollection[wishlistSearchResultsToRestore].LastSearchResultsCount = 0;
+                    try
+                    {
+                        //may not be on UI thread if from wishlist timer elapsed...
+                        SeekerApplication.Toaster.ShowToast("Failed to restore wishlist search results from disk", ToastLength.Long);
+                    }
+                    catch
+                    {
+
+                    }
+                }
+                //safely fix the state. even in case of error...
+                SearchTabHelper.SearchTabCollection[wishlistSearchResultsToRestore] = SearchTabUtil.GetTabFromSavedState(new List<SearchResponse>(), SearchTabHelper.SearchTabCollection[wishlistSearchResultsToRestore]);
+            }
+            else
+            {
+                SearchTabHelper.SearchTabCollection[wishlistSearchResultsToRestore] = SearchTabUtil.GetTabFromSavedState(restoredSearchResults, SearchTabHelper.SearchTabCollection[wishlistSearchResultsToRestore], unseenIndices);
+            }
+        }
+
+
+        public static void SaveHeadersToSharedPrefs()
+        {
+
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+
+            string stringToSave = string.Empty;
+            //we should only save things we need for the wishlist searches.
+            List<int> tabsToSave = SearchTabDialog.GetWishesTabIds();
+            if (tabsToSave.Count == 0)
+            {
+                Logger.Debug("Nothing to Save");
+            }
+            else
+            {
+                Dictionary<int, SavedStateSearchTabHeader> savedStates = new Dictionary<int, SavedStateSearchTabHeader>();
+                foreach (int tabIndex in tabsToSave)
+                {
+                    savedStates.Add(tabIndex, SavedStateSearchTabHeaderHelper.GetSavedStateHeaderFromTab(SearchTabHelper.SearchTabCollection[tabIndex]));
+                }
+
+                stringToSave = SerializationHelper.SerializeToString(savedStates);
+            }
+
+            PreferencesManager.SaveSearchTabHeaders(stringToSave);
+
+            sw.Stop();
+            Logger.Debug("HEADERS - SaveHeadersToSharedPrefs: " + sw.ElapsedMilliseconds);
+        }
+
+#if BinaryFormatterAvailable
+
+        //load legacy, and then save new to shared prefs and disk
+        public static void ConvertLegacyWishlistsIfApplicable(Context c)
+        {
+            string savedState = SeekerState.SharedPreferences.GetString(KeyConsts.M_SearchTabsState_LEGACY, string.Empty);
+            if (savedState == string.Empty)
+            {
+                //nothing to do...
+                return;
+            }
+            else
+            {
+                Logger.Debug("Converting Wishlists to New Format...");
+                RestoreStateFromSharedPreferencesLegacy();
+                SeekerState.SharedPreferences.Edit().Remove(KeyConsts.M_SearchTabsState_LEGACY).Commit();
+                //string x = SeekerState.SharedPreferences.GetString(KeyConsts.M_SearchTabsState_LEGACY, string.Empty); //works, string is empty.
+                SaveHeadersToSharedPrefs();
+                SaveAllSearchTabsToDisk(c);
+            }
+        }
+
+#endif
+
+        public static void RestoreHeadersFromSharedPreferences()
+        {
+            string savedState = SeekerState.SharedPreferences.GetString(KeyConsts.M_SearchTabsState_Headers, string.Empty);
+            if (savedState == string.Empty)
+            {
+                return;
+            }
+            else
+            {
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+
+                Logger.Debug("HEADERS - base64 string length: " + sw.ElapsedMilliseconds);
+
+                Dictionary<int, SavedStateSearchTabHeader> savedStateDict = SerializationHelper.RestoreSavedStateHeaderDictFromString(savedState);
+
+                int lowestID = int.MaxValue;
+                foreach (var pair in savedStateDict)
+                {
+                    if (pair.Key < lowestID)
+                    {
+                        lowestID = pair.Key;
+                    }
+                    SearchTabCollection[pair.Key] = SavedStateSearchTabHeaderHelper.GetTabFromSavedState(pair.Value, null);
+                }
+                if (lowestID != int.MaxValue)
+                {
+                    lastWishlistID = lowestID;
+                }
+
+                sw.Stop();
+                Logger.Debug("HEADERS - RestoreStateFromSharedPreferences: wishlist: " + sw.ElapsedMilliseconds);
+            }
+            //SeekerState.SharedPreferences.Edit().Remove
+        }
+
+#if BinaryFormatterAvailable
+        public static void RestoreStateFromSharedPreferencesLegacy()
+        {
+            string savedState = SeekerState.SharedPreferences.GetString(KeyConsts.M_SearchTabsState_LEGACY, string.Empty);
+            if (savedState == string.Empty)
+            {
+                return;
+            }
+            else
+            {
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+
+                Logger.Debug("base64 string length: " + sw.ElapsedMilliseconds);
+
+                using (System.IO.MemoryStream memStream = new System.IO.MemoryStream(Convert.FromBase64String(savedState)))
+                {
+                    BinaryFormatter formatter = SerializationMigrationHelper.GetLegacyBinaryFormatter();
+                    var savedStateDict = formatter.Deserialize(memStream) as Dictionary<int, SavedStateSearchTab>;
+                    int lowestID = int.MaxValue;
+                    foreach (var pair in savedStateDict)
+                    {
+                        if (pair.Key < lowestID)
+                        {
+                            lowestID = pair.Key;
+                        }
+                        SearchTabCollection[pair.Key] = SavedStateSearchTab.GetTabFromSavedState(pair.Value);
+                    }
+                    if (lowestID != int.MaxValue)
+                    {
+                        lastWishlistID = lowestID;
+                    }
+                }
+                sw.Stop();
+                Logger.Debug("RestoreStateFromSharedPreferences: wishlist: " + sw.ElapsedMilliseconds);
+            }
+        }
+#endif
+
+        static SearchTabHelper()
+        {
+            SearchTabCollection[CurrentTab] = new SearchTab();
+        }
+        //CURRENT TAB == what is current being shown in UI. Therefore, everyone should use it OTHER THAN the search logic which should only use it IF it matches the current tab.
+        public static volatile int CurrentTab = 0;
+        public static TabType CurrentTabType = TabType.Search;
+        public static string FilterStickyString = string.Empty;
+
+        public static System.Collections.Concurrent.ConcurrentDictionary<int, SearchTab> SearchTabCollection = new System.Collections.Concurrent.ConcurrentDictionary<int, SearchTab>();
+        private static int lastSearchID = 0;
+        private static int lastWishlistID = 0;
+
+        //all of these getters and setters work on current tab.
+
+        public static int AddSearchTab() //returns ID of new search term added.
+        {
+            lastSearchID++;
+            SearchTabCollection[lastSearchID] = new SearchTab();
+            return lastSearchID;
+        }
+
+        //public static int AddWishlistSearchTab() //returns ID of new search term added.
+        //{
+        //    lastWishlistID--;
+        //    SearchTabCollection[lastWishlistID] = new SearchTab();
+        //    SearchTabCollection[lastWishlistID].SearchTarget = SearchTarget.Wishlist;
+        //    return lastWishlistID;
+        //}
+
+        public static void AddWishlistSearchTabFromCurrent()
+        {
+            lastWishlistID--;
+            SearchTabCollection[lastWishlistID] = SearchTabCollection[CurrentTab].Clone(true);
+            SearchTabCollection[lastWishlistID].SearchTarget = SearchTarget.Wishlist;
+            SearchTabCollection[lastWishlistID].CurrentlySearching = false;
+
+            //*********************
+            SearchTabHelper.SaveSearchResultsToDisk(lastWishlistID, SeekerState.ActiveActivityRef);
+            SearchTabHelper.SaveHeadersToSharedPrefs();
+        }
+
+        /// <summary>
+        /// This is done in the case of import
+        /// TODO: testing - this is the only way to create a wishlist tab without the main activity created so beware!! and test!!
+        ///    prove that this is always initialized (so we dont save and wipe away all previous wishes...)
+        /// </summary>
+        public static void AddWishlistSearchTabFromString(string wish)
+        {
+            lastWishlistID--;
+            SearchTabCollection[lastWishlistID] = new SearchTab();
+            SearchTabCollection[lastWishlistID].LastSearchTerm = wish;
+            SearchTabCollection[lastWishlistID].SearchTarget = SearchTarget.Wishlist;
+            SearchTabCollection[lastWishlistID].CurrentlySearching = false;
+
+            //*********************
+
+        }
+
+        public static SearchTab CurrentSearchTab => SearchTabCollection[CurrentTab];
+
+        public static int LastSearchResultsCount
+        {
+            get
+            {
+                return SearchTabCollection[CurrentTab].LastSearchResultsCount;
+            }
+            set
+            {
+                SearchTabCollection[CurrentTab].LastSearchResultsCount = value;
+            }
+        }
+
+        public static string LastSearchTerm
+        {
+            get
+            {
+                return SearchTabCollection[CurrentTab].LastSearchTerm;
+            }
+            set
+            {
+                SearchTabCollection[CurrentTab].LastSearchTerm = value;
+            }
+        }
+
+        public static SearchResultSorting SortHelperSorting
+        {
+            get
+            {
+                return SearchTabCollection[CurrentTab].SortHelperSorting;
+            }
+            set
+            {
+                SearchTabCollection[CurrentTab].SortHelperSorting = value;
+            }
+        }
+
+        public static int LastSearchResponseCount //static so when the fragment gets remade we can use it
+        {
+            get
+            {
+                return SearchTabCollection[CurrentTab].LastSearchResponseCount;
+            }
+            set
+            {
+                SearchTabCollection[CurrentTab].LastSearchResponseCount = value;
+            }
+        }
+
+        public static List<SearchResponse> SearchResponses //static so when the fragment gets remade we can use it
+        {
+            get
+            {
+                return SearchTabCollection[CurrentTab].SearchResponses;
+
+            }
+            set
+            {
+                SearchTabCollection[CurrentTab].SearchResponses = value;
+            }
+        }
+
+        public static SortedSet<SearchResponse> SortHelper
+        {
+            get
+            {
+                return SearchTabCollection[CurrentTab].SortHelper;
+            }
+            set
+            {
+                SearchTabCollection[CurrentTab].SortHelper = value;
+            }
+        }
+
+        /// <summary>
+        /// Locking on the SortHelper is not enough, since it gets replaced if user changes the sort algorithm
+        /// </summary>
+        public static object SortHelperLockObject
+        {
+            get
+            {
+                return SearchTabCollection[CurrentTab].SortHelperLockObject;
+            }
+        }
+
+        public static TextFilter TextFilter => SearchTabCollection[CurrentTab].TextFilter;
+
+        public static CancellationTokenSource CancellationTokenSource
+        {
+            get
+            {
+                return SearchTabCollection[CurrentTab].CancellationTokenSource;
+            }
+            set
+            {
+                SearchTabCollection[CurrentTab].CancellationTokenSource = value;
+            }
+        }
+
+
+        public static List<SearchResponse> UI_SearchResponses
+        {
+            get
+            {
+                return SearchTabCollection[CurrentTab].UI_SearchResponses;
+            }
+            set
+            {
+                SearchTabCollection[CurrentTab].UI_SearchResponses = value;
+            }
+        }
+        public static SearchTarget SearchTarget
+        {
+            get
+            {
+                return SearchTabCollection[CurrentTab].SearchTarget;
+            }
+            set
+            {
+                SearchTabCollection[CurrentTab].SearchTarget = value;
+            }
+        }
+        public static bool CurrentlySearching
+        {
+            get
+            {
+                return SearchTabCollection[CurrentTab].CurrentlySearching;
+            }
+            set
+            {
+                SearchTabCollection[CurrentTab].CurrentlySearching = value;
+            }
+        }
+
+
+        public static string SearchTargetChosenUser
+        {
+            get
+            {
+                return SearchTabCollection[CurrentTab].SearchTargetChosenUser;
+            }
+            set
+            {
+                SearchTabCollection[CurrentTab].SearchTargetChosenUser = value;
+            }
+        }
+
+        public static string SearchTargetChosenRoom
+        {
+            get
+            {
+                return SearchTabCollection[CurrentTab].SearchTargetChosenRoom;
+            }
+            set
+            {
+                SearchTabCollection[CurrentTab].SearchTargetChosenRoom = value;
+            }
+        }
+
+
+    }
+
+}

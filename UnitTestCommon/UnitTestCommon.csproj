@@ -1,0 +1,39 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+
+    <IsPackable>false</IsPackable>
+    <UsesVerify>true</UsesVerify>
+    <Configurations>Debug;Release;Debug Mock</Configurations>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="NUnit" Version="4.3.2" />
+    <PackageReference Include="NUnit3TestAdapter" Version="5.0.0" />
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="Verify.NUnit" Version="28.11.0" />
+    <PackageReference Include="SharpZipLib" Version="1.4.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="TestData\Set1\browseresponse.mpk" />
+    <Content Include="TestData\Set1\browseresponse_hidden.mpk" />
+    <Content Include="TestData\Set1\friendlydirtouri.mpk" />
+    <Content Include="TestData\Set1\helperindex.mpk" />
+    <Content Include="TestData\Set1\keys.mpk" />
+    <Content Include="TestData\Set1\SoulSeekPrefs.xml" />
+    <Content Include="TestData\Set1\tokenindex.mpk" />
+  </ItemGroup>
+	<ItemGroup>
+	<Content Include="TestData\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Seeker\Soulseek.NET-master\src\Soulseek.csproj" />
+    <ProjectReference Include="..\Common\Common.csproj" />
+  </ItemGroup>
+
+</Project>

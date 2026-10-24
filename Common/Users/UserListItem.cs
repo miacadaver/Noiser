@@ -1,0 +1,64 @@
+using System;
+
+namespace Seeker
+{
+    public enum UserRole
+    {
+        Friend = 0,
+        Ignored = 1,
+        Category = 2
+    }
+
+    /// <summary>
+    /// This is the full user info...
+    /// </summary>
+    public class UserListItem
+    {
+        public string Username = string.Empty;
+        public UserRole Role;
+        public Soulseek.UserStatus? UserStatus; //add user updates this..
+        public Soulseek.UserData? UserData; //add user updates this as well...
+        public Soulseek.UserInfo? UserInfo; // can be metadata only — picture bytes live in UserInfoPictureCacheService keyed by Username.
+        public bool HasPicture; //preserved across the strip-on-store; UserInfo.HasPicture would otherwise be derived from picture != null.
+        public bool DoesNotExist; //we dont allow someone to add a user that does not exist, BUT if they add someone and their username expires or such, then this will happen...
+        public UserListItem(string username, UserRole role)
+        {
+            Role = role;
+            Username = username;
+            UserStatus = null;
+            UserData = null;
+            UserInfo = null;
+        }
+        public UserListItem(string username)
+        {
+            Username = username;
+            UserStatus = null;
+            UserData = null;
+            UserInfo = null;
+        }
+        public UserListItem()
+        {
+            UserStatus = null;
+            UserData = null;
+            UserInfo = null;
+        }
+
+        //both item.UserStatus and item.UserData have status
+        public Soulseek.UserPresence GetStatusFromItem(out bool statusExists)
+        {
+            statusExists = false;
+            Soulseek.UserPresence status = Soulseek.UserPresence.Away;
+            if (this.UserStatus != null)
+            {
+                statusExists = true;
+                status = this.UserStatus.Presence;
+            }
+            else if (this.UserData != null)
+            {
+                statusExists = true;
+                status = this.UserData.Status;
+            }
+            return status;
+        }
+    }
+}

@@ -1,0 +1,281 @@
+﻿using Android.App;
+using Android.Content;
+using AndroidX.Core.App;
+using AndroidX.DocumentFile.Provider;
+using Seeker.Helpers;
+using Seeker.Managers;
+using Seeker.Transfers;
+using Soulseek;
+using System;
+using System.Collections.Generic;
+using System.Net;
+using System.Threading;
+using System.Threading.Tasks;
+
+using Common;
+namespace Seeker.Services
+{
+    public class NotifInfo
+    {
+        public NotifInfo(string firstDir)
+        {
+            NOTIF_ID_FOR_USER = UploadNotificationTracker.NextId();
+            FilesUploadedToUser = 1;
+            DirNames = new List<string> { firstDir };
+        }
+        public int NOTIF_ID_FOR_USER;
+        public int FilesUploadedToUser;
+        public List<string> DirNames = new List<string>();
+    }
+
+    internal static class UploadNotificationTracker
+    {
+        private static readonly Dictionary<string, NotifInfo> tracker = new Dictionary<string, NotifInfo>();
+        private static int nextId = 400;
+
+        internal static int NextId()
+        {
+            return nextId++;
+        }
+
+        public static NotifInfo GetOrCreate(string username, string directory)
+        {
+            if (tracker.TryGetValue(username, out var info))
+            {
+                if (!info.DirNames.Contains(directory))
+                {
+                    info.DirNames.Add(directory);
+                }
+                info.FilesUploadedToUser++;
+            }
+            else
+            {
+                info = new NotifInfo(directory);
+                tracker.Add(username, info);
+            }
+            return info;
+        }
+    }
+
+    // Upload enqueue + notification
+    public static class UploadService
+    {
+        public static event EventHandler<TransferItem> TransferAddedUINotify;
+
+        private static readonly UploadQueue uploadQueue = new UploadQueue(
+            PrivilegesManager.Instance.CheckIfPrivileged, CurrentSlotLimit());
+
+        private static int CurrentSlotLimit()
+        {
+            return PreferencesState.LimitSimultaneousUploads ? PreferencesState.MaxSimultaneousUploadsLimit : int.MaxValue;
+        }
+
+        public static void ApplySlotLimitSetting()
+        {
+            uploadQueue.SlotLimit = CurrentSlotLimit();
+        }
+
+        public static bool HasFreeUploadSlot()
+        {
+            return uploadQueue.HasFreeSlot;
+        }
+
+        public static int QueueLengthFor(string requester)
+        {
+            return uploadQueue.QueuedCount(requester);
+        }
+
+        public static int UploadSlotsToAdvertise()
+        {
+            int limit = uploadQueue.SlotLimit;
+            // if no limit then return currently used + 1
+            return limit == int.MaxValue ? uploadQueue.UsedSlots + 1 : limit;
+        }
+
+        public static Notification CreateUploadNotification(Context context, String username, List<String> directories, int numFiles)
+        {
+            string fileS = numFiles == 1 ? SeekerState.ActiveActivityRef.GetString(Resource.String.file) : SeekerState.ActiveActivityRef.GetString(Resource.String.files);
+            string titleText = string.Format(SeekerState.ActiveActivityRef.GetString(Resource.String.upload_f_string), numFiles, fileS, username);
+            string directoryString = string.Empty;
+            if (directories.Count == 1)
+            {
+                directoryString = SeekerState.ActiveActivityRef.GetString(Resource.String.from_directory) + ": " + directories[0];
+            }
+            else
+            {
+                directoryString = SeekerState.ActiveActivityRef.GetString(Resource.String.from_directories) + ": " + directories[0];
+                for (int i = 0; i < directories.Count; i++)
+                {
+                    if (i == 0)
+                    {
+                        continue;
+                    }
+                    directoryString += ", " + directories[i];
+                }
+            }
+            string contextText = directoryString;
+            Intent notifIntent = new Intent(context, typeof(MainActivity));
+            notifIntent.AddFlags(ActivityFlags.SingleTop);
+            notifIntent.PutExtra(MainActivity.GoToUploadsExtra, true);
+            PendingIntent pendingIntent =
+                PendingIntent.GetActivity(context, username.GetHashCode(), notifIntent, CommonHelpers.AppendMutabilityIfApplicable(PendingIntentFlags.UpdateCurrent, true));
+            //no such method takes args CHANNEL_ID in API 25. API 26 = 8.0 which requires channel ID.
+            //a "channel" is a category in the UI to the end user.
+            Notification notification = null;
+            if (OperatingSystem.IsAndroidVersionAtLeast(26))
+            {
+                notification =
+                      new Notification.Builder(context, AppNotifications.CHANNEL_ID_UPLOAD_COMPLETED)
+                      .SetContentTitle(titleText)
+                      .SetContentText(contextText)
+                      .SetSmallIcon(Resource.Drawable.ic_stat_soulseekicontransparent)
+                      .SetContentIntent(pendingIntent)
+                      .SetOnlyAlertOnce(true) //maybe
+                      .SetTicker(titleText).Build();
+            }
+            else
+            {
+                notification =
+#pragma warning disable CS0618 // Type or member is obsolete
+                  new Notification.Builder(context)
+#pragma warning restore CS0618 // Type or member is obsolete
+                  .SetContentTitle(titleText)
+                  .SetContentText(contextText)
+                  .SetSmallIcon(Resource.Drawable.ic_stat_soulseekicontransparent)
+                  .SetContentIntent(pendingIntent)
+                  .SetOnlyAlertOnce(true) //maybe
+                  .SetTicker(titleText).Build();
+            }
+
+            return notification;
+        }
+
+        /// <summary>
+        ///     Invoked upon a remote request to download a file.
+        /// </summary>
+        /// <param name="username">The username of the requesting user.</param>
+        /// <param name="endpoint">The IP endpoint of the requesting user.</param>
+        /// <param name="filename">The filename of the requested file.</param>
+        /// <returns>A Task representing the asynchronous operation.</returns>
+        /// <exception cref="DownloadEnqueueException">Thrown when the download is rejected.  The Exception message will be passed to the remote user.</exception>
+        /// <exception cref="Exception">Thrown on any other Exception other than a rejection.  A generic message will be passed to the remote user for security reasons.</exception>
+        public static Task EnqueueDownloadAction(string username, IPEndPoint endpoint, string filename)
+        {
+            Logger.Debug("Upload Request Received");
+            if (UserListService.Instance.IsUserInIgnoreList(username))
+            {
+                return Task.CompletedTask;
+            }
+
+            _ = endpoint;
+            string errorMsg = null;
+            Tuple<long, string, Tuple<int, int, int, int>, bool, bool> ourFileInfo = SharedFileService.SharedFileCache.GetFullInfoFromSearchableName(filename, out errorMsg);
+            if (ourFileInfo == null)
+            {
+                Logger.Firebase("ourFileInfo is null: " + ourFileInfo + " " + errorMsg);
+                throw new DownloadEnqueueException($"File not found.");
+            }
+
+            DocumentFile ourFile = null;
+            Android.Net.Uri ourUri = Android.Net.Uri.Parse(ourFileInfo.Item2);
+
+            if (ourFileInfo.Item4 || ourFileInfo.Item5)
+            {
+                if (!SimpleHelpers.UserListService.ContainsUser(username))
+                {
+                    throw new DownloadEnqueueException($"File not shared");
+                }
+            }
+
+            if (!UploadDirectoryManager.IsFromTree(filename)) //IsFromTree method!
+            {
+                ourFile = DocumentFile.FromFile(new Java.IO.File(ourUri.Path));
+            }
+            else
+            {
+                ourFile = DocumentFile.FromTreeUri(SeekerState.ActiveActivityRef, ourUri);
+            }
+
+            if (!ourFile.Exists())
+            {
+                throw new DownloadEnqueueException($"File not found.");
+            }
+
+            var cts = new CancellationTokenSource();
+
+            TransferItem transferItem = new TransferItem();
+            transferItem.Username = username;
+            transferItem.FullFilename = filename;
+            transferItem.Filename = SimpleHelpers.GetFileNameFromFile(filename).ToString();
+            transferItem.FolderName = SimpleHelpers.GetFolderNameFromFile(filename).ToString();
+            transferItem.CancellationTokenSource = cts;
+            transferItem.Size = ourFile.Length();
+            transferItem.isUpload = true;
+            transferItem = TransferItems.TransferItemManagerUploads.AddIfNotExistAndReturnTransfer(transferItem, out bool exists);
+
+            if (!exists) //else the state will simply be updated a bit later.
+            {
+                TransferAddedUINotify?.Invoke(null, transferItem);
+            }
+            var queueEntry = uploadQueue.Enqueue(username, filename);
+            TransferState.SetupCancellationToken(transferItem, cts, out CancellationTokenSource oldCts);
+
+            // inline so we each user's requests reach the per user semaphore in order (which seems to respect the order on Release)
+            Task uploadTask;
+            try
+            {
+                var uploadUri = ourFile.Uri;
+                uploadTask = SeekerState.SoulseekClient.UploadAsync(username, filename, transferItem.Size,
+                    inputStreamFactory: (_) => Task.FromResult<System.IO.Stream>(SeekerState.MainActivityRef.ContentResolver.OpenInputStream(uploadUri)),
+                    options: new TransferOptions(
+                        governor: SpeedLimitHelper.OurUploadGovernor,
+                        slotAwaiter: async (_, token) =>
+                        {
+                            await uploadQueue.AwaitSlotAsync(queueEntry, token);
+                            Logger.Debug($"upload slot granted: {filename} to {username}");
+                        },
+                        slotReleased: _ =>
+                        {
+                            uploadQueue.ReleaseSlot(queueEntry);
+                            Logger.Debug($"upload slot released: {filename} to {username}");
+                        }),
+                    cancellationToken: cts.Token);
+            }
+            catch (Exception e)
+            {
+                uploadTask = Task.FromException(e);
+            }
+
+            // runs inline when the task already failed, so a duplicate's entry is gone before we answer
+            uploadTask.ContinueWith(t =>
+            {
+                if (t.IsFaulted)
+                {
+                    var e = t.Exception.InnerException;
+                    if (e is DuplicateTransferException || e is DuplicateTokenException)
+                    {
+                        Logger.Debug("UPLOAD DUPL - " + e.Message);
+                        TransferState.SetupCancellationToken(transferItem, oldCts, out _);
+                    }
+                }
+                uploadQueue.Remove(queueEntry);
+            }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+
+            // return a completed task so that the invoking code can respond to the remote client.
+            return Task.CompletedTask;
+        }
+
+        // null result == no op
+        public static Task<int?> PlaceInQueueResolver(string username, IPEndPoint endpoint, string filename)
+        {
+            _ = endpoint;
+            if (UserListService.Instance.IsUserInIgnoreList(username))
+            {
+                return Task.FromResult<int?>(null);
+            }
+            int? place = uploadQueue.EstimatePosition(username, filename);
+            Logger.Debug($"place in queue of {filename} for {username}: {(place.HasValue ? place.Value.ToString() : "not queued")}");
+            return Task.FromResult(place);
+        }
+    }
+}

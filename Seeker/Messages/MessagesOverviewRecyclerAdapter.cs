@@ -1,0 +1,430 @@
+﻿using Android.App;
+using Android.Content;
+using Android.Graphics;
+using Android.Graphics.Drawables;
+using Android.OS;
+using Android.Runtime;
+using Android.Views;
+using Android.Widget;
+using AndroidX.Core.Content;
+using AndroidX.RecyclerView.Widget;
+using Google.Android.Material.Snackbar;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using Common;
+using Seeker.Helpers;
+
+namespace Seeker.Messages
+{
+    public class ItemTouchHelperMessageOverviewCallback : ItemTouchHelper.SimpleCallback
+    {
+        private MessagesOverviewRecyclerAdapter adapter = null;
+        private AndroidX.Fragment.App.Fragment containingFragment = null;
+        public ItemTouchHelperMessageOverviewCallback(MessagesOverviewRecyclerAdapter _adapter, AndroidX.Fragment.App.Fragment outerFrag) : base(0, ItemTouchHelper.Left) //no dragging. left swiping.
+        {
+            containingFragment = outerFrag;
+            adapter = _adapter;
+            iconDrawable = ContextCompat.GetDrawable(SeekerState.ActiveActivityRef, Resource.Drawable.baseline_delete_outline_white_24);
+            clipDrawable = new ClipDrawable(iconDrawable, GravityFlags.Right, ClipDrawableOrientation.Horizontal);
+        }
+        private Android.Graphics.Drawables.ColorDrawable colorDrawable = new Android.Graphics.Drawables.ColorDrawable(Color.ParseColor("#ed4a51"));
+        private Android.Graphics.Drawables.Drawable iconDrawable = null;
+        private Android.Graphics.Drawables.ClipDrawable clipDrawable = null;
+
+        public override int GetMovementFlags(RecyclerView recyclerView, RecyclerView.ViewHolder viewHolder)
+        {
+            if (adapter.IsInBatchSelectMode)
+            {
+                return MakeMovementFlags(0, 0);
+            }
+            return base.GetMovementFlags(recyclerView, viewHolder);
+        }
+
+        public override bool OnMove(RecyclerView p0, RecyclerView.ViewHolder p1, RecyclerView.ViewHolder p2)
+        {
+            return false;
+        }
+
+        public static void UndoSingleUserMessagesDeleteAction(MessagesOverviewRecyclerAdapter adapter, (string username, List<Message> messages, int readCount) deletedData, int position = -1, bool fromOptionMenu = false)
+        {
+            if (string.IsNullOrEmpty(deletedData.username) || (!fromOptionMenu && position == -1))
+            {
+                //error
+                SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.failed_to_undo), ToastLength.Short);
+                return;
+            }
+            MessageController.UndoDeleteMessagesFromUser(deletedData);
+            if (fromOptionMenu)
+            {
+                (SeekerState.ActiveActivityRef as MessagesActivity).GetOverviewFragment().RefreshAdapter();
+            }
+            else
+            {
+                adapter.RestoreAt(position, deletedData.username);
+            }
+        }
+
+        public override void OnSwiped(RecyclerView.ViewHolder p0, int p1)
+        {
+            int pos = p0.AbsoluteAdapterPosition;
+            if (pos == RecyclerView.NoPosition || pos >= adapter.ItemCount)
+            {
+                Logger.Firebase("MESSAGE OVERVIEW: " + pos);
+                return;
+            }
+            //delete and save messages
+            //show snackbar
+            var usernameToDelete = adapter.At(pos);
+            adapter.RemoveAt(pos); //removes from adapter data and notifies.
+            var (deletedMessages, readCount) = MessageController.DeleteMessageFromUserWithUndo(usernameToDelete);
+
+            Snackbar sb = Snackbar.Make(containingFragment.View, string.Format(SeekerState.ActiveActivityRef.GetString(Resource.String.deleted_message_history_with),
+                usernameToDelete), Snackbar.LengthLong)
+                .SetAction(Resource.String.undo, (View view) => UndoSingleUserMessagesDeleteAction(this.adapter, (usernameToDelete, deletedMessages, readCount), pos, false)) ;
+            sb.Show();
+        }
+
+        public override void ClearView(RecyclerView recyclerView, RecyclerView.ViewHolder viewHolder)
+        {
+            base.ClearView(recyclerView, viewHolder);
+            this.colorDrawable.SetBounds(0, 0, 0, 0);
+            this.clipDrawable.SetBounds(0, 0, 0, 0);
+        }
+
+        public override void OnChildDraw(Canvas c, RecyclerView recyclerView, RecyclerView.ViewHolder viewHolder, float dX, float dY, int actionState, bool isCurrentlyActive)
+        {
+            base.OnChildDraw(c, recyclerView, viewHolder, dX, dY, actionState, isCurrentlyActive);
+            View itemView = viewHolder.ItemView;
+            if (dX < 0)
+            {
+                this.colorDrawable.SetBounds(itemView.Right + (int)dX, itemView.Top, itemView.Right, itemView.Bottom);
+                double margin = (itemView.Bottom - itemView.Top) * .25;
+                int clipBounds = (int)((itemView.Bottom - itemView.Top) - 2 * margin);
+                int level = Math.Min((int)(Math.Abs((dX + margin) / (clipBounds)) * 10000), 10000);
+                if (level < 0)
+                {
+                    level = 0;
+                }
+                clipDrawable.SetLevel(level);
+                clipDrawable.SetBounds((int)(itemView.Right - clipBounds - margin), (int)(itemView.Top + margin), (int)(itemView.Right - margin), (int)(itemView.Bottom - margin));
+            }
+            else
+            {
+                this.colorDrawable.SetBounds(0, 0, 0, 0);
+                this.clipDrawable.SetBounds(0, 0, 0, 0);
+            }
+            this.colorDrawable.Draw(c);
+            clipDrawable.Draw(c);
+        }
+    }
+
+
+    public class MessageOverviewDiffCallback : DiffUtil.Callback
+    {
+        private List<string> oldList;
+        private List<string> newList;
+
+        public MessageOverviewDiffCallback(List<string> _oldList, List<string> _newList)
+        {
+            oldList = _oldList;
+            newList = _newList;
+        }
+
+        public override int NewListSize => newList.Count;
+
+        public override int OldListSize => oldList.Count;
+
+        public override bool AreContentsTheSame(int oldItemPosition, int newItemPosition)
+        {
+            return false; // always rebind — unread count / last message may have changed
+        }
+
+        public override bool AreItemsTheSame(int oldItemPosition, int newItemPosition)
+        {
+            return oldList[oldItemPosition] == newList[newItemPosition];
+        }
+    }
+
+    public class MessagesOverviewRecyclerAdapter : RecyclerView.Adapter
+    {
+        public List<string> localDataSet;
+        public List<int> SelectedPositions = new List<int>();
+        public bool IsInBatchSelectMode = false;
+        public override int ItemCount => localDataSet.Count;
+        private int position = -1;
+
+        public override void OnBindViewHolder(RecyclerView.ViewHolder holder, int position)
+        {
+            var view = (holder as MessageOverviewHolder).messageOverviewView;
+
+            if (SelectedPositions.Contains(position))
+            {
+                view.SetSelectedBackground(true);
+            }
+            else
+            {
+                view.SetSelectedBackground(false);
+            }
+
+            view.setItem(localDataSet[position], IsInBatchSelectMode, SelectedPositions.Contains(position));
+        }
+
+        public void setPosition(int position)
+        {
+            this.position = position;
+        }
+
+        public int getPosition()
+        {
+            return this.position;
+        }
+
+
+        private void MessageOverviewClick(object sender, EventArgs e)
+        {
+            setPosition((sender as MessageOverviewView).ViewHolder.BindingAdapterPosition);
+            if (IsInBatchSelectMode)
+            {
+                (MessagesActivity.MessagesActivityRef as MessagesActivity).GetOverviewFragment()?.ToggleBatchSelect(position);
+                return;
+            }
+            MessagesActivity.MessagesActivityRef.ChangeToInnerFragment(localDataSet[position]);
+        }
+
+        public override RecyclerView.ViewHolder OnCreateViewHolder(ViewGroup parent, int viewType)
+        {
+            MessageOverviewView view = MessageOverviewView.Create(parent);
+            (view as View).Click += MessageOverviewClick;
+            MessageOverviewHolder holder = new MessageOverviewHolder(view as View);
+            (view as View).LongClick += (sender, e) =>
+            {
+                int pos = holder.BindingAdapterPosition;
+                if (pos != RecyclerView.NoPosition)
+                {
+                    (MessagesActivity.MessagesActivityRef as MessagesActivity).GetOverviewFragment()?.OnItemLongClick(pos);
+                }
+            };
+            return holder;
+        }
+
+        public string At(int pos)
+        {
+            return localDataSet[pos];
+        }
+
+        public void RemoveAt(int pos)
+        {
+            localDataSet.RemoveAt(pos);
+            this.NotifyItemRemoved(pos);
+        }
+
+        public void RestoreAt(int pos, string uname)
+        {
+            localDataSet.Insert(pos, uname);
+            this.NotifyItemInserted(pos);
+        }
+
+        public void NotifyNameChanged(string name)
+        {
+            int pos = localDataSet.IndexOf(name);
+            if (pos != -1)
+            {
+                this.NotifyItemChanged(pos);
+            }
+        }
+
+        public MessagesOverviewRecyclerAdapter(List<string> ti)
+        {
+            localDataSet = ti;
+        }
+
+    }
+
+    public class MessageOverviewHolder : RecyclerView.ViewHolder
+    {
+        public MessageOverviewView messageOverviewView;
+
+
+        public MessageOverviewHolder(View view) : base(view)
+        {
+            //super(view);
+            // Define click listener for the ViewHolder's View
+
+            messageOverviewView = (MessageOverviewView)view;
+            messageOverviewView.ViewHolder = this;
+            //(MessageOverviewView as View).SetOnCreateContextMenuListener(this);
+        }
+
+        public MessageOverviewView getUnderlyingView()
+        {
+            return messageOverviewView;
+        }
+    }
+
+    public class MessageOverviewView : LinearLayout
+    {
+        public MessageOverviewHolder ViewHolder { get; set; }
+        private TextView viewUsername;
+        private TextView viewMessage;
+        private TextView viewDateTimeAgo;
+        private TextView unreadBadge;
+        private ImageView viewStatusIndicator;
+        private ImageView selectionCheckbox;
+        private Color cellTextColor;
+        private Color subduedColor;
+        private Color verySubduedColor;
+
+        public MessageOverviewView(Context context) : base(context)
+        {
+            LayoutInflater.From(context).Inflate(Resource.Layout.message_overview_item, this, true);
+            setupChildren();
+        }
+
+        public static MessageOverviewView Create(ViewGroup parent)
+        {
+            var itemView = new MessageOverviewView(parent.Context);
+            itemView.LayoutParameters = new RecyclerView.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            return itemView;
+        }
+
+        public void setupChildren()
+        {
+            viewUsername = FindViewById<TextView>(Resource.Id.username);
+            viewMessage = FindViewById<TextView>(Resource.Id.message);
+            viewDateTimeAgo = FindViewById<TextView>(Resource.Id.dateTimeAgo);
+            unreadBadge = FindViewById<TextView>(Resource.Id.unreadBadge);
+            viewStatusIndicator = FindViewById<ImageView>(Resource.Id.statusIndicator);
+            selectionCheckbox = FindViewById<ImageView>(Resource.Id.selectionCheckbox);
+            cellTextColor = UiHelpers.GetColorFromAttribute(SeekerState.ActiveActivityRef, Resource.Attribute.cellTextColor);
+            subduedColor = UiHelpers.GetColorFromAttribute(SeekerState.ActiveActivityRef, Resource.Attribute.cellTextColorSubdued);
+            verySubduedColor = UiHelpers.GetColorFromAttribute(SeekerState.ActiveActivityRef, Resource.Attribute.cellTextColorVerySubdued);
+        }
+
+        public void SetSelectedBackground(bool isSelected)
+        {
+            if (isSelected)
+            {
+                this.Background = Resources.GetDrawable(Resource.Color.batchSelectHighlight, null);
+            }
+            else
+            {
+                this.Background = null;
+            }
+        }
+
+        private void SetStatusIndicator(string username)
+        {
+            if (CommonState.UserList == null)
+            {
+                viewStatusIndicator.Visibility = ViewStates.Gone;
+                return;
+            }
+
+            UserListItem foundItem = null;
+            lock (CommonState.UserList)
+            {
+                foreach (UserListItem item in CommonState.UserList)
+                {
+                    if (item.Username == username)
+                    {
+                        foundItem = item;
+                        break;
+                    }
+                }
+            }
+
+            if (foundItem == null)
+            {
+                viewStatusIndicator.Visibility = ViewStates.Gone;
+                return;
+            }
+
+            Soulseek.UserPresence status = foundItem.GetStatusFromItem(out bool statusExists);
+            if (!statusExists)
+            {
+                viewStatusIndicator.Visibility = ViewStates.Gone;
+                return;
+            }
+
+            viewStatusIndicator.Visibility = ViewStates.Visible;
+            int colorRes;
+            switch (status)
+            {
+                case Soulseek.UserPresence.Online:
+                    colorRes = Resource.Color.online;
+                    break;
+                case Soulseek.UserPresence.Away:
+                    colorRes = Resource.Color.away;
+                    break;
+                default:
+                    colorRes = Resource.Color.offline;
+                    break;
+            }
+            viewStatusIndicator.SetColorFilter(new Android.Graphics.Color(ContextCompat.GetColor(SeekerState.ActiveActivityRef, colorRes)));
+        }
+
+        public void setItem(string username, bool isInBatchMode, bool isSelected)
+        {
+            viewUsername.Text = username;
+            Message m = MessageController.Messages[username].Last();
+
+            viewDateTimeAgo.Text = SimpleHelpers.GetDateTimeSinceAbbrev(m.LocalDateTime);
+
+            SetStatusIndicator(username);
+
+            if (isInBatchMode)
+            {
+                selectionCheckbox.Visibility = ViewStates.Visible;
+                if (isSelected)
+                {
+                    selectionCheckbox.SetImageResource(Resource.Drawable.check_circle);
+                }
+                else
+                {
+                    selectionCheckbox.SetImageResource(Resource.Drawable.check_circle_outline);
+                }
+            }
+            else
+            {
+                selectionCheckbox.Visibility = ViewStates.Gone;
+            }
+
+            int unreadCount = MessageController.GetUnreadCount(username);
+            if (unreadCount > 0)
+            {
+                unreadBadge.Visibility = ViewStates.Visible;
+                unreadBadge.Text = unreadCount > 99 ? "99+" : unreadCount.ToString();
+
+                // unread: username bold, message bright
+                viewUsername.SetTypeface(null, TypefaceStyle.Bold);
+                viewUsername.SetTextColor(cellTextColor);
+                viewMessage.SetTypeface(null, TypefaceStyle.Normal);
+                viewMessage.SetTextColor(cellTextColor);
+                viewDateTimeAgo.SetTypeface(null, TypefaceStyle.Normal);
+                viewDateTimeAgo.SetTextColor(subduedColor);
+            }
+            else
+            {
+                unreadBadge.Visibility = ViewStates.Gone;
+
+                // read: username normal, message more subdued for contrast
+                viewUsername.SetTypeface(null, TypefaceStyle.Normal);
+                viewUsername.SetTextColor(cellTextColor);
+                viewMessage.SetTypeface(null, TypefaceStyle.Normal);
+                viewMessage.SetTextColor(subduedColor);
+                viewDateTimeAgo.SetTypeface(null, TypefaceStyle.Normal);
+                viewDateTimeAgo.SetTextColor(subduedColor);
+            }
+
+            string msgText = m.MessageText;
+            if (m.FromMe)
+            {
+                msgText = "\u21AA" + msgText;
+            }
+            viewMessage.Text = msgText;
+        }
+    }
+
+}
