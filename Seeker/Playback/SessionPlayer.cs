@@ -43,19 +43,22 @@ namespace Seeker.Playback
                 commands.AddIf(command, actualPlayer.AvailableCommands.Contains(command));
             commands.AddIf(Commands.CommandPlayPause, track != null && track.Failure == null);
             commands.AddIf(Commands.CommandStop, track != null);
+            var seekRange = track?.SeekRange ?? default;
+            commands.AddIf(Commands.CommandSeekInCurrentMediaItem,
+                track != null && track.Failure == null && seekRange.CanSeek);
             builder.SetAvailableCommands(commands.Build());
 
             var playlist = new List<MediaItemData>();
             var item = actualPlayer.CurrentMediaItem;
             if (track != null && item != null)
             {
-                // Strip original Format/APIC data and all unsupported seeking from the session
-                // timeline. Publish only the merged metadata and bounded thumbnail.
+                // Strip original Format/APIC data and publish only the merged metadata and
+                // bounded thumbnail. Seekability follows the extractor's completed-sample index.
                 playlist.Add(new MediaItemData.Builder(item)
                     .SetMediaItem(item.BuildUpon().SetMediaMetadata(track.SessionMetadata).Build())
                     .SetMediaMetadata(track.SessionMetadata)
-                    .SetIsSeekable(false)
-                    .SetDurationUs(actualPlayer.Duration > 0 ? actualPlayer.Duration * 1000 : C.TimeUnset)
+                    .SetIsSeekable(seekRange.CanSeek)
+                    .SetDurationUs(seekRange.DurationUs > 0 ? seekRange.DurationUs : C.TimeUnset)
                     .Build());
             }
             builder.SetPlaylist(playlist).SetCurrentMediaItemIndex(playlist.Count == 0 ? C.IndexUnset : 0);
@@ -68,6 +71,17 @@ namespace Seeker.Playback
         protected override IListenableFuture HandleStop()
         {
             stop();
+            return CompletedFuture();
+        }
+
+        protected override IListenableFuture HandleSeek(int mediaItemIndex, long positionMs, int seekCommand)
+        {
+            var track = current?.Invoke();
+            // Do not expose seek-back/forward increments or playlist operations. Every accepted
+            // seek comes through the same per-track timestamp range as the in-app seek bar.
+            if (seekCommand == Commands.CommandSeekInCurrentMediaItem
+                && track != null && (mediaItemIndex == C.IndexUnset || mediaItemIndex == 0))
+                track.TrySeekTo(positionMs);
             return CompletedFuture();
         }
 

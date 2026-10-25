@@ -14,7 +14,10 @@
     <string name="stream_paused">Paused</string>
     <string name="stream_finished">Finished</string>
     <string name="stream_failed">Could not continue playback: %1$s</string>
-    <string name="stream_progress">Received %1$d%% · Played %2$d:%3$02d</string>
+    <string name="stream_progress">Received %1$d%%</string>
+    <string name="stream_seek">Playback position</string>
+    <string name="stream_seek_position">%1$s / %2$s</string>
+    <string name="stream_seek_unknown">Played %1$s · Seekable to %2$s · Duration unknown</string>
     <string name="stream_file_limit">Streaming supports MP3 files up to 256 MB with a known size.</string>
     <string name="stream_download_conflict">This file is streaming. Stop playback before downloading it.</string>
     <string name="app_name">Seeker</string>

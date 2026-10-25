@@ -27,15 +27,19 @@ namespace Seeker.Playback
         private readonly IExoPlayer player;
         private readonly Task predecessor;
         private readonly CancellationTokenSource cancellation = new CancellationTokenSource();
+        private readonly object seekRangeSync = new object();
+        private int seekPublishPending;
         private ProgressiveBuffer buffer;
         private ProgressiveDataSource.Factory dataSourceFactory;
         private Task transferTask = Task.CompletedTask;
         private bool resourcesClosed;
         private bool stopped;
+        private volatile bool readableLocalFile;
         private int metadataRevision;
         private AndroidX.Media3.Common.Metadata lastId3;
         private volatile TransferStates transferState;
         private volatile bool receiving;
+        private SeekRangeSnapshot seekRange = new SeekRangeSnapshot(0, -1, false);
 
         public string Id { get; }
         public string Username { get; }
@@ -47,10 +51,43 @@ namespace Seeker.Playback
         public PlaybackException Failure { get; private set; }
         public Task Cleanup { get; private set; } = Task.CompletedTask;
         public bool IsStopped => stopped;
-        public long Received => buffer?.AvailableLength ?? FileInfo.Size;
-        public bool HasBytes => buffer == null || buffer.AvailableLength > 0;
+        public long Received => buffer != null ? buffer.AvailableLength : readableLocalFile ? FileInfo.Size : 0;
+        public bool HasBytes => buffer != null ? buffer.AvailableLength > 0 : readableLocalFile;
         public bool IsQueued => transferState.HasFlag(TransferStates.Queued);
         public bool IsReceiving => receiving;
+        public SeekRangeSnapshot SeekRange
+        {
+            get
+            {
+                lock (seekRangeSync)
+                {
+                    long durationUs = seekRange.DurationUs;
+                    long playerDuration = player.Duration;
+                    if (durationUs <= 0 && playerDuration > 0) durationUs = playerDuration * 1000;
+                    long seekableUs = durationUs > 0
+                        ? Math.Min(seekRange.SeekablePositionUs, durationUs) : seekRange.SeekablePositionUs;
+                    return new SeekRangeSnapshot(seekableUs, durationUs, seekRange.CanSeek,
+                        seekRange.SafePosition, seekRange.MinimumPosition);
+                }
+            }
+        }
+
+        public bool TrySeekTo(long positionMs)
+        {
+            if (positionMs < 0 || Failure != null || stopped || !owner.IsCurrent(this)) return false;
+            long positionUs = positionMs > long.MaxValue / 1000 ? long.MaxValue : positionMs * 1000;
+            if (!SeekRange.Contains(positionUs)) return false;
+            try
+            {
+                player.SeekTo(positionMs);
+                return true;
+            }
+            catch (Exception exception)
+            {
+                Logger.Debug("Rejected MP3 seek: " + exception.Message);
+                return false;
+            }
+        }
 
         public StreamingPlayback(StreamingPlaybackService owner, IExoPlayer player, string id,
             string username, FullFileInfo file, Task predecessor)
@@ -75,9 +112,10 @@ namespace Seeker.Playback
                 {
                     var source = new ProgressiveMediaSource.Factory(
                         new AndroidX.Media3.DataSource.DefaultDataSource.Factory(owner.ApplicationContext),
-                        new Mp3ExtractorsFactory(disableSeeking: false))
+                        new Mp3ExtractorsFactory(disableSeeking: false, seekIndexChanged: OnSeekIndexChanged))
                         .CreateMediaSource(new MediaItem.Builder().SetUri(localUri).SetMediaId(Id).Build());
                     player.SetMediaSource(source);
+                    readableLocalFile = true;
                 }
                 else
                 {
@@ -87,7 +125,8 @@ namespace Seeker.Playback
                     Directory.CreateDirectory(directory);
                     buffer = new ProgressiveBuffer(Path.Combine(directory, Guid.NewGuid().ToString("N") + ".part"), FileInfo.Size);
                     dataSourceFactory = new ProgressiveDataSource.Factory(buffer);
-                    var source = new ProgressiveMediaSource.Factory(dataSourceFactory, new Mp3ExtractorsFactory())
+                    var source = new ProgressiveMediaSource.Factory(dataSourceFactory,
+                        new Mp3ExtractorsFactory(disableSeeking: false, seekIndexChanged: OnSeekIndexChanged))
                         .CreateMediaSource(new MediaItem.Builder().SetUri("seeker-stream:///track.mp3")
                             .SetMediaId(Id).SetMimeType("audio/mpeg").Build());
                     player.SetMediaSource(source);
@@ -111,6 +150,19 @@ namespace Seeker.Playback
                 return stream != null;
             }
             catch (Exception) { return false; }
+        }
+
+        private void OnSeekIndexChanged(SeekRangeSnapshot range)
+        {
+            lock (seekRangeSync) seekRange = range;
+            // Extraction may consume many samples faster than playback time. Coalesce those
+            // notifications into one main-thread refresh; Snapshot always reads the latest range.
+            if (Interlocked.Exchange(ref seekPublishPending, 1) != 0) return;
+            owner.RunOnMain(() =>
+            {
+                Interlocked.Exchange(ref seekPublishPending, 0);
+                if (owner.IsCurrent(this)) owner.Publish();
+            });
         }
 
         private async Task ReceiveAsync()

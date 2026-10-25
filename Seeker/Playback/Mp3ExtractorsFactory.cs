@@ -5,11 +5,14 @@ namespace Seeker.Playback
     internal sealed class Mp3ExtractorsFactory : Java.Lang.Object, IExtractorsFactory
     {
         private readonly bool disableSeeking;
-        public Mp3ExtractorsFactory(bool disableSeeking = true) { this.disableSeeking = disableSeeking; }
+        private readonly System.Action<Common.Playback.SeekRangeSnapshot> seekIndexChanged;
+        public Mp3ExtractorsFactory(bool disableSeeking = false,
+            System.Action<Common.Playback.SeekRangeSnapshot> seekIndexChanged = null)
+        { this.disableSeeking = disableSeeking; this.seekIndexChanged = seekIndexChanged; }
 
         public IExtractor[] CreateExtractors()
         {
-            return new IExtractor[] { new BoundedMp3Extractor(disableSeeking) };
+            return new IExtractor[] { new BoundedMp3Extractor(disableSeeking, seekIndexChanged) };
         }
 
         public IExtractor[] CreateExtractors(Android.Net.Uri uri,

@@ -35,6 +35,33 @@ namespace UnitTestCommon
         }
 
         [Test]
+        public async Task RewindKeepsReceivedPrefixAndWriterResumePositionForLaterBytes()
+        {
+            using var buffer = Create(6);
+            await buffer.Writer.WriteAsync(new byte[] { 1, 2, 3, 4 });
+            var received = new byte[2];
+
+            Assert.That(buffer.ReadAt(2, received, 0, 2, CancellationToken.None, TimeSpan.FromSeconds(1)), Is.EqualTo(2));
+            Assert.That(received, Is.EqualTo(new byte[] { 3, 4 }));
+            Assert.That(buffer.Writer.Position, Is.EqualTo(4));
+            Assert.That(buffer.AvailableLength, Is.EqualTo(4));
+
+            Assert.That(buffer.ReadAt(0, received, 0, 2, CancellationToken.None, TimeSpan.FromSeconds(1)), Is.EqualTo(2));
+            Assert.That(received, Is.EqualTo(new byte[] { 1, 2 }));
+            Assert.That(buffer.Writer.Position, Is.EqualTo(4));
+            Assert.That(buffer.AvailableLength, Is.EqualTo(4));
+
+            await buffer.Writer.WriteAsync(new byte[] { 5, 6 });
+            buffer.Complete();
+            Assert.That(buffer.Writer.Position, Is.EqualTo(6));
+            Assert.That(buffer.AvailableLength, Is.EqualTo(6));
+            var complete = new byte[6];
+            Assert.That(buffer.ReadAt(0, complete, 0, complete.Length,
+                CancellationToken.None, TimeSpan.FromSeconds(1)), Is.EqualTo(6));
+            Assert.That(complete, Is.EqualTo(new byte[] { 1, 2, 3, 4, 5, 6 }));
+        }
+
+        [Test]
         public async Task StopWakesBlockedReaderPromptly()
         {
             using var buffer = Create();
@@ -69,6 +96,52 @@ namespace UnitTestCommon
         {
             using var buffer = Create();
             Assert.Throws<IOException>(() => buffer.ReadAt(0, new byte[1], 0, 1, CancellationToken.None, TimeSpan.FromMilliseconds(30)));
+        }
+
+        [Test]
+        public async Task InterruptingOneReaderDoesNotFailOrMoveTheTransfer()
+        {
+            using var buffer = Create(4);
+            using var lifetime = new CancellationTokenSource();
+            int interrupted = 0;
+            var blockedRead = Task.Run(() => buffer.ReadAt(0, new byte[2], 0, 2, lifetime.Token,
+                TimeSpan.FromSeconds(5), () => Volatile.Read(ref interrupted) != 0));
+            await Task.Delay(25);
+            Interlocked.Exchange(ref interrupted, 1);
+            Assert.ThrowsAsync<OperationCanceledException>(async () =>
+                await blockedRead.WaitAsync(TimeSpan.FromSeconds(2)));
+            Assert.That(buffer.AvailableLength, Is.EqualTo(0));
+            Assert.That(buffer.Writer.Position, Is.EqualTo(0));
+
+            await buffer.Writer.WriteAsync(new byte[] { 7, 8 });
+            var received = new byte[2];
+            Assert.That(buffer.ReadAt(0, received, 0, received.Length, lifetime.Token, TimeSpan.FromSeconds(1)), Is.EqualTo(2));
+            Assert.That(received, Is.EqualTo(new byte[] { 7, 8 }));
+            Assert.That(buffer.Writer.Position, Is.EqualTo(2));
+        }
+
+        [Test]
+        public async Task ThreadInterruptWakesAFrontierWaitWithoutClosingTheWriter()
+        {
+            using var buffer = Create(4);
+            using var entered = new ManualResetEventSlim();
+            Thread readerThread = null;
+            var blockedRead = Task.Run(() =>
+            {
+                readerThread = Thread.CurrentThread;
+                entered.Set();
+                return buffer.ReadAt(0, new byte[1], 0, 1, CancellationToken.None,
+                    TimeSpan.FromSeconds(5), () => false);
+            });
+
+            Assert.That(entered.Wait(TimeSpan.FromSeconds(2)), Is.True);
+            readerThread.Interrupt();
+            Assert.ThrowsAsync<OperationCanceledException>(async () =>
+                await blockedRead.WaitAsync(TimeSpan.FromSeconds(2)));
+
+            await buffer.Writer.WriteAsync(new byte[] { 42 });
+            Assert.That(buffer.AvailableLength, Is.EqualTo(1));
+            Assert.That(buffer.Writer.Position, Is.EqualTo(1));
         }
 
         [Test]

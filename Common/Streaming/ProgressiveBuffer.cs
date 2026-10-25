@@ -35,7 +35,7 @@ namespace Common.Streaming
         }
 
         public int ReadAt(long position, byte[] bytes, int offset, int count,
-            CancellationToken cancellationToken, TimeSpan timeout)
+            CancellationToken cancellationToken, TimeSpan timeout, Func<bool>? interruptRequested = null)
         {
             if (position < 0) throw new ArgumentOutOfRangeException(nameof(position));
             if (bytes == null) throw new ArgumentNullException(nameof(bytes));
@@ -48,6 +48,8 @@ namespace Common.Streaming
                 while (true)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+                    if (interruptRequested?.Invoke() == true)
+                        throw new OperationCanceledException("The media read was cancelled by a seek.");
                     if (disposed) throw new ObjectDisposedException(nameof(ProgressiveBuffer));
                     if (position < available)
                     {
@@ -58,7 +60,18 @@ namespace Common.Streaming
                     if (completed) return -1;
                     var remaining = timeout - elapsed.Elapsed;
                     if (remaining <= TimeSpan.Zero) throw new IOException("Timed out waiting for audio from the peer.");
-                    Monitor.Wait(sync, remaining);
+                    // Media3 interrupts a cancelled loader thread during a seek. Poll that thread
+                    // signal promptly while retaining the same transfer buffer and cancellation
+                    // token, so the next loader can read the same committed prefix.
+                    try
+                    {
+                        Monitor.Wait(sync, interruptRequested == null
+                            ? remaining : (remaining < TimeSpan.FromMilliseconds(100) ? remaining : TimeSpan.FromMilliseconds(100)));
+                    }
+                    catch (ThreadInterruptedException) when (interruptRequested != null)
+                    {
+                        throw new OperationCanceledException("The media read was interrupted by a seek.");
+                    }
                 }
             }
         }

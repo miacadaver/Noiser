@@ -35,9 +35,15 @@ namespace Seeker.Playback
         private TextView album;
         private TextView status;
         private TextView progress;
+        private TextView seekStatus;
+        private SeekBar seekBar;
         private Button pause;
         private bool attached;
         private string pendingRequest;
+        private bool trackingSeekBar;
+        private bool staleSeekGesture;
+        private string trackingTrackId;
+        private SeekRangeSnapshot trackingSeekRange;
 
         internal StreamingPlaybackController(MainActivity activity)
         {
@@ -146,6 +152,33 @@ namespace Seeker.Playback
             album = view.FindViewById<TextView>(Resource.Id.streamAlbum);
             status = view.FindViewById<TextView>(Resource.Id.streamStatus);
             progress = view.FindViewById<TextView>(Resource.Id.streamProgress);
+            seekStatus = view.FindViewById<TextView>(Resource.Id.streamSeekStatus);
+            seekBar = view.FindViewById<SeekBar>(Resource.Id.streamSeekBar);
+            seekBar.ProgressChanged += (_, args) =>
+            {
+                if (args.FromUser) HandleUserSeekProgress(args.Progress);
+            };
+            seekBar.StartTrackingTouch += (_, __) =>
+            {
+                staleSeekGesture = false;
+                var current = StreamingPlaybackService.Current?.Snapshot();
+                trackingSeekBar = current?.SeekRange.CanSeek == true;
+                trackingTrackId = current?.TrackId;
+                trackingSeekRange = current?.SeekRange ?? default;
+            };
+            seekBar.StopTrackingTouch += (_, __) =>
+            {
+                var current = StreamingPlaybackService.Current?.Snapshot();
+                if (!staleSeekGesture && trackingSeekBar && current?.TrackId == trackingTrackId)
+                {
+                    long targetUs = trackingSeekRange.SliderPosition(seekBar.Progress, seekBar.Max);
+                    if (trackingSeekRange.Contains(targetUs)) Controls?.SeekTo(targetUs / 1000);
+                }
+                trackingSeekBar = false;
+                staleSeekGesture = false;
+                trackingTrackId = null;
+                Update();
+            };
             pause = view.FindViewById<Button>(Resource.Id.streamPause);
             pause.Click += (_, __) => TogglePause();
             var window = new Google.Android.Material.Dialog.MaterialAlertDialogBuilder(activity)
@@ -162,6 +195,9 @@ namespace Seeker.Playback
                 if (!ReferenceEquals(dialog, window)) return;
                 dialog = null;
                 pendingRequest = null;
+                trackingSeekBar = false;
+                staleSeekGesture = false;
+                trackingTrackId = null;
                 Update();
             };
             dialog.Show();
@@ -202,6 +238,13 @@ namespace Seeker.Playback
                     artist.Visibility = album.Visibility = ViewStates.Gone;
                     status.SetText(pendingRequest != null ? Resource.String.stream_connecting : Resource.String.stream_stopped);
                     pause.Enabled = false;
+                    seekBar.Enabled = false;
+                    seekBar.Progress = 0;
+                    seekBar.SecondaryProgress = 0;
+                    seekStatus.Text = string.Empty;
+                    trackingSeekBar = false;
+                    staleSeekGesture = false;
+                    trackingTrackId = null;
                 }
             }
             else
@@ -229,11 +272,58 @@ namespace Seeker.Playback
                     long seconds = Math.Max(0, snapshot.Position) / 1000;
                     long percent = snapshot.Size > 0 ? Math.Min(100, snapshot.Received * 100 / snapshot.Size) : 0;
                     progress.Text = activity.GetString(Resource.String.stream_progress, new Java.Lang.Object[]
-                    { Java.Lang.Long.ValueOf(percent), Java.Lang.Long.ValueOf(seconds / 60), Java.Lang.Long.ValueOf(seconds % 60) });
+                    { Java.Lang.Long.ValueOf(percent) });
+                    if (trackingSeekBar && trackingTrackId != snapshot.TrackId)
+                    {
+                        trackingSeekBar = false;
+                        staleSeekGesture = true;
+                    }
+                    seekBar.Enabled = snapshot.Phase != PlaybackPhase.Error
+                        && snapshot.SeekRange.CanSeek && Controls != null;
+                    seekBar.SecondaryProgress = snapshot.SeekRange.SeekableProgress(seekBar.Max);
+                    if (!trackingSeekBar)
+                    {
+                        seekBar.Progress = snapshot.SeekRange.SliderProgress(Math.Max(0, snapshot.Position) * 1000, seekBar.Max);
+                        UpdateSeekStatus(Math.Max(0, snapshot.Position) * 1000, snapshot.SeekRange);
+                    }
                 }
             }
             // Position refresh exists only while this Activity is visible, never as a background poll.
             if (snapshot != null || pendingRequest != null) handler.PostDelayed(tick, 250);
+        }
+
+        private void HandleUserSeekProgress(int progressValue)
+        {
+            var current = StreamingPlaybackService.Current?.Snapshot();
+            if (current == null || current.Phase == PlaybackPhase.Error || !current.SeekRange.CanSeek) return;
+            if (staleSeekGesture)
+            {
+                seekBar.Progress = current.SeekRange.SliderProgress(Math.Max(0, current.Position) * 1000, seekBar.Max);
+                UpdateSeekStatus(Math.Max(0, current.Position) * 1000, current.SeekRange);
+                return;
+            }
+            if (trackingSeekBar && current.TrackId != trackingTrackId)
+            {
+                trackingSeekBar = false;
+                staleSeekGesture = true;
+                seekBar.Progress = current.SeekRange.SliderProgress(Math.Max(0, current.Position) * 1000, seekBar.Max);
+                UpdateSeekStatus(Math.Max(0, current.Position) * 1000, current.SeekRange);
+                return;
+            }
+            trackingSeekRange = current.SeekRange;
+            trackingTrackId = current.TrackId;
+            long requested = trackingSeekRange.SliderPosition(progressValue, seekBar.Max);
+            long bounded = Math.Min(requested, trackingSeekRange.SeekablePositionUs);
+            if (bounded != requested)
+            {
+                seekBar.Progress = trackingSeekRange.SliderProgress(bounded, seekBar.Max);
+            }
+            UpdateSeekStatus(bounded, trackingSeekRange);
+
+            // Keyboard and accessibility changes may not produce touch tracking callbacks.
+            // Commit them immediately, through the same MediaSession validator.
+            if (!trackingSeekBar && Controls != null && trackingSeekRange.Contains(bounded))
+                Controls.SeekTo(bounded / 1000);
         }
 
         private static void SetArtwork(ImageView view, PlaybackSnapshot snapshot)
@@ -241,6 +331,21 @@ namespace Seeker.Playback
             if (snapshot.Artwork != null) view.SetImageBitmap(snapshot.Artwork);
             else view.SetImageResource(Resource.Drawable.stream_artwork_placeholder);
         }
+
+        private void UpdateSeekStatus(long positionUs, SeekRangeSnapshot range)
+        {
+            if (seekStatus == null) return;
+            long positionSeconds = Math.Max(0, positionUs) / 1_000_000;
+            string position = FormatTime(positionSeconds);
+            seekStatus.Text = range.HasKnownDuration
+                ? activity.GetString(Resource.String.stream_seek_position,
+                    position, FormatTime(range.DurationUs / 1_000_000))
+                : activity.GetString(Resource.String.stream_seek_unknown,
+                    position, FormatTime(range.SeekablePositionUs / 1_000_000));
+        }
+
+        private static string FormatTime(long seconds) => string.Format(System.Globalization.CultureInfo.InvariantCulture,
+            "{0}:{1:00}", seconds / 60, seconds % 60);
 
         private static int StatusResource(PlaybackPhase phase) => phase switch
         {

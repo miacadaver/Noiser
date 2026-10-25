@@ -17,6 +17,11 @@
         android:accessibilityLiveRegion="polite" />
     <TextView android:id="@+id/streamProgress" android:layout_width="match_parent"
         android:layout_height="wrap_content" android:layout_marginTop="12dp" />
+    <SeekBar android:id="@+id/streamSeekBar" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:max="1000" android:enabled="false"
+        android:contentDescription="@string/stream_seek" />
+    <TextView android:id="@+id/streamSeekStatus" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:gravity="center_horizontal" />
     <Button android:id="@+id/streamPause" android:layout_width="match_parent"
         android:layout_height="wrap_content" android:layout_marginTop="12dp"
         android:text="@string/stream_pause" android:enabled="false" />

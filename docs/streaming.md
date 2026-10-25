@@ -23,7 +23,14 @@ The modified Soulseek.NET library delivers ordered TCP bytes to a supplied strea
 publishes chunks after flushing them to an app-private cache file, supports independent positional readers,
 and reports EOF only after completion. Its writer's Position always reports the committed prefix length,
 including after a reader moves elsewhere. `ProgressiveDataSource` waits at the current frontier and wakes
-on data, cancellation, failure, or timeout. A custom MP3 extractor disables seeking.
+on data, cancellation, failure, or timeout. The bounded MP3 extractor preserves the ID3 allocation guard,
+uses Media3's Xing/Info/VBRI seeking data where available, and requests Media3's incremental index when
+advertised file length alone would imply a constant-bitrate guess. It exposes only seek points within
+completed extracted samples and committed bytes.
+
+The received-byte indicator uses the committed streaming prefix. It reports the advertised size for a
+completed local file only after its URI has been confirmed readable and installed as the playback source;
+failed remote initialization with no buffer reports zero received bytes.
 
 Ordinary downloads retain their existing storage and completion path. Streaming tokens are recognized by
 `TransferEventRouter`, so they kick the existing keepalive without ordinary download counters/notifications,
@@ -32,7 +39,8 @@ cover a fully received track while it is playing. Late transfer events retain to
 
 ## Current behavior and limits
 
-- One MP3 at a time; 256 MiB maximum advertised size. No seeking or folder queue.
+- One MP3 at a time; 256 MiB maximum advertised size. Seeking is limited to extracted audio in the
+  received prefix; remote ranges and folder queues are not supported.
 - ExoPlayer starts with approximately two seconds of decoded audio buffered; it may read further ahead.
   Starting does not depend on the complete file arriving. Leading ID3 tags can increase startup time.
 - A waiting peer gets up to three minutes before an empty-buffer read times out. Once bytes have arrived,
@@ -47,6 +55,24 @@ cover a fully received track while it is playing. Late transfer events retain to
   release the stream. A killed process is not automatically resumed.
 - Buffer deletion waits for transfer shutdown. Abandoned `.part` files are cleaned on application startup.
   A temporary file may contain the complete track while playback is still running.
+
+## Seeking
+
+The app-private file remains a sequential Soulseek download. Playback reads it positionally, so rewinding
+does not restart or reposition the peer transfer. Media3 supplies the time-to-byte mapping, including Xing,
+Info, and VBRI metadata when present. If that metadata cannot establish a reliable VBR mapping, the extractor
+uses its incremental sample index instead of estimating byte positions from the advertised file size.
+
+Only completed extractor samples advance the bounded per-track timestamp and byte frontier. A 64-frame tail
+retains parsed sample start/end positions; it does not map time to bytes. The seekable timestamp ends at the
+last parsed frame at least 500 ms behind the extractor frontier, leaving completed audio for decoder preroll.
+Media3 remains the only timestamp-to-byte map. Its native points must land between the first parsed audio frame
+and that safe frame boundary; if no native point qualifies, seeking stays disabled. This works with a large ID3
+prefix and short received files without treating metadata bytes as audio or subtracting a fixed byte count. The
+full player and MediaSession use the same validated seek range. The seek bar reports the
+current position, total duration when known, and seekable audio. When the duration is unknown, it labels it as
+unknown. Stopping or switching tracks resets the visible range. A cancelled loader wait observes Media3's
+thread interruption without cancelling the transfer or changing the Soulseek writer position.
 
 ## Build and automated checks
 
@@ -69,10 +95,24 @@ Use the CI configuration to run the full host suite:
 dotnet test UnitTestCommon/UnitTestCommon.csproj --configuration Release --filter 'TestCategory!=RealData'
 ```
 
-Validation for `3.11.2-stream.5`: **665 passed, 1 skipped**, including all 11 original streaming tests,
-the metadata tests, and 16 new lifecycle cases. Android APK packaging and Java callback/manifest checks
-also pass locally. Encrypted Debug-only fixtures need upstream's `SeekerEncryptKey`; they are excluded
-by CI's Release configuration. Live peer playback has not been exercised on an Android device here.
+Run the Media3 parser/seek-map regression probe against the restored Xamarin AARs with
+`.github/scripts/media3-mp3-seek-probe/run.sh`. It builds synthetic CBR/VBR MP3 frame streams, including a
+200,000-byte ID3 prefix, and exercises partial-prefix seek/reparse plus final duration. On the pinned Media3
+1.11.1 artifacts it reports `IndexSeeker` for masked CBR, VBR, and ID3-prefixed VBR; the unmasked VBR control
+uses `ConstantBitrateSeeker` and estimates 28.7 seconds instead of the fixture's 5.224467 seconds. This is a
+native parser and seek-map probe only: it does not instantiate the Android wrapper, run an audio decoder, or
+verify audible playback.
+
+Step 4 validation: **58 focused tests passed**; **677 Release host tests passed, 1 skipped** with
+`TestCategory!=RealData`; the Android Debug build succeeded; the generated Java Media3 callback and manifest
+checker passed, including extractor wrapper callbacks. The build reports existing package, analyzer, and
+resource warnings. Encrypted Debug-only fixtures need upstream's `SeekerEncryptKey`; they are excluded by the
+Release configuration. Live peer playback has not been exercised on an Android device here.
+
+After an environment restart, the existing Release test assembly was rerun: **677 passed, 1 skipped**;
+the focused buffer, seek-index, and streaming-download subgroup passed **23 tests**. The Android SDK and
+temporary native probe dependencies were unavailable after the restart, so the Android build and Media3
+probe results above precede the final received-byte accounting flag correction and were not rerun afterward.
 
 ## Device acceptance checks
 
@@ -85,15 +125,20 @@ Run these against a real Android device and an MP3 that the test peer is authori
 2. Throttle the peer so transfer completion takes substantially longer than the player's starting buffer.
    Confirm audible playback while the dialog shows Received below 100%.
 3. Pause/resume. Slow the transfer below the playback bitrate and confirm buffering followed by recovery.
-4. Disconnect the peer after a prefix arrives. Confirm one offset-based retry, or a visible terminal error.
-5. Stop during the peer queue, a buffer wait, and playback. Confirm prompt UI response, no continuing transfer,
+4. Rewind and seek forward within received audio while the transfer is incomplete. Confirm the reported safe
+   range grows with received samples, seeks past it are rejected, and no second peer connection starts.
+   Repeat while paused, buffering, and near the received boundary.
+5. Test CBR and VBR MP3s with and without Xing/Info/VBRI headers. Check that seeks use extractor timestamps
+   and unreliable maps restrict seeking safely.
+6. Disconnect the peer after a prefix arrives. Confirm one offset-based retry, or a visible terminal error.
+7. Stop during the peer queue, a buffer wait, and playback. Confirm prompt UI response, no continuing transfer,
    and deletion of `cache/mp3-streams/*.part` after shutdown.
-6. Repeat Play, switch tracks, rotate, lock the screen, and background the app. Confirm ongoing playback,
+8. Repeat Play, switch tracks, rotate, lock the screen, and background the app. Confirm ongoing playback,
    correct controls/metadata, and no duplicate transfer or crash. Force-stop and relaunch to check
    abandoned cache cleanup. Follow the complete background playback checklist in the linked document.
-7. Try Play during an ordinary download, Download during streaming, and Play on an existing completed download.
+9. Try Play during an ordinary download, Download during streaming, and Play on an existing completed download.
    Confirm no second peer transfer for the same file while its current owner is active.
-8. Verify search, regular downloads/resume, transfers, uploads, and folder browsing alongside streaming.
+10. Verify search, regular downloads/resume, transfers, uploads, and folder browsing alongside streaming.
 
 Live audio playback and these Android lifecycle checks require device validation. The mock download mode
 generates arbitrary bytes and therefore is not a valid MP3 decoding fixture.

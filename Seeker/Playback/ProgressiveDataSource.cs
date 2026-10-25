@@ -40,7 +40,9 @@ namespace Seeker.Playback
             {
                 // Initial peer queue waits get more time than a stall during playback.
                 var timeout = buffer.AvailableLength == 0 ? TimeSpan.FromMinutes(3) : TimeSpan.FromSeconds(45);
-                int read = buffer.ReadAt(position, bytes, offset, (int)Math.Min(length, remaining), readCancellation.Token, timeout);
+                using var thread = Java.Lang.Thread.CurrentThread();
+                int read = buffer.ReadAt(position, bytes, offset, (int)Math.Min(length, remaining),
+                    readCancellation.Token, timeout, () => thread.IsInterrupted);
                 if (read > 0)
                 {
                     position += read;

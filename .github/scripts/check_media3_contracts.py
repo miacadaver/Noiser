@@ -27,11 +27,31 @@ OVERRIDES = {
         ("androidx.media3.common.SimpleBasePlayer.State", "getState", ()),
         ("androidx.media3.common.SimpleBasePlayer.State", "getPlaceholderState", ("androidx.media3.common.SimpleBasePlayer.State",)),
         ("com.google.common.util.concurrent.ListenableFuture", "handleStop", ()),
+        ("com.google.common.util.concurrent.ListenableFuture", "handleSeek", ("int", "long", "int")),
         ("com.google.common.util.concurrent.ListenableFuture", "handleSetPlayWhenReady", ("boolean",)),
     },
     "StreamingPlaybackService.java": {
         ("androidx.media3.session.MediaSession", "onGetSession", ("androidx.media3.session.MediaSession.ControllerInfo",)),
         ("com.google.common.util.concurrent.ListenableFuture", "onUpdateNotificationAsync", ("androidx.media3.session.MediaSession", "boolean")),
+    },
+}
+
+WRAPPER_OVERRIDES = {
+    "UnknownLengthExtractorInput": {
+        ("long", "getLength", ()),
+    },
+    "TrackingExtractorOutput": {
+        ("androidx.media3.extractor.TrackOutput", "track", ("int", "int")),
+        ("void", "seekMap", ("androidx.media3.extractor.SeekMap",)),
+    },
+    "TrackingTrackOutput": {
+        ("void", "sampleMetadata", ("long", "int", "int", "int",
+         "androidx.media3.extractor.TrackOutput.CryptoData")),
+    },
+    "SafeSeekMap": {
+        ("boolean", "isSeekable", ()),
+        ("long", "getDurationUs", ()),
+        ("androidx.media3.extractor.SeekMap.SeekPoints", "getSeekPoints", ("long",)),
     },
 }
 
@@ -104,6 +124,21 @@ def main():
             failures.append(f"{filename}: missing {returns} {name}({', '.join(parameters)})")
         if not missing:
             print(f"{filename}: all {len(expected)} session overrides exported")
+    generated_sources = list((args.obj / "android/src").rglob("*.java"))
+    for type_name, expected in WRAPPER_OVERRIDES.items():
+        wrappers = []
+        for path in generated_sources:
+            source = path.read_text()
+            if re.search(r"\bclass\s+[A-Za-z0-9_$]*" + re.escape(type_name) + r"\b", source):
+                wrappers.append((path, source))
+        if len(wrappers) != 1:
+            raise RuntimeError(f"Expected one generated {type_name} wrapper; found {len(wrappers)}")
+        path, source = wrappers[0]
+        missing = expected - methods(source, generated=True)
+        for returns, name, parameters in sorted(missing):
+            failures.append(f"{path.name}: missing {returns} {name}({', '.join(parameters)})")
+        if not missing:
+            print(f"{type_name}: all {len(expected)} extractor callback overrides exported")
     android = "{http://schemas.android.com/apk/res/android}"
     manifests = [args.obj / "android/AndroidManifest.xml", args.obj / "AndroidManifest.xml"]
     manifest = ET.parse(next(path for path in manifests if path.exists())).getroot()

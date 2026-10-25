@@ -227,7 +227,7 @@ namespace Seeker.Playback
                 SessionPlayer.PlayWhenReady, actualPlayer.IsPlaying, actualPlayer.PlaybackSuppressionReason != 0,
                 track.HasBytes, track.IsQueued);
             return new PlaybackSnapshot(track.Metadata, track.Artwork, phase, actualPlayer.CurrentPosition,
-                track.Received, track.FileInfo.Size, track.Failure?.Message,
+                track.Received, track.FileInfo.Size, track.Failure?.Message, track.Id, track.SeekRange,
                 SessionPlayer.PlayWhenReady && actualPlayer.PlaybackSuppressionReason == 0);
         }
 
@@ -322,9 +322,11 @@ namespace Seeker.Playback
         public long Received { get; }
         public long Size { get; }
         public string Error { get; }
+        public string TrackId { get; }
+        public Common.Playback.SeekRangeSnapshot SeekRange { get; }
         public bool ShowPause { get; }
         public PlaybackSnapshot(TrackMetadata metadata, Bitmap artwork, PlaybackPhase phase, long position,
-            long received, long size, string error, bool showPause)
-        { Metadata = metadata; Artwork = artwork; Phase = phase; Position = position; Received = received; Size = size; Error = error; ShowPause = showPause; }
+            long received, long size, string error, string trackId, Common.Playback.SeekRangeSnapshot seekRange, bool showPause)
+        { Metadata = metadata; Artwork = artwork; Phase = phase; Position = position; Received = received; Size = size; Error = error; TrackId = trackId; SeekRange = seekRange; ShowPause = showPause; }
     }
 }
