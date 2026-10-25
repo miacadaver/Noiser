@@ -1,4 +1,5 @@
 using Android.OS;
+using Bitmap = Android.Graphics.Bitmap;
 using Android.Views;
 using Android.Widget;
 using AndroidX.Fragment.App;
@@ -7,6 +8,7 @@ using AndroidX.Media3.ExoPlayer;
 using AndroidX.Media3.ExoPlayer.Source;
 using AndroidX.Media3.Extractor;
 using Common.Streaming;
+using Common.Playback;
 using Seeker.Services;
 using Seeker.Helpers;
 using Soulseek;
@@ -37,6 +39,13 @@ namespace Seeker.Playback
         private TextView status;
         private TextView progress;
         private Button pause;
+        private TextView artist;
+        private TextView album;
+        private ImageView artwork;
+        private Bitmap artworkBitmap;
+        private MetadataListener metadataListener;
+        private int metadataRevision;
+        public TrackMetadata Metadata { get; private set; }
         private IExoPlayer player;
         private ProgressiveBuffer buffer;
         private ProgressiveDataSource.Factory dataSourceFactory;
@@ -50,6 +59,7 @@ namespace Seeker.Playback
             this.activity = activity;
             this.username = username;
             this.file = file;
+            Metadata = TrackMetadataFallback.FromPath(file.FullFileName);
             predecessor = previousTransfer;
             tick = new Java.Lang.Runnable(Update);
         }
@@ -98,13 +108,17 @@ namespace Seeker.Playback
             status = view.FindViewById<TextView>(Resource.Id.streamStatus);
             progress = view.FindViewById<TextView>(Resource.Id.streamProgress);
             pause = view.FindViewById<Button>(Resource.Id.streamPause);
+            artist = view.FindViewById<TextView>(Resource.Id.streamArtist);
+            album = view.FindViewById<TextView>(Resource.Id.streamAlbum);
+            artwork = view.FindViewById<ImageView>(Resource.Id.streamArtwork);
             dialog = new Google.Android.Material.Dialog.MaterialAlertDialogBuilder(activity)
-                .SetTitle(SimpleHelpers.GetFileNameFromFile(file.FullFileName).ToString())
+                .SetTitle(Metadata.Title)
                 .SetView(view)
                 .SetNegativeButton(Resource.String.stream_stop, (_, __) => Stop())
                 .Create();
             dialog.DismissEvent += (_, __) => Stop();
             dialog.Show();
+            ShowMetadata();
             pause.Click += (_, __) =>
             {
                 if (player == null || stopped) return;
@@ -119,12 +133,20 @@ namespace Seeker.Playback
                     .Build();
                 player.SetAudioAttributes(new AndroidX.Media3.Common.AudioAttributes.Builder()
                     .SetUsage(C.UsageMedia).SetContentType(C.AudioContentTypeMusic).Build(), true);
+                metadataListener = new MetadataListener(ReadMetadata);
+                player.AddListener(metadataListener);
 
                 // Reuse a completed ordinary download when its URI is still readable.
                 var existing = TransferItems.TransferItemManagerDL?.GetTransferItemWithIndexFromAll(file.FullFileName, username, out _);
                 string localUri = existing?.State.HasFlag(TransferStates.Succeeded) == true ? existing.FinalUri : null;
                 if (!string.IsNullOrEmpty(localUri) && CanRead(localUri))
-                    player.SetMediaItem(MediaItem.FromUri(localUri));
+                {
+                    // Use the same bounded ID3 extractor for cached ordinary downloads.
+                    var source = new ProgressiveMediaSource.Factory(
+                        new AndroidX.Media3.DataSource.DefaultDataSource.Factory(activity.ApplicationContext),
+                        new Mp3ExtractorsFactory(disableSeeking: false)).CreateMediaSource(MediaItem.FromUri(localUri));
+                    player.SetMediaSource(source);
+                }
                 else
                 {
                     if (file.Size <= 0 || file.Size > MaximumFileSize)
@@ -177,6 +199,11 @@ namespace Seeker.Playback
         {
             handler.RemoveCallbacks(tick);
             if (stopped || player == null) return;
+            // DisableSeeking intentionally leaves streamed duration unknown in many MP3s.
+            // Keep it absent unless the player actually reports a positive duration.
+            long duration = player.Duration;
+            if (duration > 0 && duration != Metadata.DurationMilliseconds)
+                Metadata = Metadata.WithEmbedded(new TrackMetadataValues { DurationMilliseconds = duration });
             if (player.PlayerError != null) { ShowFailure(player.PlayerError.Message); return; }
             if (player.PlaybackState == 4) // Media3 Player.STATE_ENDED
             {
@@ -209,15 +236,25 @@ namespace Seeker.Playback
         {
             if (stopped) return;
             stopped = true;
+            Interlocked.Increment(ref metadataRevision);
             handler.RemoveCallbacks(tick);
             cancellation.Cancel();
             dataSourceFactory?.CancelReads();
             buffer?.Fail(new OperationCanceledException());
             // Wake the loader before Release waits for it, so Stop never waits for a peer.
-            try { player?.Release(); }
+            try
+            {
+                if (metadataListener != null) player?.RemoveListener(metadataListener);
+                player?.Release();
+            }
             catch (Exception exception) { Logger.Debug("Stream player release: " + exception.Message); }
             player?.Dispose();
             player = null;
+            metadataListener?.Dispose();
+            metadataListener = null;
+            artwork.SetImageResource(Resource.Drawable.stream_artwork_placeholder);
+            artworkBitmap?.Dispose();
+            artworkBitmap = null;
             dataSourceFactory?.Dispose();
             pause.Enabled = false;
             var ownedBuffer = buffer;
@@ -236,13 +273,69 @@ namespace Seeker.Playback
             }
         }
 
+        private void ShowMetadata()
+        {
+            dialog.SetTitle(Metadata.Title);
+            artist.Text = Metadata.Artist;
+            artist.Visibility = string.IsNullOrEmpty(Metadata.Artist) ? ViewStates.Gone : ViewStates.Visible;
+            album.Text = Metadata.Album;
+            album.Visibility = string.IsNullOrEmpty(Metadata.Album) ? ViewStates.Gone : ViewStates.Visible;
+        }
+
+        private void ReadMetadata(MediaMetadata mediaMetadata)
+        {
+            if (stopped || !ReferenceEquals(current, this)) return;
+            int revision = Interlocked.Increment(ref metadataRevision);
+            Task.Run(() =>
+            {
+                Bitmap bitmap = null;
+                try
+                {
+                    if (Volatile.Read(ref metadataRevision) != revision) return;
+                    var values = StreamingMetadata.Read(mediaMetadata);
+                    if (Volatile.Read(ref metadataRevision) != revision) return;
+                    bitmap = StreamingMetadata.DecodeArtwork(values.ArtworkData);
+                    activity.RunOnUiThread(() =>
+                    {
+                        // Both the owner and revision must still match after asynchronous decoding.
+                        if (stopped || !ReferenceEquals(current, this) || revision != metadataRevision)
+                        {
+                            bitmap?.Dispose();
+                            return;
+                        }
+                        Metadata = Metadata.WithEmbedded(values);
+                        ShowMetadata();
+                        if (bitmap != null)
+                        {
+                            artwork.SetImageBitmap(bitmap);
+                            artworkBitmap?.Dispose();
+                            artworkBitmap = bitmap;
+                        }
+                    });
+                }
+                catch (Exception exception)
+                {
+                    bitmap?.Dispose();
+                    Logger.Debug("Stream metadata ignored: " + exception.Message);
+                }
+            });
+        }
+
+        private sealed class MetadataListener : Java.Lang.Object, IPlayerListener
+        {
+            private readonly Action<MediaMetadata> changed;
+            public MetadataListener(Action<MediaMetadata> changed) { this.changed = changed; }
+            public void OnMediaMetadataChanged(MediaMetadata metadata) => changed(metadata);
+        }
+
         private sealed class Mp3ExtractorsFactory : Java.Lang.Object, IExtractorsFactory
         {
+            private readonly bool disableSeeking;
+            public Mp3ExtractorsFactory(bool disableSeeking = true) { this.disableSeeking = disableSeeking; }
+
             public IExtractor[] CreateExtractors()
             {
-                var extractor = new AndroidX.Media3.Extractor.Mp3.Mp3Extractor();
-                extractor.DisableSeeking();
-                return new IExtractor[] { extractor };
+                return new IExtractor[] { new BoundedMp3Extractor(disableSeeking) };
             }
 
             public IExtractor[] CreateExtractors(Android.Net.Uri uri,

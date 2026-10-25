@@ -1,5 +1,7 @@
 # Single-MP3 streaming prototype
 
+The next increment adds [embedded MP3 metadata, filename fallbacks, and bounded artwork display](streaming-metadata.md).
+
 ## Source and architecture
 
 Upstream: `jackBonadies/SeekerAndroid`, revision `ff1dcc6de55a412e8d6eadaddf36deca54517413`.
