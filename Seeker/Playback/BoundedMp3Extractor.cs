@@ -29,6 +29,8 @@ namespace Seeker.Playback
             extractor.Seek(position, timeUs);
         }
         public void Release() => extractor.Release();
+        public IExtractor UnderlyingImplementation => extractor;
+        public System.Collections.Generic.IList<ISniffFailure> SniffFailureDetails => System.Array.Empty<ISniffFailure>();
 
         public int Read(IExtractorInput input, PositionHolder seekPosition)
         {

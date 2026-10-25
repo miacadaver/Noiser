@@ -87,7 +87,7 @@ dotnet test UnitTestCommon/UnitTestCommon.csproj --configuration Release --filte
 Android compilation and the GitHub APK workflow verify binding/resource integration. A physical Android
 device has not been used for this change. The following remain device acceptance checks:
 
-1. Install `3.11.2-stream.3`, stream a tagged MP3 from a throttled test peer, and confirm audible playback
+1. Install `3.11.2-stream.4`, stream a tagged MP3 from a throttled test peer, and confirm audible playback
    while Received is below 100%, with the correct title/artist/album/cover in the existing dialog.
 2. Repeat with ID3v2.3 UTF-16, v2.4 UTF-8, legacy Latin-1, track/total values, album artist, and year tags.
    Confirm those values in the metadata snapshot when debugging.
@@ -114,7 +114,24 @@ These checks do not claim successful native decoding, rendered artwork, or live 
 - Added `UnitTestCommon/TrackMetadataTests.cs` and `Id3TagHeaderTests.cs`.
 - Updated the Android manifest version, README, and streaming documentation; added this document.
 
-No package references or dependencies were added.
+No NuGet packages were added. The callback compatibility fix references `Mono.Android.Export`,
+which is supplied by the existing Android SDK, for the legacy Java-only callback.
+
+## Android callback compatibility fix
+
+Version `3.11.2-stream.3` passed C# compilation but failed on a user's Android device with
+`AbstractMethodError` for `Player.Listener.onTimelineChanged`. Its metadata listener implemented only
+one CLR callback, so the other Java callback bridges were absent. Version `3.11.2-stream.4` explicitly
+implements the complete restored `Player.Listener` contract, forwarding metadata and leaving unrelated
+callbacks as no-ops. The legacy `onPositionDiscontinuity(int)` overload still exists in the Java AAR
+but is absent from its C# interface, so it is explicitly exported using the SDK's `Java.Interop.Export`.
+The custom extractor and extractor factory also explicitly implement their Java
+default interface methods, including the underlying-extractor getter used by Media3.
+
+The APK workflow now runs `.github/scripts/check_media3_contracts.py` after building. It compares the
+generated Java wrapper signatures with `javap` output from the actual restored Media3 AARs and rejects
+an APK with missing bridges. This verifies Java method export as well as C# compilation; live playback
+and on-device metadata rendering still require device confirmation.
 
 ## Library references
 

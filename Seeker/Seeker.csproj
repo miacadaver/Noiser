@@ -130,6 +130,8 @@
     <PackageReference Include="Xamarin.AndroidX.Compose.Runtime.Annotation.Jvm" Version="1.10.0.1" ExcludeAssets="all" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Runtime support for exporting Media3's legacy Java-only listener callback. -->
+    <Reference Include="Mono.Android.Export" />
     <ProjectReference Include="..\Common\Common.csproj" />
     <ProjectReference Include="Mono.Nat-master\Mono.Nat\Mono.Nat.csproj" />
     <ProjectReference Include="Soulseek.NET-master\src\Soulseek.csproj" />

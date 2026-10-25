@@ -61,6 +61,9 @@ jobs:
           -p:AndroidSdkDirectory="$ANDROID_HOME"
           -p:JavaSdkDirectory="$JAVA_HOME"
 
+      - name: Verify Media3 Java callback contracts
+        run: python3 .github/scripts/check_media3_contracts.py
+
       - name: Stage APK
         shell: bash
         run: |
