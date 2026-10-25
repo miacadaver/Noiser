@@ -39,7 +39,6 @@ namespace Seeker
 
         void Application.IActivityLifecycleCallbacks.OnActivityDestroyed(Activity activity)
         {
-            Playback.StreamingPlaybackController.StopForActivity(activity);
         }
 
         void Application.IActivityLifecycleCallbacks.OnActivityPaused(Activity activity)
@@ -155,8 +154,6 @@ namespace Seeker
             }
             isForeground = false;
             Logger.Debug("We are backgrounded!");
-            // The first streaming increment is foreground-only. A media playback service comes next.
-            Playback.StreamingPlaybackController.StopCurrent();
 
             //app going to background — drain buffered diagnostics before Android can kill us.
             DiagnosticFileWriter.FlushBlocking();

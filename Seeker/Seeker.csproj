@@ -99,6 +99,9 @@
   </Choose>
   <ItemGroup>
     <PackageReference Include="Xamarin.AndroidX.Media3.ExoPlayer" Version="1.11.1" />
+    <PackageReference Include="Xamarin.AndroidX.Media3.Session" Version="1.11.1" />
+    <!-- Core 1.19 (required by Media3 Session) includes the former core-ktx classes. -->
+    <PackageReference Include="Xamarin.AndroidX.Core.Core.Ktx" Version="1.17.0.2" ExcludeAssets="all" />
     <PackageReference Include="Microsoft.NET.StringTools">
       <Version>18.3.3</Version>
     </PackageReference>

@@ -1,11 +1,43 @@
 using Android.Graphics;
 using AndroidX.Media3.Common;
 using Common.Playback;
+using System.IO;
 
 namespace Seeker.Playback
 {
     internal static class StreamingMetadata
     {
+        public static MediaMetadata BuildSessionMetadata(TrackMetadata track, byte[] thumbnail)
+        {
+            var builder = new MediaMetadata.Builder().SetTitle(track.Title).SetArtist(track.Artist)
+                .SetAlbumTitle(track.Album).SetAlbumArtist(track.AlbumArtist);
+            if (track.TrackNumber.HasValue) builder.SetTrackNumber(Java.Lang.Integer.ValueOf(track.TrackNumber.Value));
+            if (track.ReleaseYear.HasValue) builder.SetReleaseYear(Java.Lang.Integer.ValueOf(track.ReleaseYear.Value));
+            if (track.DurationMilliseconds.HasValue) builder.SetDurationMs(Java.Lang.Long.ValueOf(track.DurationMilliseconds.Value));
+            if (thumbnail != null) builder.SetArtworkData(thumbnail, Java.Lang.Integer.ValueOf(MediaMetadata.PictureTypeFrontCover));
+            return builder.Build();
+        }
+
+        // Small enough for media-session IPC; original multi-megabyte APIC data stays in-process.
+        public static byte[] EncodeSessionArtwork(Bitmap bitmap)
+        {
+            if (bitmap == null) return null;
+            try
+            {
+                double scale = System.Math.Min(1d, 256d / System.Math.Max(bitmap.Width, bitmap.Height));
+                Bitmap small = scale < 1d ? Bitmap.CreateScaledBitmap(bitmap, System.Math.Max(1, (int)(bitmap.Width * scale)),
+                    System.Math.Max(1, (int)(bitmap.Height * scale)), true) : null;
+                try
+                {
+                    using var stream = new MemoryStream();
+                    if (!(small ?? bitmap).Compress(Bitmap.CompressFormat.Jpeg, 85, stream) || stream.Length > 128 * 1024) return null;
+                    return stream.ToArray();
+                }
+                finally { small?.Dispose(); }
+            }
+            catch (System.Exception) { return null; }
+        }
+
         // Called on a worker. Media3 has already decoded ID3v2 text encodings and preferred cover art.
         public static TrackMetadataValues Read(MediaMetadata metadata)
         {

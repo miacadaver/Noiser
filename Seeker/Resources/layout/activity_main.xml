@@ -41,9 +41,13 @@
             android:id="@+id/pager"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:layout_above="@id/navigation"
+            android:layout_above="@id/streamBottomControls"
         />
 
+        <LinearLayout android:id="@+id/streamBottomControls"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:layout_alignParentBottom="true">
+        <include layout="@layout/stream_mini_player" />
         <com.google.android.material.bottomnavigation.BottomNavigationView
             android:id="@+id/navigation"
             android:layout_width="match_parent"
@@ -59,8 +63,8 @@
             app:itemTextColor="#ffffffff"
             app:itemTextAppearanceActive="@style/navTextActive"
             app:itemTextAppearanceInactive="@style/navTextInactive"
-            android:layout_alignParentBottom="true"
             app:menu="@menu/navigation_menu"
         />
+        </LinearLayout>
     </RelativeLayout>
 </RelativeLayout>

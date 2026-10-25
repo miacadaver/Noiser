@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/streamMiniPlayer" android:layout_width="match_parent"
+    android:layout_height="wrap_content" android:minHeight="64dp"
+    android:orientation="horizontal" android:gravity="center_vertical"
+    android:background="?attr/dialog_background" android:foreground="?android:attr/selectableItemBackground"
+    android:paddingStart="12dp" android:paddingEnd="8dp" android:visibility="gone"
+    android:clickable="true" android:focusable="true" android:contentDescription="@string/stream_open_player">
+    <ImageView android:id="@+id/streamMiniArtwork" android:layout_width="44dp" android:layout_height="44dp"
+        android:layout_marginEnd="12dp" android:scaleType="centerCrop" android:importantForAccessibility="no"
+        android:src="@drawable/stream_artwork_placeholder" />
+    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+        android:layout_weight="1" android:orientation="vertical">
+        <TextView android:id="@+id/streamMiniTitle" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:textSize="14sp" android:textColor="?attr/normalTextColor" android:singleLine="true" android:ellipsize="end" />
+        <TextView android:id="@+id/streamMiniArtist" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:textSize="12sp" android:textColor="?attr/cellTextColorSubdued" android:singleLine="true" android:ellipsize="end" />
+    </LinearLayout>
+    <ImageButton android:id="@+id/streamMiniPause" android:layout_width="48dp" android:layout_height="48dp"
+        android:background="?android:attr/selectableItemBackgroundBorderless" android:tint="?attr/normalTextColor"
+        android:src="@drawable/stream_play" android:contentDescription="@string/stream_pause" />
+</LinearLayout>

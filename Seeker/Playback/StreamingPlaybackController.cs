@@ -1,392 +1,255 @@
 using Android.OS;
-using Bitmap = Android.Graphics.Bitmap;
+using Android.Content;
+using Android.Runtime;
 using Android.Views;
 using Android.Widget;
+using AndroidX.Core.Content;
 using AndroidX.Fragment.App;
 using AndroidX.Media3.Common;
-using AndroidX.Media3.ExoPlayer;
-using AndroidX.Media3.ExoPlayer.Source;
-using AndroidX.Media3.Extractor;
-using Common.Streaming;
+using AndroidX.Media3.Session;
 using Common.Playback;
-using Seeker.Services;
+using Google.Common.Util.Concurrent;
+using MediaController = AndroidX.Media3.Session.MediaController;
 using Seeker.Helpers;
 using Soulseek;
 using System;
-using System.IO;
-using System.Threading;
-using System.Threading.Tasks;
-using Directory = System.IO.Directory;
-using File = System.IO.File;
-using OperationCanceledException = System.OperationCanceledException;
 
 namespace Seeker.Playback
 {
-    /// <summary>First increment: one MP3, foreground playback, no user seeking or retained downloads.</summary>
+    /// <summary>Activity UI only. Its MediaController is a proxy, never a second audio player.</summary>
     internal sealed class StreamingPlaybackController
     {
-        private static StreamingPlaybackController current;
-        private static Task previousTransfer = Task.CompletedTask;
-        private const long MaximumFileSize = 256L * 1024 * 1024;
-        private readonly FragmentActivity activity;
-        private readonly string username;
-        private readonly FullFileInfo file;
-        private readonly Task predecessor;
-        private readonly CancellationTokenSource cancellation = new CancellationTokenSource();
+        private readonly MainActivity activity;
         private readonly Handler handler = new Handler(Looper.MainLooper);
         private readonly Java.Lang.Runnable tick;
+        private readonly View mini;
+        private readonly ImageView miniArtwork;
+        private readonly TextView miniTitle;
+        private readonly TextView miniArtist;
+        private readonly ImageButton miniPause;
+        private IListenableFuture controllerFuture;
+        private MediaController controller;
         private AndroidX.AppCompat.App.AlertDialog dialog;
+        private ImageView artwork;
+        private TextView artist;
+        private TextView album;
         private TextView status;
         private TextView progress;
         private Button pause;
-        private TextView artist;
-        private TextView album;
-        private ImageView artwork;
-        private Bitmap artworkBitmap;
-        private MetadataListener metadataListener;
-        private int metadataRevision;
-        public TrackMetadata Metadata { get; private set; }
-        private IExoPlayer player;
-        private ProgressiveBuffer buffer;
-        private ProgressiveDataSource.Factory dataSourceFactory;
-        private Task transferTask = Task.CompletedTask;
-        private Task cleanupTask = Task.CompletedTask;
-        private volatile TransferStates transferState;
-        private bool stopped;
+        private bool attached;
+        private string pendingRequest;
 
-        private StreamingPlaybackController(FragmentActivity activity, string username, FullFileInfo file)
+        internal StreamingPlaybackController(MainActivity activity)
         {
             this.activity = activity;
-            this.username = username;
-            this.file = file;
-            Metadata = TrackMetadataFallback.FromPath(file.FullFileName);
-            predecessor = previousTransfer;
             tick = new Java.Lang.Runnable(Update);
+            mini = activity.FindViewById(Resource.Id.streamMiniPlayer);
+            miniArtwork = activity.FindViewById<ImageView>(Resource.Id.streamMiniArtwork);
+            miniTitle = activity.FindViewById<TextView>(Resource.Id.streamMiniTitle);
+            miniArtist = activity.FindViewById<TextView>(Resource.Id.streamMiniArtist);
+            miniPause = activity.FindViewById<ImageButton>(Resource.Id.streamMiniPause);
+            mini.Click += (_, __) => ShowCurrent();
+            miniPause.Click += (_, __) => TogglePause();
         }
 
         public static void Show(FragmentActivity activity, string username, FullFileInfo file)
         {
             activity.RunOnUiThread(() =>
             {
-                if (current != null && !current.stopped && current.username == username && current.file.FullFileName == file.FullFileName)
-                    return;
-                StopCurrent();
-                current = new StreamingPlaybackController(activity, username, file);
-                current.Start();
+                string request = StreamingPlaybackService.RequestPlay(activity, username, file);
+                if (request == null) return;
+                if (activity is MainActivity main)
+                {
+                    var ui = main.EnsurePlaybackUi();
+                    ui.pendingRequest = request;
+                    ui.Connect();
+                    ui.ShowCurrent();
+                }
+                else activity.StartActivity(new Intent(activity, typeof(MainActivity))
+                    .SetFlags(ActivityFlags.SingleTop | ActivityFlags.ClearTop)
+                    .PutExtra(StreamingPlaybackService.OpenPlayerExtra, true));
             });
         }
 
-        public static void StopCurrent()
+        public static void CleanAbandonedCache(string cacheDirectory) => StreamingPlayback.CleanAbandonedCache(cacheDirectory);
+
+        internal void Attach()
         {
-            var previous = current;
-            current = null;
-            previous?.Stop();
-            if (previous != null) previousTransfer = previous.cleanupTask;
-            previous?.dialog?.Dismiss();
+            if (attached) return;
+            attached = true;
+            StreamingPlaybackService.Changed += Update;
+            Update();
         }
 
-        public static void StopForActivity(Android.App.Activity owner)
+        internal void Detach()
         {
-            if (ReferenceEquals(current?.activity, owner)) StopCurrent();
+            if (!attached) return;
+            attached = false;
+            StreamingPlaybackService.Changed -= Update;
+            handler.RemoveCallbacks(tick);
+            dialog?.Dismiss();
+            dialog = null;
+            miniArtwork.SetImageResource(Resource.Drawable.stream_artwork_placeholder);
+            mini.Visibility = ViewStates.Gone;
+            if (controllerFuture != null) MediaController.ReleaseFuture(controllerFuture);
+            controllerFuture = null;
+            controller = null;
         }
 
-        public static void CleanAbandonedCache(string cacheDirectory)
+        private void Connect()
         {
-            string directory = Path.Combine(cacheDirectory, "mp3-streams");
-            if (!Directory.Exists(directory)) return;
-            foreach (string path in Directory.EnumerateFiles(directory, "*.part"))
+            if (!attached || controllerFuture != null) return;
+            var context = activity.ApplicationContext;
+            var token = new SessionToken(context, new ComponentName(context, StreamingPlaybackService.ServiceName));
+            var future = new MediaController.Builder(context, token).BuildAsync();
+            controllerFuture = future;
+            future.AddListener(new Java.Lang.Runnable(() =>
             {
-                try { File.Delete(path); }
-                catch (IOException) { }
-                catch (UnauthorizedAccessException) { }
-            }
+                if (!attached || !ReferenceEquals(controllerFuture, future)) return;
+                try { controller = future.Get().JavaCast<MediaController>(); }
+                catch (Exception exception)
+                {
+                    Logger.Debug("Cannot connect playback controls: " + exception.Message);
+                    MediaController.ReleaseFuture(future);
+                    controllerFuture = null;
+                }
+                Update();
+            }), ContextCompat.GetMainExecutor(context));
         }
 
-        private void Start()
+        private IPlayer Controls => controller?.IsConnected == true
+            ? controller : StreamingPlaybackService.Current?.SessionPlayer;
+
+        private void TogglePause()
         {
+            var snapshot = StreamingPlaybackService.Current?.Snapshot();
+            if (snapshot == null || snapshot.Phase == PlaybackPhase.Error) return;
+            if (snapshot.ShowPause) Controls?.Pause();
+            else Controls?.Play();
+        }
+
+        private void Stop()
+        {
+            StreamingPlaybackService.CancelPending(pendingRequest);
+            pendingRequest = null;
+            Controls?.Stop();
+            Update();
+        }
+
+        internal void ShowCurrent()
+        {
+            if (!attached || activity.IsFinishing || activity.IsDestroyed) return;
+            if (dialog?.IsShowing == true) return;
             View view = activity.LayoutInflater.Inflate(Resource.Layout.stream_playback, null);
+            artwork = view.FindViewById<ImageView>(Resource.Id.streamArtwork);
+            artist = view.FindViewById<TextView>(Resource.Id.streamArtist);
+            album = view.FindViewById<TextView>(Resource.Id.streamAlbum);
             status = view.FindViewById<TextView>(Resource.Id.streamStatus);
             progress = view.FindViewById<TextView>(Resource.Id.streamProgress);
             pause = view.FindViewById<Button>(Resource.Id.streamPause);
-            artist = view.FindViewById<TextView>(Resource.Id.streamArtist);
-            album = view.FindViewById<TextView>(Resource.Id.streamAlbum);
-            artwork = view.FindViewById<ImageView>(Resource.Id.streamArtwork);
-            dialog = new Google.Android.Material.Dialog.MaterialAlertDialogBuilder(activity)
-                .SetTitle(Metadata.Title)
+            pause.Click += (_, __) => TogglePause();
+            var window = new Google.Android.Material.Dialog.MaterialAlertDialogBuilder(activity)
+                .SetTitle(Resource.String.stream_player)
                 .SetView(view)
-                .SetNegativeButton(Resource.String.stream_stop, (_, __) => Stop())
-                .Create();
-            dialog.DismissEvent += (_, __) => Stop();
-            dialog.Show();
-            ShowMetadata();
-            pause.Click += (_, __) =>
+                .SetPositiveButton(Resource.String.close, (_, __) => { })
+                .SetNegativeButton(Resource.String.stream_stop, (_, __) => Stop()).Create();
+            dialog = window;
+            var windowArtwork = artwork;
+            window.DismissEvent += (_, __) =>
             {
-                if (player == null || stopped) return;
-                player.PlayWhenReady = !player.PlayWhenReady;
+                // Closing/minimizing the UI never controls playback lifetime.
+                windowArtwork.SetImageResource(Resource.Drawable.stream_artwork_placeholder);
+                if (!ReferenceEquals(dialog, window)) return;
+                dialog = null;
+                pendingRequest = null;
                 Update();
             };
-            try
-            {
-                player = new ExoPlayerBuilder(activity.ApplicationContext)
-                    .SetLoadControl(new DefaultLoadControl.Builder().SetBufferDurationsMs(15000, 60000, 2000, 4000).Build())
-                    .SetHandleAudioBecomingNoisy(true)
-                    .Build();
-                player.SetAudioAttributes(new AndroidX.Media3.Common.AudioAttributes.Builder()
-                    .SetUsage(C.UsageMedia).SetContentType(C.AudioContentTypeMusic).Build(), true);
-                metadataListener = new MetadataListener(ReadMetadata);
-                player.AddListener(metadataListener);
-
-                // Reuse a completed ordinary download when its URI is still readable.
-                var existing = TransferItems.TransferItemManagerDL?.GetTransferItemWithIndexFromAll(file.FullFileName, username, out _);
-                string localUri = existing?.State.HasFlag(TransferStates.Succeeded) == true ? existing.FinalUri : null;
-                if (!string.IsNullOrEmpty(localUri) && CanRead(localUri))
-                {
-                    // Use the same bounded ID3 extractor for cached ordinary downloads.
-                    var source = new ProgressiveMediaSource.Factory(
-                        new AndroidX.Media3.DataSource.DefaultDataSource.Factory(activity.ApplicationContext),
-                        new Mp3ExtractorsFactory(disableSeeking: false)).CreateMediaSource(MediaItem.FromUri(localUri));
-                    player.SetMediaSource(source);
-                }
-                else
-                {
-                    if (file.Size <= 0 || file.Size > MaximumFileSize)
-                        throw new InvalidOperationException(activity.GetString(Resource.String.stream_file_limit));
-                    string directory = Path.Combine(activity.CacheDir.AbsolutePath, "mp3-streams");
-                    Directory.CreateDirectory(directory);
-                    buffer = new ProgressiveBuffer(Path.Combine(directory, Guid.NewGuid().ToString("N") + ".part"), file.Size);
-                    dataSourceFactory = new ProgressiveDataSource.Factory(buffer);
-                    var extractors = new Mp3ExtractorsFactory();
-                    var mediaSource = new ProgressiveMediaSource.Factory(dataSourceFactory, extractors)
-                        .CreateMediaSource(new MediaItem.Builder().SetUri("seeker-stream:///track.mp3").SetMimeType("audio/mpeg").Build());
-                    player.SetMediaSource(mediaSource);
-                    transferTask = Task.Run(ReceiveAsync);
-                }
-                player.Prepare();
-                player.PlayWhenReady = true;
-                Update();
-            }
-            catch (Exception exception) { ShowFailure(exception.Message); }
-        }
-
-        private bool CanRead(string uri)
-        {
-            try
-            {
-                using var stream = activity.ContentResolver.OpenInputStream(Android.Net.Uri.Parse(uri));
-                return stream != null;
-            }
-            catch (Exception) { return false; }
-        }
-
-        private async Task ReceiveAsync()
-        {
-            try
-            {
-                // Finish cancellation of the preceding transfer before acquiring its peer/path again.
-                await predecessor.ConfigureAwait(false);
-                await DownloadService.Instance.StreamAsync(username, file, buffer,
-                    state => transferState = state, cancellation.Token, retainUntilReleased: true).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
-            catch (Exception exception)
-            {
-                string message = DownloadFailureClassifier.GetCause(exception)?.Message ?? exception.Message;
-                activity.RunOnUiThread(() => { if (!stopped) ShowFailure(message); });
-            }
+            dialog.Show();
+            if (StreamingPlaybackService.Current?.Playback != null || pendingRequest != null) Connect();
+            Update();
         }
 
         private void Update()
         {
             handler.RemoveCallbacks(tick);
-            if (stopped || player == null) return;
-            // DisableSeeking intentionally leaves streamed duration unknown in many MP3s.
-            // Keep it absent unless the player actually reports a positive duration.
-            long duration = player.Duration;
-            if (duration > 0 && duration != Metadata.DurationMilliseconds)
-                Metadata = Metadata.WithEmbedded(new TrackMetadataValues { DurationMilliseconds = duration });
-            if (player.PlayerError != null) { ShowFailure(player.PlayerError.Message); return; }
-            if (player.PlaybackState == 4) // Media3 Player.STATE_ENDED
+            if (!attached || activity.IsFinishing || activity.IsDestroyed) return;
+            var service = StreamingPlaybackService.Current;
+            if (service?.LastHandledRequestId == pendingRequest) pendingRequest = null;
+            var snapshot = pendingRequest == null ? service?.Snapshot() : null;
+            if (controller != null && !controller.IsConnected)
             {
-                status.SetText(Resource.String.stream_finished);
-                Stop();
-                return;
+                MediaController.ReleaseFuture(controllerFuture);
+                controllerFuture = null;
+                controller = null;
             }
-            int statusResource = !player.PlayWhenReady ? Resource.String.stream_paused
-                : player.IsPlaying ? Resource.String.stream_playing
-                : buffer?.AvailableLength == 0 && transferState.HasFlag(TransferStates.Queued) ? Resource.String.stream_queued
-                : buffer?.AvailableLength == 0 && transferState == TransferStates.None ? Resource.String.stream_connecting
-                : Resource.String.stream_buffering;
-            status.SetText(statusResource);
-            pause.Enabled = true;
-            pause.SetText(player.PlayWhenReady ? Resource.String.stream_pause : Resource.String.stream_resume);
-            long seconds = Math.Max(0, player.CurrentPosition) / 1000;
-            long percent = buffer == null ? 100 : buffer.AvailableLength * 100 / file.Size;
-            progress.Text = activity.GetString(Resource.String.stream_progress, new Java.Lang.Object[]
-                { Java.Lang.Long.ValueOf(percent), Java.Lang.Long.ValueOf(seconds / 60), Java.Lang.Long.ValueOf(seconds % 60) });
-            handler.PostDelayed(tick, 250);
-        }
-
-        private void ShowFailure(string message)
-        {
-            status.Text = activity.GetString(Resource.String.stream_failed, message);
-            Stop();
-        }
-
-        private void Stop()
-        {
-            if (stopped) return;
-            stopped = true;
-            Interlocked.Increment(ref metadataRevision);
-            handler.RemoveCallbacks(tick);
-            cancellation.Cancel();
-            dataSourceFactory?.CancelReads();
-            buffer?.Fail(new OperationCanceledException());
-            // Wake the loader before Release waits for it, so Stop never waits for a peer.
-            try
+            if (snapshot != null) Connect();
+            bool full = dialog?.IsShowing == true;
+            if (snapshot == null && pendingRequest == null && controllerFuture != null)
             {
-                if (metadataListener != null) player?.RemoveListener(metadataListener);
-                player?.Release();
+                MediaController.ReleaseFuture(controllerFuture);
+                controllerFuture = null;
+                controller = null;
             }
-            catch (Exception exception) { Logger.Debug("Stream player release: " + exception.Message); }
-            player?.Dispose();
-            player = null;
-            metadataListener?.Dispose();
-            metadataListener = null;
-            artwork.SetImageResource(Resource.Drawable.stream_artwork_placeholder);
-            artworkBitmap?.Dispose();
-            artworkBitmap = null;
-            dataSourceFactory?.Dispose();
-            pause.Enabled = false;
-            var ownedBuffer = buffer;
-            cleanupTask = transferTask.ContinueWith(_ =>
+            mini.Visibility = snapshot != null && !full ? ViewStates.Visible : ViewStates.Gone;
+            if (snapshot == null)
             {
-                DownloadService.Instance.ReleaseStream(username, file.FullFileName, ownedBuffer);
-                try { ownedBuffer?.Dispose(); }
-                catch (Exception exception) when (exception is IOException || exception is UnauthorizedAccessException)
-                { Logger.Debug("Stream cache cleanup: " + exception.Message); }
-                cancellation.Dispose();
-            }, TaskScheduler.Default);
-            if (ReferenceEquals(current, this))
-            {
-                current = null;
-                previousTransfer = cleanupTask;
-            }
-        }
-
-        private void ShowMetadata()
-        {
-            dialog.SetTitle(Metadata.Title);
-            artist.Text = Metadata.Artist;
-            artist.Visibility = string.IsNullOrEmpty(Metadata.Artist) ? ViewStates.Gone : ViewStates.Visible;
-            album.Text = Metadata.Album;
-            album.Visibility = string.IsNullOrEmpty(Metadata.Album) ? ViewStates.Gone : ViewStates.Visible;
-        }
-
-        private void ReadMetadata(MediaMetadata mediaMetadata)
-        {
-            if (stopped || !ReferenceEquals(current, this)) return;
-            int revision = Interlocked.Increment(ref metadataRevision);
-            Task.Run(() =>
-            {
-                Bitmap bitmap = null;
-                try
+                miniArtwork.SetImageResource(Resource.Drawable.stream_artwork_placeholder);
+                if (full)
                 {
-                    if (Volatile.Read(ref metadataRevision) != revision) return;
-                    var values = StreamingMetadata.Read(mediaMetadata);
-                    if (Volatile.Read(ref metadataRevision) != revision) return;
-                    bitmap = StreamingMetadata.DecodeArtwork(values.ArtworkData);
-                    activity.RunOnUiThread(() =>
-                    {
-                        // Both the owner and revision must still match after asynchronous decoding.
-                        if (stopped || !ReferenceEquals(current, this) || revision != metadataRevision)
-                        {
-                            bitmap?.Dispose();
-                            return;
-                        }
-                        Metadata = Metadata.WithEmbedded(values);
-                        ShowMetadata();
-                        if (bitmap != null)
-                        {
-                            artwork.SetImageBitmap(bitmap);
-                            artworkBitmap?.Dispose();
-                            artworkBitmap = bitmap;
-                        }
-                    });
+                    dialog.SetTitle(Resource.String.stream_player);
+                    artwork.SetImageResource(Resource.Drawable.stream_artwork_placeholder);
+                    artist.Text = album.Text = progress.Text = string.Empty;
+                    artist.Visibility = album.Visibility = ViewStates.Gone;
+                    status.SetText(pendingRequest != null ? Resource.String.stream_connecting : Resource.String.stream_stopped);
+                    pause.Enabled = false;
                 }
-                catch (Exception exception)
-                {
-                    bitmap?.Dispose();
-                    Logger.Debug("Stream metadata ignored: " + exception.Message);
-                }
-            });
-        }
-
-        private sealed class MetadataListener : Java.Lang.Object, IPlayerListener
-        {
-            private readonly Action<MediaMetadata> changed;
-            public MetadataListener(Action<MediaMetadata> changed) { this.changed = changed; }
-            public void OnMediaMetadataChanged(MediaMetadata metadata) => changed(metadata);
-
-            // Explicit implementations generate Java callback bridges. The binding's CLR default
-            // interface bodies do not cover these callbacks on Android (AbstractMethodError).
-            public void OnAudioAttributesChanged(AndroidX.Media3.Common.AudioAttributes audioAttributes) { }
-            public void OnAudioSessionIdChanged(int audioSessionId) { }
-            public void OnAvailableCommandsChanged(PlayerCommands availableCommands) { }
-            public void OnCues(AndroidX.Media3.Common.Text.CueGroup cueGroup) { }
-            public void OnCuesDeprecated(System.Collections.Generic.IList<AndroidX.Media3.Common.Text.Cue> cues) { }
-            public void OnDeviceInfoChanged(DeviceInfo deviceInfo) { }
-            public void OnDeviceVolumeChanged(int volume, bool muted) { }
-            public void OnEvents(IPlayer player, PlayerEvents events) { }
-            public void OnIsLoadingChanged(bool isLoading) { }
-            public void OnIsPlayingChanged(bool isPlaying) { }
-            public void OnLoadingChanged(bool isLoading) { }
-            public void OnMaxSeekToPreviousPositionChanged(long maxSeekToPreviousPositionMs) { }
-            public void OnMediaItemTransition(MediaItem mediaItem, int reason) { }
-            public void OnMetadata(AndroidX.Media3.Common.Metadata metadata) { }
-            public void OnPlayWhenReadyChanged(bool playWhenReady, int reason) { }
-            public void OnPlaybackParametersChanged(PlaybackParameters playbackParameters) { }
-            public void OnPlaybackStateChanged(int playbackState) { }
-            public void OnPlaybackSuppressionReasonChanged(int playbackSuppressionReason) { }
-            public void OnPlayerError(PlaybackException error) { }
-            public void OnPlayerErrorChanged(PlaybackException error) { }
-            public void OnPlayerStateChanged(bool playWhenReady, int playbackState) { }
-            public void OnPlaylistMetadataChanged(MediaMetadata mediaMetadata) { }
-            // Still present in the Java AAR, although absent from the current C# interface.
-            [Java.Interop.Export("onPositionDiscontinuity")]
-            public void OnPositionDiscontinuity(int reason) { }
-            public void OnPositionDiscontinuity(PlayerPositionInfo oldPosition, PlayerPositionInfo newPosition, int reason) { }
-            public void OnRenderedFirstFrame() { }
-            public void OnRepeatModeChanged(int repeatMode) { }
-            public void OnSeekBackIncrementChanged(long seekBackIncrementMs) { }
-            public void OnSeekForwardIncrementChanged(long seekForwardIncrementMs) { }
-            public void OnShuffleModeEnabledChanged(bool shuffleModeEnabled) { }
-            public void OnSkipSilenceEnabledChanged(bool skipSilenceEnabled) { }
-            public void OnSurfaceSizeChanged(int width, int height) { }
-            public void OnTimelineChanged(Timeline timeline, int reason) { }
-            public void OnTrackSelectionParametersChanged(TrackSelectionParameters parameters) { }
-            public void OnTracksChanged(Tracks tracks) { }
-            public void OnVideoSizeChanged(VideoSize videoSize) { }
-            public void OnVolumeChanged(float volume) { }
-        }
-
-        private sealed class Mp3ExtractorsFactory : Java.Lang.Object, IExtractorsFactory
-        {
-            private readonly bool disableSeeking;
-            public Mp3ExtractorsFactory(bool disableSeeking = true) { this.disableSeeking = disableSeeking; }
-
-            public IExtractor[] CreateExtractors()
-            {
-                return new IExtractor[] { new BoundedMp3Extractor(disableSeeking) };
             }
-
-            public IExtractor[] CreateExtractors(Android.Net.Uri uri,
-                System.Collections.Generic.IDictionary<string, System.Collections.Generic.IList<string>> responseHeaders) => CreateExtractors();
-
-            // Match ExtractorsFactory's default no-op configuration methods for this MP3-only factory.
-            public IExtractorsFactory ExperimentalSetCodecsToParseWithinGopSampleDependencies(int codecs) => this;
-            public IExtractorsFactory ExperimentalSetTextTrackTranscodingEnabled(bool enabled) => this;
-            public IExtractorsFactory SetParseHagcMetadata(bool enabled) => this;
-            public IExtractorsFactory SetSubtitleParserFactory(AndroidX.Media3.Extractor.Text.ISubtitleParserFactory factory) => this;
+            else
+            {
+                miniTitle.Text = snapshot.Metadata.Title;
+                miniArtist.Text = snapshot.Metadata.Artist;
+                miniArtist.Visibility = string.IsNullOrEmpty(snapshot.Metadata.Artist) ? ViewStates.Gone : ViewStates.Visible;
+                SetArtwork(miniArtwork, snapshot);
+                miniPause.SetImageResource(snapshot.ShowPause ? Resource.Drawable.stream_pause : Resource.Drawable.stream_play);
+                miniPause.ContentDescription = activity.GetString(snapshot.ShowPause ? Resource.String.stream_pause : Resource.String.stream_resume);
+                miniPause.Enabled = snapshot.Phase != PlaybackPhase.Error && Controls != null;
+                if (full)
+                {
+                    dialog.SetTitle(snapshot.Metadata.Title);
+                    artist.Text = snapshot.Metadata.Artist;
+                    artist.Visibility = string.IsNullOrEmpty(snapshot.Metadata.Artist) ? ViewStates.Gone : ViewStates.Visible;
+                    album.Text = snapshot.Metadata.Album;
+                    album.Visibility = string.IsNullOrEmpty(snapshot.Metadata.Album) ? ViewStates.Gone : ViewStates.Visible;
+                    SetArtwork(artwork, snapshot);
+                    if (snapshot.Phase == PlaybackPhase.Error)
+                        status.Text = activity.GetString(Resource.String.stream_failed, snapshot.Error);
+                    else status.SetText(StatusResource(snapshot.Phase));
+                    pause.Enabled = snapshot.Phase != PlaybackPhase.Error && Controls != null;
+                    pause.SetText(snapshot.ShowPause ? Resource.String.stream_pause : Resource.String.stream_resume);
+                    long seconds = Math.Max(0, snapshot.Position) / 1000;
+                    long percent = snapshot.Size > 0 ? Math.Min(100, snapshot.Received * 100 / snapshot.Size) : 0;
+                    progress.Text = activity.GetString(Resource.String.stream_progress, new Java.Lang.Object[]
+                    { Java.Lang.Long.ValueOf(percent), Java.Lang.Long.ValueOf(seconds / 60), Java.Lang.Long.ValueOf(seconds % 60) });
+                }
+            }
+            // Position refresh exists only while this Activity is visible, never as a background poll.
+            if (snapshot != null || pendingRequest != null) handler.PostDelayed(tick, 250);
         }
+
+        private static void SetArtwork(ImageView view, PlaybackSnapshot snapshot)
+        {
+            if (snapshot.Artwork != null) view.SetImageBitmap(snapshot.Artwork);
+            else view.SetImageResource(Resource.Drawable.stream_artwork_placeholder);
+        }
+
+        private static int StatusResource(PlaybackPhase phase) => phase switch
+        {
+            PlaybackPhase.Playing => Resource.String.stream_playing,
+            PlaybackPhase.Paused => Resource.String.stream_paused,
+            PlaybackPhase.Queued => Resource.String.stream_queued,
+            PlaybackPhase.Connecting => Resource.String.stream_connecting,
+            PlaybackPhase.Buffering => Resource.String.stream_buffering,
+            _ => Resource.String.stream_stopped
+        };
     }
 }

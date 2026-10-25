@@ -1,4 +1,7 @@
-# MP3 metadata for foreground streaming
+# MP3 metadata for streaming
+
+This documents Step 2's metadata extraction and limits. Step 3 moves playback ownership to a
+[MediaSessionService](background-playback.md), reusing this extraction and adding bounded session artwork.
 
 ## Architecture inspected
 
@@ -10,9 +13,10 @@ The transfer's existing resume offset is used only by its existing reconnect log
 
 `Mp3Extractor` already decodes ID3v2.3/v2.4 through Media3's `Id3Decoder`, including ISO-8859-1,
 UTF-16, UTF-16BE, UTF-8, extended headers, and supported unsynchronization. Its static metadata is
-published through `Player.Listener.onMediaMetadataChanged`. The project had no MediaSession or
-streaming track metadata model. No queue, background service, seeking control, recognition API,
-or scrobbling service is added by this change.
+published through selected audio track formats and `Player.Listener.onMediaMetadataChanged`.
+The project originally had no MediaSession or streaming track metadata model. The current implementation
+reads the selected audio format's original ID3 metadata through `onTracksChanged`, keeping extraction
+independent of the merged session metadata and avoiding metadata feedback loops.
 
 The Soulseek transfer service, buffer, data source, startup buffering thresholds, retry behavior, and
 temporary-file lifecycle are unchanged. Metadata inspection uses the same Media3 extractor input,
@@ -23,7 +27,7 @@ MP3 audio follows its leading tags; a large leading tag must arrive or be skippe
 
 `Common.Playback.TrackMetadata` holds original path/filename, title, artist, album, album artist,
 track number, release year, optional duration in milliseconds, and bounded encoded artwork.
-It is independent of Android UI/player classes and can be consumed by a later MediaSession integration.
+It is independent of Android UI/player classes and supplies the current MediaSession integration.
 Snapshots merge valid embedded fields over fallback fields. Missing/invalid values do not erase good data.
 
 Media3 maps TIT2, TPE1, TALB, TPE2, TRCK, TYER/TDRC/TDRL, and APIC to its `MediaMetadata` fields.
@@ -65,8 +69,8 @@ rejected. Accepted images are sampled to at most approximately **512 × 512** pi
 4096 UTF-16 code units without splitting a surrogate pair. Invalid/missing pictures show a vector
 placeholder; missing metadata never blocks playback.
 
-Metadata marshaling and artwork decoding run on a worker. UI updates require both the current
-controller instance and the newest metadata revision to match. Switching tracks creates fresh fallback
+Metadata marshaling and artwork decoding run on a worker. Updates require both the current
+service-owned track instance and the newest metadata revision to match. Switching tracks creates fresh fallback
 data and placeholder artwork; stopping invalidates queued results. Old/replaced bitmaps are disposed.
 The existing dialog layout is extended only with artist, album, and a small cover image; its title updates
 to the real title as metadata arrives.
@@ -87,7 +91,7 @@ dotnet test UnitTestCommon/UnitTestCommon.csproj --configuration Release --filte
 Android compilation and the GitHub APK workflow verify binding/resource integration. A physical Android
 device has not been used for this change. The following remain device acceptance checks:
 
-1. Install `3.11.2-stream.4`, stream a tagged MP3 from a throttled test peer, and confirm audible playback
+1. Install `3.11.2-stream.5`, stream a tagged MP3 from a throttled test peer, and confirm audible playback
    while Received is below 100%, with the correct title/artist/album/cover in the existing dialog.
 2. Repeat with ID3v2.3 UTF-16, v2.4 UTF-8, legacy Latin-1, track/total values, album artist, and year tags.
    Confirm those values in the metadata snapshot when debugging.
@@ -114,7 +118,8 @@ These checks do not claim successful native decoding, rendered artwork, or live 
 - Added `UnitTestCommon/TrackMetadataTests.cs` and `Id3TagHeaderTests.cs`.
 - Updated the Android manifest version, README, and streaming documentation; added this document.
 
-No NuGet packages were added. The callback compatibility fix references `Mono.Android.Export`,
+Step 2 added no NuGet packages. Step 3 adds the matching Media3 Session package as documented above.
+The callback compatibility fix references `Mono.Android.Export`,
 which is supplied by the existing Android SDK, for the legacy Java-only callback.
 
 ## Android callback compatibility fix

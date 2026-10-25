@@ -35,6 +35,10 @@ namespace Seeker.Transfers
         {
             SeekerApplication.KickKeepAliveTimer();
 
+            // The media playback service owns streaming priority and wake locks. Ordinary
+            // download notifications/counters must not represent the same temporary transfer.
+            if (DownloadService.Instance.IsStreamingTransfer(sender, e.Transfer)) return;
+
             bool isUpload = e.Transfer.Direction == TransferDirection.Upload;
 
             // Track active transfer counts via atomic counters.
@@ -68,9 +72,6 @@ namespace Seeker.Transfers
                     SeekerApplication.NotifyDownloadCountChanged(count);
                 }
             }
-
-            // Temporary streams participate in keepalive accounting, without changing saved download rows.
-            if (DownloadService.Instance.IsStreamingTransfer(sender, e.Transfer)) return;
 
             // add useroffline flag if appilcable (slsk.net no longer adds it)
             TransferStates state = e.Transfer.State | GetPeerFailureFlags(e.Transfer, isUpload);

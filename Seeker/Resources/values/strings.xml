@@ -1,5 +1,9 @@
 <resources>
     <string name="stream_play">Play</string>
+    <string name="stream_player">Now playing</string>
+    <string name="stream_open_player">Open player</string>
+    <string name="stream_notification_channel">Music playback</string>
+    <string name="stream_stopped">Playback stopped</string>
     <string name="stream_pause">Pause</string>
     <string name="stream_resume">Resume</string>
     <string name="stream_stop">Stop</string>

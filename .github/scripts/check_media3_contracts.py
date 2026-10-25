@@ -13,13 +13,27 @@ import shutil
 import subprocess
 import tempfile
 import zipfile
+import xml.etree.ElementTree as ET
 
 
 CONTRACTS = (
-    ("StreamingPlaybackController_MetadataListener.java", "Common", "androidx.media3.common.Player$Listener"),
-    ("StreamingPlaybackController_Mp3ExtractorsFactory.java", "Extractor", "androidx.media3.extractor.ExtractorsFactory"),
+    ("PlaybackListener.java", "Common", "androidx.media3.common.Player$Listener"),
+    ("Mp3ExtractorsFactory.java", "Extractor", "androidx.media3.extractor.ExtractorsFactory"),
     ("BoundedMp3Extractor.java", "Extractor", "androidx.media3.extractor.Extractor"),
 )
+
+OVERRIDES = {
+    "SessionPlayer.java": {
+        ("androidx.media3.common.SimpleBasePlayer.State", "getState", ()),
+        ("androidx.media3.common.SimpleBasePlayer.State", "getPlaceholderState", ("androidx.media3.common.SimpleBasePlayer.State",)),
+        ("com.google.common.util.concurrent.ListenableFuture", "handleStop", ()),
+        ("com.google.common.util.concurrent.ListenableFuture", "handleSetPlayWhenReady", ("boolean",)),
+    },
+    "StreamingPlaybackService.java": {
+        ("androidx.media3.session.MediaSession", "onGetSession", ("androidx.media3.session.MediaSession.ControllerInfo",)),
+        ("com.google.common.util.concurrent.ListenableFuture", "onUpdateNotificationAsync", ("androidx.media3.session.MediaSession", "boolean")),
+    },
+}
 
 
 def methods(source, generated=False):
@@ -29,7 +43,7 @@ def methods(source, generated=False):
         if erased == source:
             break
         source = erased
-    pattern = r"\bpublic\s+((?:(?:abstract|default|final|static|native|synchronized)\s+)*)([\w.$\[\]]+)\s+(\w+)\s*\(([^)]*)\)"
+    pattern = r"\b(?:public|protected)\s+((?:(?:abstract|default|final|static|native|synchronized)\s+)*)([\w.$\[\]]+)\s+(\w+)\s*\(([^)]*)\)"
     result = set()
     for modifiers, returns, name, arguments in re.findall(pattern, source):
         if "static" in modifiers.split():
@@ -81,6 +95,27 @@ def main():
                     failures.append(f"{filename}: missing {returns} {name}({', '.join(parameters)})")
             else:
                 print(f"{filename}: all {len(expected)} Media3 Java methods exported")
+    for filename, expected in OVERRIDES.items():
+        sources = list((args.obj / "android/src").rglob(filename))
+        if len(sources) != 1:
+            raise RuntimeError(f"Expected one generated {filename}; found {len(sources)}")
+        missing = expected - methods(sources[0].read_text(), generated=True)
+        for returns, name, parameters in sorted(missing):
+            failures.append(f"{filename}: missing {returns} {name}({', '.join(parameters)})")
+        if not missing:
+            print(f"{filename}: all {len(expected)} session overrides exported")
+    android = "{http://schemas.android.com/apk/res/android}"
+    manifests = [args.obj / "android/AndroidManifest.xml", args.obj / "AndroidManifest.xml"]
+    manifest = ET.parse(next(path for path in manifests if path.exists())).getroot()
+    service = next(node for node in manifest.findall("application/service")
+                   if node.get(android + "name") == "com.companyname.andriodapp1.StreamingPlaybackService")
+    assert service.get(android + "foregroundServiceType") == "mediaPlayback", "Incorrect foreground service type"
+    assert service.get(android + "exported") == "true", "Media session service is not exported"
+    assert any(node.get(android + "name") == "androidx.media3.session.MediaSessionService"
+               for node in service.findall("intent-filter/action")), "Media session intent filter is missing"
+    assert any(node.get(android + "name") == "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+               for node in manifest.findall("uses-permission")), "Media playback foreground permission is missing"
+    print("Manifest: exported mediaPlayback service, session intent filter, and permission verified")
     if failures:
         raise SystemExit("\n".join(failures))
 

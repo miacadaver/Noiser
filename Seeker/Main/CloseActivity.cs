@@ -13,6 +13,8 @@ namespace Seeker
         {
             base.OnCreate(savedInstanceState);
             Logger.InfoFirebase("shutting down");
+            Playback.StreamingPlaybackService.ShutdownCurrent();
+            StopService(new Intent(this, typeof(Playback.StreamingPlaybackService)));
 
             //stop all soulseek connection.
             if (SeekerState.SoulseekClient != null)

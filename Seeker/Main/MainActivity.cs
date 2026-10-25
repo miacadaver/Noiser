@@ -527,6 +527,7 @@ namespace Seeker
             //so then the FragmentManager will be null among other things...
             SeekerState.MainActivityRef = this;
             base.OnStart();
+            RestorePlaybackUi();
         }
         public static bool fromNotificationMoveToUploads = false;
         protected override void OnNewIntent(Intent intent)
@@ -534,6 +535,7 @@ namespace Seeker
             Logger.Debug("OnNewIntent");
             base.OnNewIntent(intent);
             Intent = intent.PutExtra("ALREADY_HANDLED", true);
+            RestorePlaybackUi();
             if (Intent.GetIntExtra(WishlistController.FromWishlistString, -1) == 1)
             {
                 HandleWishlistIntent();
