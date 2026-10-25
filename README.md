@@ -6,7 +6,8 @@ The Seeker source was imported from [jackBonadies/SeekerAndroid](https://github.
 at commit `ff1dcc6de55a412e8d6eadaddf36deca54517413` (October 11, 2026).
 The original project README is retained as [UPSTREAM_README.md](UPSTREAM_README.md), along with its license and notices.
 
-Browse a peer’s folder, tap an MP3, and choose **Play**. The prototype receives the file through the existing
+Tap **Play** beside an MP3 in a peer’s folder or in the track list opened from a search result.
+The Browse file menu also retains its **Play** option. The prototype receives the file through the existing
 Soulseek client and feeds a temporary buffer to Media3/ExoPlayer while the transfer continues.
 Playback controls appear in a dialog. Closing it or putting the app in the background stops playback and
 removes the temporary file after the transfer has stopped.
@@ -19,3 +20,4 @@ Every push to `main` and pull request targeting `main` runs [unit tests](https:/
 and [builds an Android APK](https://github.com/miacadaver/Noiser/actions/workflows/android.yml).
 Open a successful APK build and download **noiser-debug-apk** from its **Artifacts** section.
 This is a standalone development APK with debug signing; the workflow needs no release signing secrets.
+The build with visible Play buttons reports version **3.11.2-stream.2** in Android's app information.

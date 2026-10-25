@@ -85,6 +85,14 @@ namespace Seeker
                     Owner.OnActionButtonClick(pos, itemView);
                 }
             };
+            itemView.PlayButton.Click += (sender, e) =>
+            {
+                int pos = holder.BindingAdapterPosition;
+                if (pos != RecyclerView.NoPosition)
+                {
+                    Owner.PlayFile(localDataSet[pos]);
+                }
+            };
             return holder;
         }
 
@@ -103,6 +111,9 @@ namespace Seeker
             }
 
             var dataItem = localDataSet[position];
+            itemView.PlayButton.Visibility = !IsInBatchSelectMode
+                && dataItem.File?.Filename?.EndsWith(".mp3", StringComparison.OrdinalIgnoreCase) == true
+                ? ViewStates.Visible : ViewStates.Gone;
             if (dataItem.IsDirectory())
             {
                 itemView.FolderIcon.Visibility = ViewStates.Visible;
@@ -158,6 +169,7 @@ namespace Seeker
     {
         public TextView DisplayName;
         public TextView FileDetails;
+        public Button PlayButton;
         public ImageView FolderIndicator;
         public ImageView FolderIcon;
         public ImageView SelectionCheckbox;
@@ -186,6 +198,7 @@ namespace Seeker
             SelectionCheckbox = FindViewById<ImageView>(Resource.Id.selectionCheckbox);
             ActionContainer = FindViewById<FrameLayout>(Resource.Id.actionContainer);
             FileDetails = FindViewById<TextView>(Resource.Id.fileDetails);
+            PlayButton = FindViewById<Button>(Resource.Id.streamPlayButton);
             ContainingViewGroup = FindViewById<LinearLayout>(Resource.Id.containingViewGroup);
         }
 

@@ -227,7 +227,15 @@ namespace Seeker
             }
             this.customAdapter = new DownloadCustomAdapter(SeekerState.MainActivityRef, adapterList);
             this.customAdapter.Owner = this;
+            this.customAdapter.PlayFile = PlayFile;
             listView.Adapter = (customAdapter);
+        }
+
+        private void PlayFile(File file)
+        {
+            var streamFile = BrowseUtils.GetFullFileInfos(new[] { file })[0];
+            string streamUsername = SearchResponse.Username;
+            SessionService.Instance.RunWithReconnect(() => Playback.StreamingPlaybackController.Show(SeekerState.ActiveActivityRef, streamUsername, streamFile));
         }
 
         private void UpdateSubHeader()
@@ -630,6 +638,7 @@ namespace Seeker
     {
         public List<int> SelectedPositions = new List<int>();
         public AndroidX.Fragment.App.DialogFragment Owner = null;
+        public Action<File> PlayFile;
         public DownloadCustomAdapter(Context c, List<FileLockedUnlockedWrapper> items) : base(c, 0, items)
         {
         }
@@ -641,7 +650,7 @@ namespace Seeker
             {
                 itemView = DownloadItemView.Create(parent);
             }
-            itemView.setItem(GetItem(position));
+            itemView.setItem(GetItem(position), PlayFile);
 
             if (SelectedPositions.Contains(position))
             {
@@ -668,6 +677,9 @@ namespace Seeker
         private TextView viewFilename;
         //private TextView viewSize;
         private TextView viewAttributes;
+        private Button playButton;
+        private File file;
+        private Action<File> playFile;
         public DownloadItemView(Context context) : base(context)
         {
             LayoutInflater.From(context).Inflate(Resource.Layout.download_row, this, true);
@@ -687,10 +699,17 @@ namespace Seeker
             viewFilename = FindViewById<TextView>(Resource.Id.textView1);
             //viewSize = FindViewById<TextView>(Resource.Id.textView2);
             viewAttributes = FindViewById<TextView>(Resource.Id.textView3);
+            playButton = FindViewById<Button>(Resource.Id.streamPlayButton);
+            playButton.Click += (_, __) => playFile?.Invoke(file);
         }
 
-        public void setItem(FileLockedUnlockedWrapper wrapper)
+        public void setItem(FileLockedUnlockedWrapper wrapper, Action<File> playFile)
         {
+            file = wrapper.File;
+            this.playFile = playFile;
+            playButton.Visibility = !wrapper.IsLocked && playFile != null
+                && file.Filename.EndsWith(".mp3", StringComparison.OrdinalIgnoreCase)
+                ? ViewStates.Visible : ViewStates.Gone;
             if (wrapper.IsLocked)
             {
                 viewFilename.Text = string.Concat(SimpleHelpers.LOCK_EMOJI, SimpleHelpers.GetFileNameFromFile(wrapper.File.Filename));

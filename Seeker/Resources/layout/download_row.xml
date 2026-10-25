@@ -7,6 +7,7 @@
     android:layout_width="fill_parent"
     android:layout_height="wrap_content"
     android:foreground="?android:attr/selectableItemBackground"
+    android:descendantFocusability="blocksDescendants"
 >
     <LinearLayout
         android:layout_width="match_parent"
@@ -48,6 +49,18 @@
                 android:singleLine="true"
             />
         </LinearLayout>
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/streamPlayButton"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:minWidth="64dp"
+            android:layout_marginEnd="4dp"
+            android:text="@string/stream_play"
+            android:textColor="?attr/cellTextColor"
+            android:textAllCaps="false"
+            android:focusable="false"
+            android:visibility="gone" />
         <ImageView
             android:id="@+id/selectionCheck"
             android:layout_width="28dp"

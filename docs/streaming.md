@@ -6,7 +6,11 @@ Upstream: `jackBonadies/SeekerAndroid`, revision `ff1dcc6de55a412e8d6eadaddf36de
 The import preserves upstream source, resources, dependencies, license, and notices. Noiser's Git history
 and original remote are retained.
 
-`BrowseFragment.ShowFileContextMenu` adds Play for filenames ending in `.mp3`, ignoring case.
+`BrowseAdapter` shows a Play button beside MP3 files. `BrowseFragment.ShowFileContextMenu` also keeps
+its Play action. `DownloadDialog` shows Play beside unlocked MP3s in the track list opened from search
+results, including after fetching the folder contents. Extension checks ignore case. Browse batch
+selection hides the Play buttons, and tapping a search track's text still selects it for download.
+Recycled rows refresh both the button visibility and the bound file so Play targets the displayed track.
 `StreamingPlaybackController` owns one foreground session and a Media3 ExoPlayer. It uses a completed
 ordinary download when its URI is readable; otherwise `DownloadService.StreamAsync` requests a temporary
 transfer through the existing authenticated Soulseek client.
@@ -66,7 +70,10 @@ one skipped). Live peer playback has not been exercised on an Android device her
 
 Run these against a real Android device and an MP3 that the test peer is authorized to share:
 
-1. Sign in, search, browse a peer folder, and select Play on an MP3. Non-MP3 menus retain their original actions.
+1. Install version `3.11.2-stream.2`. Sign in, open a search result, and tap Play beside an unlocked MP3.
+   Repeat from the Browse tab, using both the row button and the file menu. Scroll through mixed MP3,
+   non-MP3, and locked search results; confirm Play stays with the correct file. Select tracks for regular
+   download and use Browse batch selection to confirm those interactions still work.
 2. Throttle the peer so transfer completion takes substantially longer than the player's starting buffer.
    Confirm audible playback while the dialog shows Received below 100%.
 3. Pause/resume. Slow the transfer below the playback bitrate and confirm buffering followed by recovery.

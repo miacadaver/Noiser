@@ -885,6 +885,17 @@ namespace Seeker
             }
         }
 
+        public void PlayFile(DataItem dataItem)
+        {
+            if (BrowseActionMode != null
+                || dataItem?.File?.Filename?.EndsWith(".mp3", StringComparison.OrdinalIgnoreCase) != true)
+                return;
+
+            var streamFile = BrowseUtils.ToFullFileInfo(dataItem);
+            string streamUsername = state.CurrentUsername;
+            SessionService.Instance.RunWithReconnect(() => Playback.StreamingPlaybackController.Show(SeekerState.ActiveActivityRef, streamUsername, streamFile));
+        }
+
         private void ShowFileContextMenu(int position, DataItem dataItem)
         {
             var builder = new Google.Android.Material.Dialog.MaterialAlertDialogBuilder(this.Context);
@@ -935,9 +946,7 @@ namespace Seeker
                     case 3: // Play one MP3 using a temporary transfer.
                         if (canStream)
                         {
-                            var streamFile = BrowseUtils.ToFullFileInfo(dataItem);
-                            string streamUsername = state.CurrentUsername;
-                            SessionService.Instance.RunWithReconnect(() => Playback.StreamingPlaybackController.Show(SeekerState.ActiveActivityRef, streamUsername, streamFile));
+                            PlayFile(dataItem);
                         }
                         break;
                 }
