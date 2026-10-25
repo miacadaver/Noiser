@@ -190,6 +190,10 @@ namespace Seeker.Playback
             // SessionPlayer separately gates seek commands until completed bytes are indexed.
             public bool IsSeekable => nativeMap()?.IsSeekable == true;
             public long DurationUs => duration();
+            // Media3 declares isEstimated() as a Java default method. The Xamarin binding's CLR
+            // default implementation does not generate a Java bridge, so export it explicitly or
+            // ExoPlayer crashes with AbstractMethodError while preparing a stream.
+            public bool IsEstimated => nativeMap()?.IsEstimated == true;
             public SeekMapSeekPoints GetSeekPoints(long timeUs)
             {
                 var range = rangeProvider();

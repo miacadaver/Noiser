@@ -52,6 +52,8 @@ WRAPPER_OVERRIDES = {
         ("boolean", "isSeekable", ()),
         ("long", "getDurationUs", ()),
         ("androidx.media3.extractor.SeekMap.SeekPoints", "getSeekPoints", ("long",)),
+        # Java default methods still need an explicit generated bridge.
+        ("boolean", "isEstimated", ()),
     },
 }
 
