@@ -85,15 +85,15 @@ jobs:
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: seeker-izzysoft-apks
-          path: release-apks/seeker*.apk
+          name: Noiser-release-apks
+          path: release-apks/Noiser-*.apk
 
       - name: Attach APKs to GitHub Release
         if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.attach_to_release != '')
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.attach_to_release || github.ref_name }}
-          files: release-apks/seeker*.apk
+          files: release-apks/Noiser-*.apk
           fail_on_unmatched_files: true
           generate_release_notes: true
           make_latest: "true"
@@ -145,12 +145,12 @@ jobs:
             exit 1
           fi
           mkdir -p release-aab
-          cp "$AAB" "release-aab/seeker${VERSION}.aab"
+          cp "$AAB" "release-aab/Noiser-${VERSION}.aab"
           ls -lh release-aab/
 
       - name: Upload AAB artifact
         uses: actions/upload-artifact@v4
         with:
-          name: seeker-playstore-aab
-          path: release-aab/seeker*.aab
+          name: Noiser-playstore-aab
+          path: release-aab/Noiser-*.aab
           if-no-files-found: error

@@ -52,7 +52,7 @@ using ActivityFlags = Android.Content.ActivityFlags;
 //\Xamarin\Android\Xamarin.Android.CSharp.targets" />
 namespace Seeker
 {
-    [Activity(Label = "Noiser rollback", Theme = "@style/AppTheme.NoActionBar", LaunchMode = Android.Content.PM.LaunchMode.SingleTop, MainLauncher = true, Exported = true, WindowSoftInputMode = Android.Views.SoftInput.AdjustPan)]
+    [Activity(Label = "Noiser", Theme = "@style/AppTheme.NoActionBar", LaunchMode = Android.Content.PM.LaunchMode.SingleTop, MainLauncher = true, Exported = true, WindowSoftInputMode = Android.Views.SoftInput.AdjustPan)]
     public partial class MainActivity :
         ThemeableActivity, 
         ActivityCompat.IOnRequestPermissionsResultCallback, 

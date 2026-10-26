@@ -1,0 +1,1 @@
+A Soulseek client for Android with MP3 streaming, background playback, queues, and embedded metadata. Built on Seeker.

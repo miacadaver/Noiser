@@ -33,7 +33,7 @@ namespace Seeker
         public const string CHANNEL_NAME_DOWNLOAD_FOREGROUND = "Foreground Download Service";
 
         public const string CHANNEL_ID_KEEP_ALIVE = "seeker keep alive id";
-        public const string CHANNEL_NAME_KEEP_ALIVE = "Seeker Keep Alive Service";
+        public const string CHANNEL_NAME_KEEP_ALIVE = "Noiser Keep Alive Service";
 
         public static void ShowNotificationForUserOnlineAlert(string username)
         {

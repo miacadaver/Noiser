@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Seeker</string>
+    <string name="app_name">Noiser</string>
     <string name="com.google.firebase.crashlytics.mapping_file_id">1.0</string>
     <string name="home_tab">Beranda</string>
     <string name="transfer_tab">Transfer</string>
@@ -26,7 +26,7 @@
     <string name="search_user_">Cari pengguna {0}</string>
     <string name="wishlist_search">Cari keinginan</string>
     <string name="no_account">Belum memiliki akun? Cukup masukkan nama pengguna unik dan akun akan dibuatkan untuk Anda.</string>
-    <string name="keep_alive_service_subtitle">Mengizinkan Seeker untuk merespon permintaan pencarian (share), menerima pesan, dan menjalankan pencarian keinginan (wishlist) di latar belakang</string>
+    <string name="keep_alive_service_subtitle">Mengizinkan Noiser untuk merespon permintaan pencarian (share), menerima pesan, dan menjalankan pencarian keinginan (wishlist) di latar belakang</string>
     <string name="privileges_more_info">Hak akses khusus (Privileges) memungkinkan anda mendukung Jaringan Soulseek (Nir) dan server pusat yang dibutuhkan aplikasi ini. \n\nHak ini juga memungkinkan anda untuk melewati antrean unduhan mendahului pengguna yang tidak memiliki hak akses khusus tersebut. \n\nCatatan: donasi tidak disalurkan kepada pencipta klien Android tidak resmi ini (Seeker). Saat ini saya tidak menerima donasi.</string>
     <string name="no_messages">Tidak ada pesan</string>
     <string name="no_messages_subtitle">Pesan dari pengguna akan muncul di sini</string>
@@ -114,7 +114,7 @@
     <string name="create_chatroom_private">Buat privat</string>
     <string name="search_here">Cari di sini</string>
     <string name="seeker_needs_dl_dir">Pilih lokasi unduhan</string>
-    <string name="seeker_needs_dl_dir_content">Pilih folder tempat Seeker akan menyimpan file yang diunduh</string>
+    <string name="seeker_needs_dl_dir_content">Pilih folder tempat Noiser akan menyimpan file yang diunduh</string>
     <string name="seeker_needs_dl_dir_error">Folder unduhan diperlukan untuk menyimpan berkas</string>
     <string name="seeker_needs_dl_dir_choose_settings">Silakan atur direktori unduhan di Pengaturan.</string>
     <string name="seeker_cannot_access_files">Tidak dapat mengakses sistem file. Anda harus memilih direktori unduhan, baik di halaman login atau di pengaturan.</string>
@@ -474,8 +474,8 @@
     <!--Notification-->
     <string name="download_in_progress">Unduhan sedang berjalan</string>
     <string name="transfers_in_progress">Transfer sedang berjalan...</string>
-    <string name="seeker_running">Seeker sedang berjalan</string>
-    <string name="seeker_running_content">Seeker saat ini berjalan di latar belakang</string>
+    <string name="seeker_running">Noiser sedang berjalan</string>
+    <string name="seeker_running_content">Noiser saat ini berjalan di latar belakang</string>
     <!--Privileges-->
     <string name="yes">Ya</string>
     <string name="seconds_left">{0} detik</string>
@@ -534,7 +534,7 @@
     <string name="subfolders_warning_queue_paused">Folder ini berisi subfolder, apakah anda ingin memasukkan semua berkas di dalam subfolder tersebut ke antrean juga ({0}) atau hanya berkas di folder saat ini ({1})?</string>
     <string name="current_folder_only">Hanya folder saat ini</string>
     <string name="must_be_logged_in_to_give_privileges">Harus masuk log terlebih dahulu untuk memberikan hak istimewa</string>
-    <string name="about_body">Seeker adalah klien Soulseek gratis dan sumber terbuka (open source) untuk Android. Aplikasi ini tidak akan pernah memiliki iklan atau fitur berbayar.</string>
+    <string name="about_body">Noiser adalah klien Soulseek gratis dan sumber terbuka (open source) untuk Android. Aplikasi ini tidak akan pernah memiliki iklan atau fitur berbayar.</string>
     <string name="about_link_source_title">Kode sumber</string>
     <string name="about_link_translate_title">Bantu menerjemahkan</string>
     <string name="must_be_logged_in_to_get_dir_contents">Harus masuk log terlebih dahulu untuk mendapatkan konten direktori</string>
@@ -724,7 +724,7 @@
     <string name="DeleteSelected">Hapus yang dipilih</string>
     <string name="deleted_selected_message_histories">Berhasil menghapus {0} percakapan</string>
     <string name="ExportClientData">Ekspor data klien</string>
-    <string name="successfully_exported">Data klien Seeker berhasil diekspor.</string>
+    <string name="successfully_exported">Data klien Noiser berhasil diekspor.</string>
     <string name="ForceFilesystemPermission">Paksa izin sistem file</string>
     <string name="permission_already_successfully_granted">Izin akses sudah berhasil diberikan sebelumnya</string>
     <string name="permission_successfully_granted">Izin akses berhasil diberikan</string>
@@ -737,7 +737,7 @@
     <string name="must_be_logged_in_to_change_password">Harus masuk log terlebih dahulu untuk mengubah kata sandi</string>
     <string name="failed_to_change_password">Gagal mengubah kata sandi</string>
     <string name="password_successfully_updated">Kata sandi berhasil diperbarui</string>
-    <string name="error_dialog_content">Seeker mengalami masalah.\n\nMohon pertimbangkan untuk mengirimkan laporan ini ke pengembang.\n\nInformasi tambahan mengenai langkah atau kondisi sebelum masalah terjadi akan sangat kami hargai.</string>
+    <string name="error_dialog_content">Noiser mengalami masalah.\n\nMohon pertimbangkan untuk mengirimkan laporan ini ke pengembang.\n\nInformasi tambahan mengenai langkah atau kondisi sebelum masalah terjadi akan sangat kami hargai.</string>
     <string name="folder_request_user_returned_empty_response">Pengguna memberikan respons kosong untuk folder ini</string>
     <string name="just_now">baru saja</string>
     <!-- Modern settings screen -->

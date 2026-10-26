@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Seeker</string>
+    <string name="app_name">Noiser</string>
     <string name="com.google.firebase.crashlytics.mapping_file_id">1.0</string>
 
     <string name="home_tab">Domů</string>
@@ -559,9 +559,9 @@
 
     <string name="download_in_progress">Probíhá stahování</string>
     <string name="transfers_in_progress">Probíhá přenos...</string>
-    <string name="seeker_running">Seeker běží</string>
+    <string name="seeker_running">Noiser běží</string>
     <string name="seeker_running_content">
-        Seeker právě běží na pozadí
+        Noiser právě běží na pozadí
     </string>
 
     <string name="yes">Ano</string>
@@ -642,7 +642,7 @@
         Must be logged in to give privileges
     </string>
 
-    <string name="about_body">Seeker is a free and open source Soulseek client for Android. It will never have ads or paid features.</string>
+    <string name="about_body">Noiser is a free and open source Soulseek client for Android. It will never have ads or paid features.</string>
     <string name="must_be_logged_in_to_get_dir_contents">
         Must be logged in to get directory contents
     </string>
@@ -963,7 +963,7 @@
 
     <string name="ExportClientData">Export client data</string>
     <string name="successfully_exported">
-        Successfully exported Seeker client data.
+        Successfully exported Noiser client data.
     </string>
 
     <string name="ForceFilesystemPermission">
@@ -994,7 +994,7 @@
         Password successfully updated
     </string>
     <string name="error_dialog_content">
-        Seeker has encountered an issue.  \n\nPlease consider sending a report to the developer.  \n\nAny information about the steps / conditions leading up to the issue is much appreciated.
+        Noiser has encountered an issue.  \n\nPlease consider sending a report to the developer.  \n\nAny information about the steps / conditions leading up to the issue is much appreciated.
     </string>
     <string name="section_downloads">Downloads</string>
     <string name="section_search">Search</string>

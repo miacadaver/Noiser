@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Seeker</string>
+    <string name="app_name">Noiser</string>
     <string name="com.google.firebase.crashlytics.mapping_file_id">1.0</string>
 
     <string name="home_tab">Головна</string>
@@ -566,9 +566,9 @@
 
     <string name="download_in_progress">Триває завантаження</string>
     <string name="transfers_in_progress">Передачі тривають...</string>
-    <string name="seeker_running">Seeker запущено</string>
+    <string name="seeker_running">Noiser запущено</string>
     <string name="seeker_running_content">
-        Seeker працює у фоновому режимі
+        Noiser працює у фоновому режимі
     </string>
 
     <string name="yes">Так</string>
@@ -649,7 +649,7 @@
         Щоб надати привілеї, необхідно увійти в систему
     </string>
 
-    <string name="about_body">Seeker — це безплатний клієнт Soulseek з відкритим кодом для Android. У ньому ніколи не буде реклами чи платних функцій.</string>
+    <string name="about_body">Noiser — це безплатний клієнт Soulseek з відкритим кодом для Android. У ньому ніколи не буде реклами чи платних функцій.</string>
     <string name="must_be_logged_in_to_get_dir_contents">
         Щоб отримати вміст каталогу, необхідно увійти в систему
     </string>
@@ -970,7 +970,7 @@
 
     <string name="ExportClientData">Експорт даних клієнта</string>
     <string name="successfully_exported">
-        Дані клієнта Seeker успішно експортовано.
+        Дані клієнта Noiser успішно експортовано.
     </string>
 
     <string name="ForceFilesystemPermission">
@@ -1001,7 +1001,7 @@
         Password successfully updated
     </string>
     <string name="error_dialog_content">
-        Seeker has encountered an issue.  \n\nPlease consider sending a report to the developer.  \n\nAny information about the steps / conditions leading up to the issue is much appreciated.
+        Noiser has encountered an issue.  \n\nPlease consider sending a report to the developer.  \n\nAny information about the steps / conditions leading up to the issue is much appreciated.
     </string>
     <string name="section_downloads">Downloads</string>
     <string name="section_search">Search</string>

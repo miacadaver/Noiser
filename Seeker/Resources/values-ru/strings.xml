@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Seeker</string>
+    <string name="app_name">Noiser</string>
     <string name="com.google.firebase.crashlytics.mapping_file_id">1.0</string>
 
     <string name="home_tab">Главная</string>
@@ -567,9 +567,9 @@
 
     <string name="download_in_progress">Идет загрузка</string>
     <string name="transfers_in_progress">Выполняется передач...</string>
-    <string name="seeker_running">Seeker запущен</string>
+    <string name="seeker_running">Noiser запущен</string>
     <string name="seeker_running_content">
-        Seeker работает в фоновом режиме
+        Noiser работает в фоновом режиме
     </string>
 
     <string name="yes">Да</string>
@@ -650,7 +650,7 @@
         Необходимо войти в систему для предоставления привилегий
     </string>
 
-    <string name="about_body">Seeker - бесплатный android-клиент Soulseek с открытым исходным кодом. Здесь никогда не будет рекламы или платных функций.</string>
+    <string name="about_body">Noiser - бесплатный android-клиент Soulseek с открытым исходным кодом. Здесь никогда не будет рекламы или платных функций.</string>
     <string name="must_be_logged_in_to_get_dir_contents">
         Необходимо войти в систему, чтобы получить содержимое каталога
     </string>
@@ -1002,7 +1002,7 @@
         Пароль успешно обновлён
     </string>
     <string name="error_dialog_content">
-        Seeker столкнулся с проблемой. \n\nПожалуйста, поделитесь отчетом с разработчиками. \n\nЛюбая дополнительная информация, а также описание шагов для воспроизведения приветствуются.
+        Noiser столкнулся с проблемой. \n\nПожалуйста, поделитесь отчетом с разработчиками. \n\nЛюбая дополнительная информация, а также описание шагов для воспроизведения приветствуются.
     </string>
     <string name="section_downloads">Downloads</string>
     <string name="section_search">Search</string>

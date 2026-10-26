@@ -18,13 +18,13 @@ param(
 $ErrorActionPreference = "Stop"
 
 if (-not $Version) {
-    $Version = Read-Host "Seeker version (e.g. 120)"
+    $Version = Read-Host "Noiser version (e.g. 3.11.2-stream.9)"
 }
 if ([string]::IsNullOrWhiteSpace($Version)) {
     throw "Version is required."
 }
 
-$pkg     = "com.companyname.andriodapp1"
+$pkg     = "com.companyname.andriodapp1.rollback"
 $csproj  = "./Seeker/Seeker.csproj"
 $config  = "Release IzzySoft"
 $tfm     = (dotnet msbuild $csproj -getProperty:TargetFramework -v:q).Trim()
@@ -105,7 +105,7 @@ Write-Host "==> Collecting APKs into $out" -ForegroundColor Cyan
 
 $uni = Join-Path $base "$pkg-Signed.apk"
 if (Test-Path $uni) {
-    Copy-Item $uni (Join-Path $out "seeker$Version-universal.apk") -Force
+    Copy-Item $uni (Join-Path $out "Noiser-$Version-universal.apk") -Force
 } else {
     Write-Warning "Universal APK not found at $uni"
 }
@@ -113,7 +113,7 @@ if (Test-Path $uni) {
 foreach ($rid in $rids) {
     $src = Join-Path $base "$rid/publish/$pkg-Signed.apk"
     if (Test-Path $src) {
-        Copy-Item $src (Join-Path $out "seeker$Version-$($abiMap[$rid]).apk") -Force
+        Copy-Item $src (Join-Path $out "Noiser-$Version-$($abiMap[$rid]).apk") -Force
     } else {
         Write-Warning "Per-ABI APK not found for $rid at $src"
     }

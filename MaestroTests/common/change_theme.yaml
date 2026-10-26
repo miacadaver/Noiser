@@ -1,4 +1,4 @@
-appId: com.companyname.andriodapp1
+appId: com.companyname.andriodapp1.rollback
 env:
   IS_NIGHT: 'true'
   THEME_INDEX: '0'

@@ -1,49 +1,106 @@
-# Noiser
+<p align="center">
+  <img src="docs/images/noiser-banner.png" alt="Noiser — Find a track. Press play. A Soulseek client for Android, built on Seeker." width="100%">
+</p>
 
-Seeker Android with an incremental prototype for playing MP3 files directly from Soulseek peers.
+<p align="center">
+  <a href="https://github.com/miacadaver/Noiser/actions/workflows/android.yml"><img src="https://github.com/miacadaver/Noiser/actions/workflows/android.yml/badge.svg" alt="Android APK build"></a>
+  <a href="https://github.com/miacadaver/Noiser/actions/workflows/unittests.yml"><img src="https://github.com/miacadaver/Noiser/actions/workflows/unittests.yml/badge.svg" alt="Unit tests"></a>
+  <img src="https://img.shields.io/badge/Android-6.0%2B-8DE5C2?labelColor=102C32" alt="Android 6.0 and newer">
+</p>
 
-The working baseline on `main` is the pre-background-changes code restored in
-`5c950d8`, confirmed to open on the user's Samsung running Android 16.
-The four background additions (buffering/retry presentation, automatic reconnect
-recovery, saved queues, and saved playback positions) remain removed, along with
-the later battery and startup experiments. Earlier metadata/scrobbling fixes remain.
-See the [baseline verification record](docs/validation/2026-10-26-full-background-rollback.md).
+**A Soulseek client for Android that lets you play MP3s while they download.**
 
-Keep using the [confirmed working APK](https://github.com/miacadaver/Noiser/actions/runs/40366644108/artifacts/12670202882).
-Its launcher name is **Noiser rollback** and its package remains separate from the
-original app, preserving the original app's data. No reinstall is needed to adopt
-this as the project's working baseline.
+Noiser builds on [Seeker](https://github.com/jackBonadies/SeekerAndroid), keeping its search, sharing, downloads, and community features while adding an integrated player. Find a track, tap **Play**, and keep listening with the app in the background.
 
-The Seeker source was imported from [jackBonadies/SeekerAndroid](https://github.com/jackBonadies/SeekerAndroid)
-at commit `ff1dcc6de55a412e8d6eadaddf36deca54517413` (October 11, 2026).
-The original project README is retained as [UPSTREAM_README.md](UPSTREAM_README.md), along with its license and notices.
+[Get the APK](#get-noiser) · [See it in action](#a-look-inside) · [Compare with Seeker](#noiser-and-seeker) · [Roadmap](ROADMAP.md)
 
-Tap **Play** beside an MP3 in a peer’s folder or in the track list opened from a search result.
-The Browse file menu also retains its **Play** option. The prototype receives the file through the existing
-Soulseek client and feeds a temporary buffer to Media3/ExoPlayer while the transfer continues.
-Playback controls appear in a dialog. **Close** minimizes it to a mini-player above the main navigation.
-The same playback session continues in the background and exposes Android notification, lock-screen,
-and headset play/pause controls. **Stop** ends playback and removes the temporary file after transfer shutdown.
+## Listen as you discover
 
-Playback supports MP3 folder queues, Next/Previous, Play next/Add to queue, repeat modes, and autoplay.
-One track is received at a time, with buffering and one reconnect attempt. Seeking is limited to
-audio already received and parsed; it cannot jump to an unreceived part of a remote file.
-At the end of the queue, the current track stays available for replay until Stop or another selection.
-See [streaming implementation and device checks](docs/streaming.md)
-and [background playback architecture and validation](docs/background-playback.md), plus the upstream
-[development instructions](DEVELOPMENT.md).
+- **Play from search or Browse.** Start an MP3 without waiting for the entire file to download.
+- **Keep listening.** A mini-player, Android media notification, lock-screen controls, and headset play/pause share one playback session.
+- **Build a listening queue.** Folder queues, Play next, Add to queue, Next/Previous, repeat, and autoplay.
+- **See the track behind the filename.** Embedded title, artist, album, and artwork when available; conservative title/artist fallbacks when tags are missing.
+- **Keep the Soulseek essentials.** Search filters and wishlists, peer folders, downloads and uploads, messages, chatrooms, and UPnP port forwarding.
 
-Every push to `main` and pull request targeting `main` runs [unit tests](https://github.com/miacadaver/Noiser/actions/workflows/unittests.yml)
-and [builds an Android APK](https://github.com/miacadaver/Noiser/actions/workflows/android.yml).
-Open a successful APK build and download **noiser-debug-apk** from its **Artifacts** section.
-This is a standalone development APK with debug signing; the workflow needs no release signing secrets.
-The current baseline reports version **3.11.2-stream.8-rollback** in Android's app information.
-The playback dialog shows embedded title, artist, album, and artwork when available, with conservative
-filename fallbacks. See [metadata behavior, limits, and verification](docs/streaming-metadata.md).
-Playback briefly waits for initial tags before starting, helping scrobblers receive embedded metadata
-instead of a temporary filename title. This wait is bounded to 1.5 seconds; missing tags do not block playback.
+## A look inside
 
-Automated tests and Android builds pass locally. Live playback, lock-screen/Bluetooth controls, and
-external scrobbler detection still require Android device testing.
-An [Android 15 emulator validation run](docs/validation/2026-10-26-emulator.md) passed 24 runtime checks
-using generated MP3s and a simulated peer; physical-phone and real-scrobbler checks remain outstanding.
+<table>
+  <tr>
+    <th>Find music</th>
+    <th>Browse a peer</th>
+    <th>Keep listening</th>
+  </tr>
+  <tr>
+    <td align="center"><img src="fastlane/metadata/android/en-US/images/phoneScreenshots/02_search.png" width="220" alt="Seeker search results with MP3, FLAC, and bitrate labels"></td>
+    <td align="center"><img src="fastlane/metadata/android/en-US/images/phoneScreenshots/06_browse.png" width="220" alt="Seeker peer folder browser"></td>
+    <td align="center"><img src="docs/images/emulator-media-notification.png" width="220" alt="Noiser Android media card displaying embedded title and artist from a generated test MP3"></td>
+  </tr>
+</table>
+
+Search and Browse screenshots are inherited from upstream Seeker and show the shared interface before Noiser's Play buttons and branding. The media card is an actual Noiser Android 15 emulator capture using generated test audio. These images predate the new mint bird icon; they are not screenshots of the new build. [Playback validation and its limits →](docs/validation/2026-10-26-emulator.md)
+
+## Get Noiser
+
+1. Open [Android APK builds](https://github.com/miacadaver/Noiser/actions/workflows/android.yml) and choose the latest successful run on `main`.
+2. Download **Noiser-apk** from **Artifacts** and extract **Noiser.apk**. Downloading Actions artifacts requires a GitHub account; artifacts expire after 14 days.
+3. Install the APK on Android 6.0 or newer, allow installation from your browser/file manager if prompted, then sign in to Soulseek.
+4. Open a peer folder or the track list from a search result and tap **Play** beside an MP3.
+
+The app appears as **Noiser**. Version **3.11.2-stream.9** keeps the working package ID `com.companyname.andriodapp1.rollback`, separate from upstream Seeker and the earlier original-package builds. Renaming the app does not migrate or clear settings. Updating an existing installation also requires a matching signing certificate; CI APKs use development signing.
+
+This is an **experimental development build**, not a Play Store release. The pre-branding rollback was confirmed to launch on a Samsung running Android 16; the refreshed build still needs device validation. The [known-working rollback APK](https://github.com/miacadaver/Noiser/actions/runs/40366644108/artifacts/12670202882) and its [baseline record](docs/validation/2026-10-26-full-background-rollback.md) remain available as historical references, subject to artifact expiry.
+
+## Noiser and Seeker
+
+Comparison is against the **imported Seeker revision**, `ff1dcc6de55a412e8d6eadaddf36deca54517413` (October 11, 2026), rather than a claim about future upstream releases.
+
+| Capability | Imported Seeker | Noiser |
+| --- | --- | --- |
+| Search, filters, and wishlists | Included | Retained |
+| Peer browsing, downloads, uploads, and sharing | Included | Retained |
+| Messages, chatrooms, user info, and UPnP | Included | Retained |
+| Integrated MP3 playback during a peer transfer | Not included | Added, experimental |
+| Mini-player and background media session | Not included | Added |
+| Playback queues, repeat, and autoplay | Not included | Added, in memory |
+| Embedded playback metadata and artwork | No integrated streaming player | Added |
+| Seeking during streaming | No integrated streaming player | Limited to received, parsed audio |
+| Saved playback queues and positions | No integrated streaming player | Planned; removed from the working baseline |
+
+## Current limits
+
+Streaming supports **MP3 only**, one active track transfer at a time, with a **256 MiB** remote file limit. Peers must be online and willing to upload; queue time and transfer speed affect startup. There is no next-track prefetch, remote range seeking, or gapless playback.
+
+Seeking stays within audio already received and parsed. Playback queues and positions do not survive process death. One transfer-level reconnect attempt is supported; automatic playback recovery, saved queues, and saved positions remain outside the working baseline. Album metadata comes from tags, without folder-name guesses. Direct scrobbling is not implemented; external scrobbler detection still needs real-device testing.
+
+## What's next
+
+The priority is to validate the current build on real devices before restoring removed background features. [The roadmap](ROADMAP.md) tracks acceptance criteria for device reliability, recovery and persistence, and listening polish. Planned work is not included in today's APK.
+
+## Development
+
+Native Android UI in C#, **.NET 10**, Android API **36** target / **23** minimum, and **Media3/ExoPlayer**. Requirements are pinned in [global.json](global.json); Android builds also need the Android workload/SDK and JDK 21.
+
+```sh
+# Host tests: same configuration and filter as CI.
+dotnet test UnitTestCommon/UnitTestCommon.csproj --configuration Release --filter 'TestCategory!=RealData'
+
+# Standalone Android development build.
+dotnet workload restore Seeker/Seeker.csproj
+dotnet build Seeker/Seeker.csproj -p:AndroidKeyStore=false -p:EmbedAssembliesIntoApk=true
+```
+
+Pushes and pull requests to `main` run host tests and build an APK. The host tests cover transfer buffering, queue behavior, seeking bounds, metadata publication, and serialization compatibility. The historical baseline record reports **716 passed, 1 skipped**; this is not a substitute for current CI or phone testing.
+
+| Read more | Contents |
+| --- | --- |
+| [Development guide](DEVELOPMENT.md) | Setup, mock mode, deployment, and profiling |
+| [Streaming](docs/streaming.md) | Progressive buffering, transfer ownership, seeking, and limits |
+| [Background playback](docs/background-playback.md) | Service lifecycle, media controls, and device checklist |
+| [Metadata](docs/streaming-metadata.md) | Tag extraction, artwork, and publication behavior |
+| [Branding](docs/branding.md) | Editable bird artwork and Android icon exports |
+
+## Credits and license
+
+Noiser is a modified version of [Seeker by jackBonadies](https://github.com/jackBonadies/SeekerAndroid), imported at the revision above. The original [README](UPSTREAM_README.md), source notices, and [license](LICENSE) are retained. Networking uses the bundled modified **Soulseek.NET** and **Mono.Nat** libraries. The Noiser bird is adapted from Seeker's original artwork.
+
+Licensed under **GPL-3.0-only, with the Additional Terms in [LICENSE](LICENSE)**. Noiser is an unofficial Soulseek client and a separate fork of Seeker.

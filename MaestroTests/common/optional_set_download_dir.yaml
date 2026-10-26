@@ -1,4 +1,4 @@
-appId: com.companyname.andriodapp1
+appId: com.companyname.andriodapp1.rollback
 ---
 - tapOn:
     text: "OK"

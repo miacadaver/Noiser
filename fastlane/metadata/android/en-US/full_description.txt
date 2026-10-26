@@ -1,12 +1,19 @@
-<p><i>Seeker</i> is an unofficial client for <a href='https://en.wikipedia.org/wiki/Soulseek'>Soulseek</a>. It uses a modified version of the <a href='https://github.com/jpdillingham/Soulseek.NET'>Soulseek.NET</a> library for communicating with Soulseek server and peers.</p>
-<p><br><b>Features:</b></p><ul>
-<li>Searching (including wishlists and filters)</li>
-<li>Browsing User Directories</li>
-<li>Downloads and Uploads</li>
-<li>Port Forwarding via UPnP</li>
-<li>Chatrooms and Messages</li>
-<li>Adding Users</li>
-<li>Get and Set User Info</li>
-<li>Privileges</li>
+<p><b>Noiser</b> is an unofficial Soulseek client for Android, based on Seeker, with experimental MP3 playback directly from peers.</p>
+<p>Find a track in search or Browse and tap Play while the file is still arriving. Keep listening with a mini-player, background playback, and Android media controls.</p>
+<p><b>Playback features:</b></p><ul>
+<li>MP3 playback during peer transfers</li>
+<li>In-memory folder queues, Play next, Add to queue, repeat, and autoplay</li>
+<li>Embedded title, artist, album, and artwork when available</li>
+<li>Seeking within audio already received and parsed</li>
+<li>Notification, lock-screen, and headset play/pause controls</li>
 </ul>
-<p><br><b>License:</b> GNU General Public License v3.0 only (GPL-3.0-only), with Additional Terms pursuant to Section 7 of the GPLv3. Full license text and Additional Terms: <a href='https://github.com/jackBonadies/SeekerAndroid/blob/master/LICENSE'>here</a>. Source code: <a href='https://github.com/jackBonadies/SeekerAndroid'>here</a>.</p>
+<p><b>Soulseek features inherited from Seeker:</b></p><ul>
+<li>Search, wishlists, and filters</li>
+<li>Browsing peer directories</li>
+<li>Downloads, uploads, and sharing</li>
+<li>UPnP port forwarding</li>
+<li>Chatrooms, messages, user info, and privileges</li>
+</ul>
+<p><b>Development limits:</b> MP3 only, one active playback transfer, and a 256 MiB remote file limit. Peer availability and upload queues affect playback. Queues and positions are not saved after process death. External scrobblers and device-specific behavior still need testing.</p>
+<p>Noiser is a separate fork of Seeker, with a modified Soulseek.NET library. Source and roadmap: <a href="https://github.com/miacadaver/Noiser">Noiser on GitHub</a>. Upstream: <a href="https://github.com/jackBonadies/SeekerAndroid">Seeker</a>.</p>
+<p><b>License:</b> GPL-3.0-only with Additional Terms pursuant to Section 7, retained in the repository's <a href="https://github.com/miacadaver/Noiser/blob/main/LICENSE">LICENSE</a>.</p>

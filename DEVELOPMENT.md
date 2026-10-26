@@ -18,7 +18,7 @@ dotnet build .\Seeker\Seeker.csproj -p:AndroidKeyStore=false -c "Debug Mock" -t:
 dotnet publish .\Seeker\Seeker.csproj -p:AndroidKeyStore=false -p:EmbedAssembliesIntoApk=true -c "Debug Mock" -f net10.0-android36.0
 
 # view app logs
-adb logcat --pid=(adb shell pidof com.companyname.andriodapp1)
+adb logcat --pid=(adb shell pidof com.companyname.andriodapp1.rollback)
 ```
 
 Notes:
@@ -106,7 +106,7 @@ dotnet-dsrouter android
 
 # terminal 2
 adb -s R5CW7238Q0D shell setprop debug.mono.profile '127.0.0.1:9000,suspend,connect'
-adb -s R5CW7238Q0D shell am start -n com.companyname.andriodapp1/crc646350f44cde9e1cf7.MainActivity
+adb -s R5CW7238Q0D shell am start -n com.companyname.andriodapp1.rollback/crc646350f44cde9e1cf7.MainActivity
 dotnet-trace collect -p <dsrouter PID>
 dotnet-trace convert <filename>.nettrace --format speedscope
 ```

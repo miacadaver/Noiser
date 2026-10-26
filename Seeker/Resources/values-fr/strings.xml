@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Seeker</string>
+    <string name="app_name">Noiser</string>
     <string name="com.google.firebase.crashlytics.mapping_file_id">1.0</string>
     <string name="home_tab">Accueil</string>
     <string name="transfer_tab">Transferts</string>
@@ -26,7 +26,7 @@
     <string name="search_user_">Recherche l\'utilisateur {0}</string>
     <string name="wishlist_search">Rechercher dans la liste de souhaits</string>
     <string name="no_account">Pas de compte ? Entrez un nom d\'utilisateur et un compte vous sera attribué.</string>
-    <string name="keep_alive_service_subtitle">Permet à Seeker de répondre aux requêtes de recherche (partager), de recevoir des messages de chat et d\'exécuter des recherches dans la liste de souhaits en arrière-plan</string>
+    <string name="keep_alive_service_subtitle">Permet à Noiser de répondre aux requêtes de recherche (partager), de recevoir des messages de chat et d\'exécuter des recherches dans la liste de souhaits en arrière-plan</string>
     <string name="privileges_more_info">Les privilèges permettent de soutenir le créateur de Soulseek (Nir) et le serveur central dont dépend cette application.
 \n\nIl permet également d\'avoir un temps d\'avance sur les utilisateurs normaux en file d\'attente de téléchargement.
 \n\nNote : les donations n\'iront pas au créateur de Seeker, ce client android non officiel. Je n\'accepte pas les dons pour le moment.</string>
@@ -116,7 +116,7 @@
     <string name="create_chatroom_private">Rendre privé</string>
     <string name="search_here">Rechercher ici</string>
     <string name="seeker_needs_dl_dir">Choisir l\'emplacement de téléchargement</string>
-    <string name="seeker_needs_dl_dir_content">Sélectionnez un dossier où Seeker sauvegardera les fichiers téléchargés</string>
+    <string name="seeker_needs_dl_dir_content">Sélectionnez un dossier où Noiser sauvegardera les fichiers téléchargés</string>
     <string name="seeker_needs_dl_dir_error">Un dossier de téléchargement est requis pour enregistrer des fichiers</string>
     <string name="seeker_needs_dl_dir_choose_settings">Veuillez sélectionner un dossier pour les téléchargements dans les paramètres.</string>
     <string name="seeker_cannot_access_files">Accès aux fichiers impossible. Vous devez sélectionner un dossier de téléchargements dans la page de connexion ou les paramètres.</string>
@@ -476,8 +476,8 @@
     <!--Notification-->
     <string name="download_in_progress">Téléchargements en cours</string>
     <string name="transfers_in_progress">Transfères en cours...</string>
-    <string name="seeker_running">Seeker est en cours d\'exécution</string>
-    <string name="seeker_running_content">Seeker fonctionne actuellement en arrière-plan</string>
+    <string name="seeker_running">Noiser est en cours d\'exécution</string>
+    <string name="seeker_running_content">Noiser fonctionne actuellement en arrière-plan</string>
     <!--Privileges-->
     <string name="yes">Oui</string>
     <string name="seconds_left">{0} secondes</string>
@@ -536,7 +536,7 @@
     <string name="subfolders_warning_queue_paused">Ce dossier contient des sous-dossiers, voulez-vous mettre en file d\'attente tous les fichiers dans ce sous-dossier ({0}) ou seulement les fichiers dans le dossier courant ({1}) ?</string>
     <string name="current_folder_only">Dossier actuel uniquement</string>
     <string name="must_be_logged_in_to_give_privileges">Doit être connecté pour donner des privilèges</string>
-    <string name="about_body">Seeker est un client Soulseek gratuit et open-source pour Android. Il n\'aura jamais de pub ou de fonctions payantes.</string>
+    <string name="about_body">Noiser est un client Soulseek gratuit et open-source pour Android. Il n\'aura jamais de pub ou de fonctions payantes.</string>
     <string name="about_link_source_title">Code source</string>
     <string name="about_link_translate_title">Contribuer à la traduction</string>
     <string name="must_be_logged_in_to_get_dir_contents">Vous devez être connecté pour voir le contenu des dossiers</string>
@@ -726,7 +726,7 @@
     <string name="DeleteSelected">Supprimer la sélection</string>
     <string name="deleted_selected_message_histories">Conversation(s) {0} supprimée(s)</string>
     <string name="ExportClientData">Exporter données client</string>
-    <string name="successfully_exported">Données client Seeker exportées.</string>
+    <string name="successfully_exported">Données client Noiser exportées.</string>
     <string name="ForceFilesystemPermission">Forcer permissions filesystem</string>
     <string name="permission_already_successfully_granted">Cette permission a déjà été accordée</string>
     <string name="permission_successfully_granted">Permission accordée</string>
@@ -739,7 +739,7 @@
     <string name="must_be_logged_in_to_change_password">Vous devez être connecté pour changer votre mot de passe</string>
     <string name="failed_to_change_password">Échec du changement de mot de passe</string>
     <string name="password_successfully_updated">Mot de passe mis à jour</string>
-    <string name="error_dialog_content">Seeker a eu un problème. \n\nVeuillez reporter au développeur.\n\nToute information à propos des étapes / conditions menant à ce problème serait appréciée.</string>
+    <string name="error_dialog_content">Noiser a eu un problème. \n\nVeuillez reporter au développeur.\n\nToute information à propos des étapes / conditions menant à ce problème serait appréciée.</string>
     <string name="folder_request_user_returned_empty_response">L\'utilisateur a renvoyé une réponse vide pour ce dossier</string>
     <string name="just_now">juste maintenant</string>
     <!-- Modern settings screen -->

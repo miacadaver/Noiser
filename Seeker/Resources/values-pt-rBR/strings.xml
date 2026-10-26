@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Seeker</string>
+    <string name="app_name">Noiser</string>
     <string name="com.google.firebase.crashlytics.mapping_file_id">1.0</string>
 
     <string name="home_tab">Início</string>
@@ -566,9 +566,9 @@
 
     <string name="download_in_progress">Downloads em andamento</string>
     <string name="transfers_in_progress">Transferências em andamento...</string>
-    <string name="seeker_running">O Seeker está rodando</string>
+    <string name="seeker_running">O Noiser está rodando</string>
     <string name="seeker_running_content">
-        O Seeker está sendo executado em segundo plano
+        O Noiser está sendo executado em segundo plano
     </string>
 
     <string name="yes">Sim</string>
@@ -649,7 +649,7 @@
         Deve estar logado para conceder privilégios
     </string>
 
-    <string name="about_body">Seeker é um cliente Soulseek gratuito e de código aberto para Android. Ele nunca terá anúncios ou recursos pagos.</string>
+    <string name="about_body">Noiser é um cliente Soulseek gratuito e de código aberto para Android. Ele nunca terá anúncios ou recursos pagos.</string>
     <string name="must_be_logged_in_to_get_dir_contents">
         Deve estar logado para obter o conteúdo do diretório
     </string>
@@ -970,7 +970,7 @@
 
     <string name="ExportClientData">Exportar dados do Seeker</string>
     <string name="successfully_exported">
-        Os dados do Seeker foram exportados com sucesso.
+        Os dados do Noiser foram exportados com sucesso.
     </string>
 
     <string name="ForceFilesystemPermission">
@@ -1001,7 +1001,7 @@
         Senha atualizada com sucesso
     </string>
     <string name="error_dialog_content">
-        O Seeker encontrou um problema.  \n\nPor favor, considere enviar um relatório ao desenvolvedor.  \n\nQualquer informação sobre as etapas/condições que levaram ao problema será muito apreciada.
+        O Noiser encontrou um problema.  \n\nPor favor, considere enviar um relatório ao desenvolvedor.  \n\nQualquer informação sobre as etapas/condições que levaram ao problema será muito apreciada.
     </string>
     <string name="section_downloads">Downloads</string>
     <string name="section_search">Search</string>

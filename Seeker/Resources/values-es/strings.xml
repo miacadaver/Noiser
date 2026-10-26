@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Seeker</string>
+    <string name="app_name">Noiser</string>
     <string name="com.google.firebase.crashlytics.mapping_file_id">1.0</string>
     <string name="home_tab">Inicio</string>
     <string name="transfer_tab">Transferencias</string>
@@ -26,7 +26,7 @@
     <string name="search_user_">Buscar usuario {0}</string>
     <string name="wishlist_search">Buscar lista de deseos</string>
     <string name="no_account">¿No tienes cuenta? Simplemente ingresa un nombre de usuario único y crearemos una para ti</string>
-    <string name="keep_alive_service_subtitle">Permite a Seeker responder a las solicitudes de búsqueda (compartir), recibir mensajes de chat y ejecutar búsquedas de lista de deseos en segundo plano</string>
+    <string name="keep_alive_service_subtitle">Permite a Noiser responder a las solicitudes de búsqueda (compartir), recibir mensajes de chat y ejecutar búsquedas de lista de deseos en segundo plano</string>
     <string name="privileges_more_info">Los privilegios permiten apoyar al creador de Soulseek (Nir) y al servidor central del que depende esta aplicación. \n\nTambién permite una posicion privilegiada en la cola de descargas. \n\nNota: cualquier donación no va al creador de este cliente no oficial de android, Seeker. Actualmente no acepto donaciones.</string>
     <string name="no_messages">No hay mensajes. Pulsa \"+\" para comenzar.</string>
     <string name="no_messages_subtitle">Los mensajes de los usuarios aparecerán aquí</string>
@@ -474,8 +474,8 @@
     <!--Notification-->
     <string name="download_in_progress">Descargas en progreso</string>
     <string name="transfers_in_progress">Transferencia en curso...</string>
-    <string name="seeker_running">Seeker está en ejecución</string>
-    <string name="seeker_running_content">Seeker se está ejecutando en segundo plano</string>
+    <string name="seeker_running">Noiser está en ejecución</string>
+    <string name="seeker_running_content">Noiser se está ejecutando en segundo plano</string>
     <!--Privileges-->
     <string name="yes">Si</string>
     <string name="seconds_left">{0} segundos</string>
@@ -534,7 +534,7 @@
     <string name="subfolders_warning_queue_paused">Esta carpeta contiene sub carpetas, ¿Le gustaría agregar a la cola todos los archivos en esas sub carpetas también ({0}) o solo los archivos de la carpeta actual ({1})?</string>
     <string name="current_folder_only">Sólo la carpeta actual</string>
     <string name="must_be_logged_in_to_give_privileges">Debe iniciar sesión para dar permisos</string>
-    <string name="about_body">Seeker es un cliente de Soulseek gratuito y de código abierto para Android. Nunca tendrá anuncios ni características de pago.</string>
+    <string name="about_body">Noiser es un cliente de Soulseek gratuito y de código abierto para Android. Nunca tendrá anuncios ni características de pago.</string>
     <string name="about_link_source_title">Código fuente</string>
     <string name="about_link_translate_title">Ayuda a traducir</string>
     <string name="must_be_logged_in_to_get_dir_contents">Debe iniciar sesión para obtener contenido del directorio</string>
@@ -724,7 +724,7 @@
     <string name="DeleteSelected">Borrar seleccionados</string>
     <string name="deleted_selected_message_histories">Eliminadas {0} conversación(es)</string>
     <string name="ExportClientData">Exportar datos de cliente</string>
-    <string name="successfully_exported">Datos del cliente Seeker exportados con éxito</string>
+    <string name="successfully_exported">Datos del cliente Noiser exportados con éxito</string>
     <string name="ForceFilesystemPermission">Forzar permisos del sistema de archivos</string>
     <string name="permission_already_successfully_granted">El permiso ha sido concedido exitosamente</string>
     <string name="permission_successfully_granted">Permiso concedido exitosamente</string>
@@ -737,7 +737,7 @@
     <string name="must_be_logged_in_to_change_password">Debes iniciar sesión para cambiar la contraseña</string>
     <string name="failed_to_change_password">No se pudo cambiar la contraseña</string>
     <string name="password_successfully_updated">Contraseña actualizada exitosamente</string>
-    <string name="error_dialog_content">Seeker encontró un problema. \n\nPor favor, considera enviar un reporte al desarrollador. \n\nCualquier información sobre las causas que desencadenaron este fallo será muy apreciada</string>
+    <string name="error_dialog_content">Noiser encontró un problema. \n\nPor favor, considera enviar un reporte al desarrollador. \n\nCualquier información sobre las causas que desencadenaron este fallo será muy apreciada</string>
     <string name="folder_request_user_returned_empty_response">El usuario devolvió una respuesta vacía para esta carpeta</string>
     <string name="just_now">ahora mismo</string>
     <!-- Modern settings screen -->

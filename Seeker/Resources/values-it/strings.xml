@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Seeker</string>
+    <string name="app_name">Noiser</string>
     <string name="com.google.firebase.crashlytics.mapping_file_id">1.0</string>
     <string name="home_tab">Home</string>
     <string name="transfer_tab">Trasferimenti</string>
@@ -366,8 +366,8 @@
     <!--Notification-->
     <string name="download_in_progress">Downloads in progress</string>
     <string name="transfers_in_progress">Transfers in progress...</string>
-    <string name="seeker_running">Seeker is running</string>
-    <string name="seeker_running_content">Seeker is currently running in background</string>
+    <string name="seeker_running">Noiser is running</string>
+    <string name="seeker_running_content">Noiser is currently running in background</string>
     <!--Privileges-->
     <string name="yes">Yes</string>
     <string name="seconds_left">{0} seconds</string>
@@ -420,7 +420,7 @@
     <string name="subfolders_warning_queue_paused">This folder contains subfolders, would you like to queue all files in those subfolders as well ({0}) or only the files in the current folder ({1})?</string>
     <string name="current_folder_only">Current folder only</string>
     <string name="must_be_logged_in_to_give_privileges">Must be logged in to give privileges</string>
-    <string name="about_body">Seeker is a free and open source Soulseek client for Android. It will never have ads or paid features.</string>
+    <string name="about_body">Noiser is a free and open source Soulseek client for Android. It will never have ads or paid features.</string>
     <string name="must_be_logged_in_to_get_dir_contents">Must be logged in to get directory contents</string>
     <string name="note">Nota</string>
     <string name="removed_user_from_ignored_list">Removed user \"{0}\" from ignore list</string>
@@ -602,7 +602,7 @@
     <string name="HideSpeed">Nascondi velocità</string>
     <string name="Num_Selected">{0} selezionato</string>
     <string name="ExportClientData">Esporta dati del client</string>
-    <string name="successfully_exported">Successfully exported Seeker client data.</string>
+    <string name="successfully_exported">Successfully exported Noiser client data.</string>
     <string name="ForceFilesystemPermission">Force filesystem permissions</string>
     <string name="permission_already_successfully_granted">Permission has already been succesfully granted</string>
     <string name="permission_successfully_granted">Permission succesfully granted</string>
@@ -615,7 +615,7 @@
     <string name="must_be_logged_in_to_change_password">Devi aver effettuato l\'accesso per cambiare password</string>
     <string name="failed_to_change_password">Impossibile cambiare password</string>
     <string name="password_successfully_updated">Password aggiornata con successo</string>
-    <string name="error_dialog_content">Seeker has encountered an issue.  \n\nPlease consider sending a report to the developer.  \n\nAny information about the steps / conditions leading up to the issue is much appreciated.</string>
+    <string name="error_dialog_content">Noiser has encountered an issue.  \n\nPlease consider sending a report to the developer.  \n\nAny information about the steps / conditions leading up to the issue is much appreciated.</string>
     <string name="theme_purple">Viola</string>
     <string name="theme_grey">Grigio</string>
     <string name="theme_blue">Blu</string>

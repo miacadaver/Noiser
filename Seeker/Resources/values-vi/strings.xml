@@ -24,7 +24,7 @@
 	<string name="search_user_">Tìm người dùng {0}</string>
 	<string name="wishlist_search">Tìm danh sách ước</string>
 	<string name="no_account">Chưa có tài khoản? Chỉ cần nhập một tên người dùng chưa được sử dụng và tài khoản sẽ được tạo cho bạn.</string>
-	<string name="keep_alive_service_subtitle">Cho phép Seeker phản hồi yêu cầu tìm kiếm (chia sẻ), nhận tin nhắn trò chuyện, và chạy tìm kiếm danh sách ước khi ở chế độ nền</string>
+	<string name="keep_alive_service_subtitle">Cho phép Noiser phản hồi yêu cầu tìm kiếm (chia sẻ), nhận tin nhắn trò chuyện, và chạy tìm kiếm danh sách ước khi ở chế độ nền</string>
 	<string name="privileges_more_info">Đặc quyền giúp hỗ trợ Mạng Soulseek và máy chủ trung tâm mà ứng dụng này phụ thuộc vào.\n\nChúng cũng cho phép bạn được ưu tiên trước những người dùng không có đặc quyền trong hàng chờ tải xuống.\n\nLưu ý: các khoản quyên góp không chuyển đến người tạo ra ứng dụng Android không chính thức này (Seeker). Tôi hiện không nhận quyên góp.</string>
 	<string name="no_messages">Không có tin nhắn</string>
 	<string name="no_messages_subtitle">Tin nhắn từ người dùng sẽ xuất hiện ở đây</string>
@@ -112,7 +112,7 @@
 	<string name="create_chatroom_private">Đặt làm riêng tư</string>
 	<string name="search_here">Tìm kiếm tại đây</string>
 	<string name="seeker_needs_dl_dir">Chọn vị trí tải xuống</string>
-	<string name="seeker_needs_dl_dir_content">Chọn một thư mục nơi Seeker sẽ lưu các tệp đã tải xuống</string>
+	<string name="seeker_needs_dl_dir_content">Chọn một thư mục nơi Noiser sẽ lưu các tệp đã tải xuống</string>
 	<string name="seeker_needs_dl_dir_error">Cần có một thư mục tải xuống để lưu tệp</string>
 	<string name="seeker_needs_dl_dir_choose_settings">Vui lòng đặt thư mục tải xuống trong Cài đặt.</string>
 	<string name="seeker_cannot_access_files">Không thể truy cập hệ thống tệp. Bạn phải chọn một thư mục tải xuống, ở trang đăng nhập hoặc trong cài đặt.</string>
@@ -478,8 +478,8 @@
 	<!--Notification-->
 	<string name="download_in_progress">Đang tải xuống</string>
 	<string name="transfers_in_progress">Đang truyền tệp...</string>
-	<string name="seeker_running">Seeker đang chạy</string>
-	<string name="seeker_running_content">Seeker hiện đang chạy ở chế độ nền</string>
+	<string name="seeker_running">Noiser đang chạy</string>
+	<string name="seeker_running_content">Noiser hiện đang chạy ở chế độ nền</string>
 	<!--Privileges-->
 	<string name="yes">Có</string>
 	<string name="seconds_left">{0} giây</string>
@@ -538,7 +538,7 @@
 	<string name="subfolders_warning_queue_paused">Thư mục này chứa các thư mục con, bạn có muốn xếp hàng chờ tất cả tệp trong các thư mục con đó luôn ({0}) hay chỉ xếp hàng chờ các tệp trong thư mục hiện tại ({1})?</string>
 	<string name="current_folder_only">Chỉ thư mục hiện tại</string>
 	<string name="must_be_logged_in_to_give_privileges">Phải đăng nhập để tặng đặc quyền</string>
-	<string name="about_body">Seeker là một ứng dụng khách Soulseek miễn phí và mã nguồn mở dành cho Android. Ứng dụng sẽ không bao giờ có quảng cáo hay tính năng trả phí.</string>
+	<string name="about_body">Noiser là một ứng dụng khách Soulseek miễn phí và mã nguồn mở dành cho Android. Ứng dụng sẽ không bao giờ có quảng cáo hay tính năng trả phí.</string>
 	<string name="about_link_source_title">Mã nguồn</string>
 	<string name="about_link_translate_title">Giúp dịch thuật</string>
 	<string name="must_be_logged_in_to_get_dir_contents">Phải đăng nhập để lấy nội dung thư mục</string>
@@ -745,7 +745,7 @@
 	<string name="DeleteSelected">Xóa mục đã chọn</string>
 	<string name="deleted_selected_message_histories">Đã xóa {0} cuộc trò chuyện</string>
 	<string name="ExportClientData">Xuất dữ liệu ứng dụng khách</string>
-	<string name="successfully_exported">Đã xuất dữ liệu ứng dụng khách Seeker thành công.</string>
+	<string name="successfully_exported">Đã xuất dữ liệu ứng dụng khách Noiser thành công.</string>
 	<string name="ForceFilesystemPermission">Buộc cấp quyền hệ thống tệp</string>
 	<string name="permission_already_successfully_granted">Quyền đã được cấp thành công từ trước</string>
 	<string name="permission_successfully_granted">Cấp quyền thành công</string>
@@ -757,7 +757,7 @@
 	<string name="must_be_logged_in_to_change_password">Phải đăng nhập để đổi mật khẩu</string>
 	<string name="failed_to_change_password">Đổi mật khẩu thất bại</string>
 	<string name="password_successfully_updated">Cập nhật mật khẩu thành công</string>
-	<string name="error_dialog_content">Seeker đã gặp sự cố.  \n\nVui lòng cân nhắc gửi báo cáo cho nhà phát triển.  \n\nMọi thông tin về các bước / điều kiện dẫn đến sự cố đều rất được trân trọng.</string>
+	<string name="error_dialog_content">Noiser đã gặp sự cố.  \n\nVui lòng cân nhắc gửi báo cáo cho nhà phát triển.  \n\nMọi thông tin về các bước / điều kiện dẫn đến sự cố đều rất được trân trọng.</string>
 	<string name="folder_request_user_returned_empty_response">Người dùng trả về phản hồi trống cho thư mục này</string>
 	<string name="just_now">vừa xong</string>
 	<!-- Modern settings screen -->

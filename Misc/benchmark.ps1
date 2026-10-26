@@ -19,7 +19,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$pkg = 'com.companyname.andriodapp1'
+$pkg = 'com.companyname.andriodapp1.rollback'
 $act = "$pkg/crc646350f44cde9e1cf7.MainActivity"
 
 # Animation scales inflate TotalTime. Pin them off.

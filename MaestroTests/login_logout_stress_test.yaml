@@ -1,4 +1,4 @@
-appId: com.companyname.andriodapp1
+appId: com.companyname.andriodapp1.rollback
 ---
 - launchApp
 - runFlow: ./common/optional_set_download_dir.yaml

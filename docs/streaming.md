@@ -136,7 +136,7 @@ Current verification results are recorded in [background playback validation](ba
 
 Run these against a real Android device and an MP3 that the test peer is authorized to share:
 
-1. Install version `3.11.2-stream.5`. Sign in, open a search result, and tap Play beside an unlocked MP3.
+1. Install the current Noiser development APK. Sign in, open a search result, and tap Play beside an unlocked MP3.
    Repeat from the Browse tab, using both the row button and the file menu. Scroll through mixed MP3,
    non-MP3, and locked search results; confirm Play stays with the correct file. Select tracks for regular
    download and use Browse batch selection to confirm those interactions still work.
@@ -165,7 +165,7 @@ generates arbitrary bytes and therefore is not a valid MP3 decoding fixture.
 
 Pushes to `main`, pull requests targeting `main`, and manual runs trigger APK builds and unit tests.
 The Android workflow uses JDK 21, the pinned .NET SDK/workload, and the required Android SDK components.
-It builds the same standalone Debug configuration validated locally and uploads a `noiser-debug-apk`
+It builds the same standalone Debug configuration validated locally and uploads a `Noiser-apk`
 artifact, retained for 14 days. Download it from the successful run's Artifacts section and unzip it.
 
 The unit-test workflow follows upstream's Release configuration and `TestCategory!=RealData` filter.

@@ -39,7 +39,7 @@
     <string name="stream_seek_unknown">Played %1$s · Seekable to %2$s · Duration unknown</string>
     <string name="stream_file_limit">Streaming supports MP3 files up to 256 MB with a known size.</string>
     <string name="stream_download_conflict">This file is streaming. Stop playback before downloading it.</string>
-    <string name="app_name">Seeker</string>
+    <string name="app_name">Noiser</string>
     <string name="com.google.firebase.crashlytics.mapping_file_id">1.0</string>
 
     <string name="home_tab">Home</string>
@@ -72,7 +72,7 @@
     <string name="wishlist_search">Wishlist search</string>
 
     <string name="no_account">Don\'t have an account?  Simply enter a unique username and one will be created for you.</string>
-    <string name="keep_alive_service_subtitle">Allows Seeker respond to search requests (share), receive chat messages, and run wishlist searches while in background</string> 
+    <string name="keep_alive_service_subtitle">Allows Noiser respond to search requests (share), receive chat messages, and run wishlist searches while in background</string>
 		
     <string name="privileges_more_info">Privileges help support the Soulseek Network and the central server this app depends on.\n\nThey also let you skip ahead of non-privileged users in download queues.\n\nNote: donations do not go to the creator of this unofficial Android client (Seeker). I do not currently accept donations.</string>
 
@@ -170,7 +170,7 @@
     <string name="search_here">Search here</string>
 
     <string name="seeker_needs_dl_dir">Choose download location</string>
-    <string name="seeker_needs_dl_dir_content">Select a folder where Seeker will save downloaded files</string>
+    <string name="seeker_needs_dl_dir_content">Select a folder where Noiser will save downloaded files</string>
     <string name="seeker_needs_dl_dir_error">A download folder is required to save files</string>
     <string name="seeker_needs_dl_dir_choose_settings">Please set a download directory in Settings.</string>
     <string name="seeker_cannot_access_files">Cannot access filesystem.  You must select a download directory, either in the login page or in settings.</string>
@@ -596,8 +596,8 @@
     <!--Notification-->
     <string name="download_in_progress">Downloads in progress</string>
     <string name="transfers_in_progress">Transfers in progress...</string>
-    <string name="seeker_running">Seeker is running</string>
-    <string name="seeker_running_content">Seeker is currently running in background</string>
+    <string name="seeker_running">Noiser is running</string>
+    <string name="seeker_running_content">Noiser is currently running in background</string>
 
     <!--Privileges-->
     <string name="yes">Yes</string>
@@ -675,7 +675,7 @@
     <string name="current_folder_only">Current folder only</string>
     <string name="must_be_logged_in_to_give_privileges">Must be logged in to give privileges</string>
 
-    <string name="about_body">Seeker is a free and open source Soulseek client for Android. It will never have ads or paid features.</string>
+    <string name="about_body">Noiser is a free and open source Soulseek client for Android, based on Seeker. It will never have ads or paid features.</string>
     <string name="about_link_source_title">Source code</string>
     <string name="about_link_translate_title">Help translate</string>
     <string name="must_be_logged_in_to_get_dir_contents">Must be logged in to get directory contents</string>
@@ -944,7 +944,7 @@
     <string name="deleted_selected_message_histories">Deleted {0} conversation(s)</string>
 
     <string name="ExportClientData">Export client data</string>
-    <string name="successfully_exported">Successfully exported Seeker client data.</string>
+    <string name="successfully_exported">Successfully exported Noiser client data.</string>
 
     <string name="ForceFilesystemPermission">Force filesystem permissions</string>
     <string name="permission_already_successfully_granted">Permission has already been successfully granted</string>
@@ -963,7 +963,7 @@
 
     <string name="failed_to_change_password">Failed to change password</string>
     <string name="password_successfully_updated">Password successfully updated</string>
-    <string name="error_dialog_content">Seeker has encountered an issue.  \n\nPlease consider sending a report to the developer.  \n\nAny information about the steps / conditions leading up to the issue is much appreciated.</string>
+    <string name="error_dialog_content">Noiser has encountered an issue.  \n\nPlease consider sending a report to the developer.  \n\nAny information about the steps / conditions leading up to the issue is much appreciated.</string>
 
     <string name="folder_request_user_returned_empty_response">User returned an empty response for this folder</string>
 	
