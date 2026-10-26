@@ -18,10 +18,13 @@ The matching [host-test run](https://github.com/miacadaver/Noiser/actions/runs/4
 
 The initial main build compiled but was withheld because the certificate parser recognized only older `Signer #1` output. Current Android build-tools use additional signature-scheme and SDK-range labels. The parser was extended to recognize those labels and repeated occurrences of the same certificate while rejecting a different app certificate in any reported scheme. Source-stamp certificates and public-key digests do not substitute for the app certificate. The successful final APK verification above confirms the corrected path.
 
-## Remaining acceptance checks
+## Independent-runner verification
 
-- Confirm the same APK certificate on a second fresh CI runner.
-- Install successive same-certificate builds on the physical phone and verify settings remain intact.
+[Repeat APK build 40382651882](https://github.com/miacadaver/Noiser/actions/runs/40382651882) passed for commit `6172eeea1afc09a26589da9b9dc4298e5993d089` on another fresh runner. Both completed builds restored the same key and verified the final APK against the exact public certificate above. The repeat [host-test run](https://github.com/miacadaver/Noiser/actions/runs/40382652000) also passed.
+
+## Remaining acceptance check
+
+Install successive same-certificate builds on the physical phone and verify settings remain intact. No physical device was available in this session.
 
 Older disposable-key APKs may need a one-time uninstall before adopting this identity. Export client data and preserve it outside app-private storage before uninstalling. See [signing setup, backup, and transition guidance](../development-signing.md).
 

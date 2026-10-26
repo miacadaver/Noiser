@@ -32,7 +32,7 @@ Reduce static activity references and split large playback-related classes incre
 - [ ] Check real external scrobblers, artwork, tag timing, and long-session battery use.
 - [ ] Capture current Noiser search, player, queue, and notification screenshots to replace the inherited/validation gallery.
 - [x] Configure persistent development signing with a pinned certificate and fail-closed APK verification.
-- [ ] Verify two successive APK builds use the same certificate.
+- [x] Verify two successive APK builds use the same certificate. See [CI evidence](docs/validation/2026-10-26-development-signing.md).
 - [ ] Verify a same-certificate update on the physical phone retains settings.
 
 **Done when:** device model, Android version, APK/commit, and pass/fail results are recorded, with regressions resolved or clearly documented.
