@@ -35,6 +35,8 @@
     </style>
 
     <style name="AppTheme.NoActionBar">
+        <item name="noiserNavigationActive">@color/noiserOnChrome</item>
+        <item name="noiserNavigationInactive">@color/noiserOnChrome</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar">false</item>
         <item name="windowActionBar">false</item>

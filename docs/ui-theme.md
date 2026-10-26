@@ -14,7 +14,7 @@ The existing theme IDs remain unchanged for saved-settings compatibility. The ol
 
 - [`noiser_palette.xml`](../Seeker/Resources/values/noiser_palette.xml): explicit light, dark, AMOLED, chrome, and accent colors.
 - [`themes.xml`](../Seeker/Resources/values/themes.xml): application and Material color roles, including tonal containers so components do not fall back to lavender surfaces.
-- [`check_noiser_theme.py`](../.github/scripts/check_noiser_theme.py): XML/reference validation and 39 contrast checks across the three Noiser themes, each requiring at least 4.5:1 for the tested text roles.
+- [`check_noiser_theme.py`](../.github/scripts/check_noiser_theme.py): XML/reference validation and 45 contrast checks across the three Noiser themes, each requiring at least 4.5:1 for the tested text roles.
 
 Run the resource checks without an Android SDK:
 

@@ -76,6 +76,8 @@ def main():
             ("colorOnSurfaceVariant", "colorSurfaceVariant"),
             ("mainTextColor", "colorSurface"),
             ("mainTextColor", "dialog_background"),
+            ("noiserNavigationActive", "whitePurpleForNavBar"),
+            ("noiserNavigationInactive", "mainPurple"),
         ):
             ratio = contrast(color(items[foreground], colors, items), color(items[background], colors, items))
             assert ratio >= 4.5, f"{name}: {foreground} on {background} is {ratio:.2f}:1 (needs 4.5:1)"

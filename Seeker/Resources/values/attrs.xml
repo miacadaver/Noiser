@@ -74,4 +74,6 @@
     <attr name="searchHeaderBackground" format="color" />
 
     <attr name="destructiveColor" format="color" />
+    <attr name="noiserNavigationActive" format="color" />
+    <attr name="noiserNavigationInactive" format="color" />
 </resources>
