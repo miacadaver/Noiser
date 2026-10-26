@@ -1,0 +1,13 @@
+Android emulator playback validation; generated silent MP3s; mocked peer transport.
+2026-10-26T04:02:34.2254343Z PASS: folder album remains in app display while loading
+2026-10-26T04:02:34.3893910Z PASS: current Android session album is empty before tags
+2026-10-26T04:02:34.5232177Z PASS: upcoming queue item does not publish a guessed album
+2026-10-26T04:02:37.6656673Z PASS: parsed album updates in-app metadata
+2026-10-26T04:02:37.6685478Z PASS: active queue metadata retains parsed album provenance
+2026-10-26T04:02:39.1630872Z PASS: untagged album keeps the in-app folder display
+2026-10-26T04:02:39.1640734Z PASS: missing album tag leaves native current album empty after parsing
+2026-10-26T04:02:39.1666597Z PASS: previous queue item retains its real tagged album
+2026-10-26T04:02:39.1687478Z PASS: duration updates do not publish the folder album
+2026-10-26T04:02:39.1688529Z PASS: no observed session update exposed the folder album
+2026-10-26T04:02:39.3523131Z PASS: test transfers stopped and buffers cleaned
+2026-10-26T04:02:39.3529843Z RESULT: 11 checks passed

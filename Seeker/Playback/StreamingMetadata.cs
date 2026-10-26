@@ -9,8 +9,9 @@ namespace Seeker.Playback
     {
         public static MediaMetadata BuildSessionMetadata(TrackMetadata track, byte[] thumbnail)
         {
+            // Android sees metadata before the initial playback wait; keep album guesses in the UI.
             var builder = new MediaMetadata.Builder().SetTitle(track.Title).SetArtist(track.Artist)
-                .SetAlbumTitle(track.Album).SetAlbumArtist(track.AlbumArtist);
+                .SetAlbumTitle(track.EmbeddedAlbum).SetAlbumArtist(track.AlbumArtist);
             if (track.TrackNumber.HasValue) builder.SetTrackNumber(Java.Lang.Integer.ValueOf(track.TrackNumber.Value));
             if (track.ReleaseYear.HasValue) builder.SetReleaseYear(Java.Lang.Integer.ValueOf(track.ReleaseYear.Value));
             if (track.DurationMilliseconds.HasValue) builder.SetDurationMs(Java.Lang.Long.ValueOf(track.DurationMilliseconds.Value));

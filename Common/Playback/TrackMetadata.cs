@@ -11,6 +11,8 @@ namespace Common.Playback
         public string Title { get; }
         public string? Artist { get; }
         public string? Album { get; }
+        // Album may be a display fallback. Only a parsed tag is suitable for external scrobblers.
+        public string? EmbeddedAlbum { get; }
         public string? AlbumArtist { get; }
         public int? TrackNumber { get; }
         public int? ReleaseYear { get; }
@@ -20,13 +22,14 @@ namespace Common.Playback
 
         internal TrackMetadata(string path, string filename, string title, string? artist, string? album,
             string? albumArtist = null, int? trackNumber = null, int? year = null,
-            long? duration = null, byte[]? artwork = null)
+            long? duration = null, byte[]? artwork = null, string? embeddedAlbum = null)
         {
             OriginalPath = path;
             OriginalFilename = filename;
             Title = title;
             Artist = artist;
             Album = album;
+            EmbeddedAlbum = embeddedAlbum;
             AlbumArtist = albumArtist;
             TrackNumber = trackNumber;
             ReleaseYear = year;
@@ -43,7 +46,8 @@ namespace Common.Playback
             values.ReleaseYear >= 1000 && values.ReleaseYear <= 9999 ? values.ReleaseYear : ReleaseYear,
             values.DurationMilliseconds > 0 ? values.DurationMilliseconds : DurationMilliseconds,
             values.ArtworkData?.Length > 0 && values.ArtworkData.Length <= MaximumArtworkBytes
-                ? values.ArtworkData : ArtworkData);
+                ? values.ArtworkData : ArtworkData,
+            embeddedAlbum: Clean(values.Album) ?? EmbeddedAlbum);
 
         internal static string? Clean(string? value)
         {

@@ -51,14 +51,14 @@ namespace Common.Playback
             if (metadata == null) throw new ArgumentNullException(nameof(metadata));
             Metadata = new TrackMetadata(metadata.OriginalPath, Metadata.OriginalFilename, metadata.Title,
                 metadata.Artist, metadata.Album, metadata.AlbumArtist, metadata.TrackNumber,
-                metadata.ReleaseYear, metadata.DurationMilliseconds);
+                metadata.ReleaseYear, metadata.DurationMilliseconds, embeddedAlbum: metadata.EmbeddedAlbum);
         }
 
         /// <summary>Queue entries deliberately retain metadata without artwork bytes.</summary>
         public PlaybackQueueEntry Copy() => new PlaybackQueueEntry(Username, RemotePath, Size,
             new TrackMetadata(Metadata.OriginalPath, Metadata.OriginalFilename, Metadata.Title,
                 Metadata.Artist, Metadata.Album, Metadata.AlbumArtist, Metadata.TrackNumber,
-                Metadata.ReleaseYear, Metadata.DurationMilliseconds), DiscNumber, Id,
+                Metadata.ReleaseYear, Metadata.DurationMilliseconds, embeddedAlbum: Metadata.EmbeddedAlbum), DiscNumber, Id,
             WasFilenameLatin1Decoded, WasFolderLatin1Decoded);
     }
 

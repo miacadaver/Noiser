@@ -29,6 +29,12 @@ MP3 audio follows its leading tags; a large leading tag must arrive or be skippe
 track number, release year, optional duration in milliseconds, and bounded encoded artwork.
 It is independent of Android UI/player classes and supplies the current MediaSession integration.
 Snapshots merge valid embedded fields over fallback fields. Missing/invalid values do not erase good data.
+The display `Album` may come from a folder or filename; `EmbeddedAlbum` records only a valid parsed
+album tag. Android's media session and notification use `EmbeddedAlbum` for current and queued tracks.
+Their album field stays unset while tags load and for files without an album tag. Folder/filename
+guesses remain available inside Noiser's UI. Duration-only updates and queue copies preserve this distinction.
+See [album publication regression checks](validation/2026-10-26-album-metadata.md) for delayed-tag and
+missing-album validation on Android.
 
 Media3 maps TIT2, TPE1, TALB, TPE2, TRCK, TYER/TDRC/TDRL, and APIC to its `MediaMetadata` fields.
 Release year takes precedence over recording year; the latter covers legacy TYER tags. Front cover

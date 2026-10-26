@@ -55,6 +55,9 @@ reads the original selected audio format's ID3 data on the existing stream; it m
 request. Missing fields retain the established conservative filename/folder fallback. Revision and
 track ownership checks reject late work from previous songs. Non-current entries use their stored
 metadata without artwork; only the active entry uses the current session metadata and artwork.
+Album is an exception to external fallback publication: the session and notification publish only
+the parsed album tag. Folder/filename album guesses are kept for the in-app display and never become
+session album metadata, including before tags arrive, after duration updates, or in upcoming queue entries.
 Each refresh takes one defensive queue snapshot and reuses it throughout timeline construction.
 
 Artwork decoding remains on a worker with Step 2's limits. The in-app cover is at most approximately
