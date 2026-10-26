@@ -51,6 +51,19 @@ namespace UnitTestCommon
         }
 
         [Test]
+        public void RapidQueueAppendRequestsAreDeliveredInFullAndOnce()
+        {
+            var mailbox = new PlaybackAppendMailbox<string>();
+            string first = mailbox.Publish("first");
+            string second = mailbox.Publish("second");
+            Assert.That(mailbox.TryTake(first, out var a), Is.True);
+            Assert.That(a, Is.EqualTo("first"));
+            Assert.That(mailbox.TryTake(second, out var b), Is.True);
+            Assert.That(b, Is.EqualTo("second"));
+            Assert.That(mailbox.TryTake(first, out _), Is.False);
+        }
+
+        [Test]
         public async Task ConcurrentDeliveryStartsAtMostOneRequest()
         {
             var mailbox = new PlaybackRequestMailbox<object>();

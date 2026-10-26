@@ -13,6 +13,8 @@ using MediaController = AndroidX.Media3.Session.MediaController;
 using Seeker.Helpers;
 using Soulseek;
 using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace Seeker.Playback
 {
@@ -30,6 +32,10 @@ namespace Seeker.Playback
         private IListenableFuture controllerFuture;
         private MediaController controller;
         private AndroidX.AppCompat.App.AlertDialog dialog;
+        private AndroidX.AppCompat.App.AlertDialog queueDialog;
+        private ListView queueList;
+        private QueueAdapter queueAdapter;
+        private string queueSignature;
         private ImageView artwork;
         private TextView artist;
         private TextView album;
@@ -38,6 +44,9 @@ namespace Seeker.Playback
         private TextView seekStatus;
         private SeekBar seekBar;
         private Button pause;
+        private Button previous;
+        private Button next;
+        private Button openQueue;
         private bool attached;
         private string pendingRequest;
         private bool trackingSeekBar;
@@ -77,6 +86,36 @@ namespace Seeker.Playback
             });
         }
 
+        public static void ShowQueue(FragmentActivity activity,
+            IEnumerable<PlaybackQueueEntry> entries, string selectedEntryId)
+        {
+            activity.RunOnUiThread(() =>
+            {
+                string request = StreamingPlaybackService.RequestPlayQueue(activity, entries, selectedEntryId);
+                if (request == null) return;
+                if (activity is MainActivity main)
+                {
+                    var ui = main.EnsurePlaybackUi();
+                    ui.pendingRequest = request;
+                    ui.Connect();
+                    ui.ShowCurrent();
+                }
+                else activity.StartActivity(new Intent(activity, typeof(MainActivity))
+                    .SetFlags(ActivityFlags.SingleTop | ActivityFlags.ClearTop)
+                    .PutExtra(StreamingPlaybackService.OpenPlayerExtra, true));
+            });
+        }
+
+        public static void AddToQueue(FragmentActivity activity, string username, FullFileInfo file, bool playNext)
+        {
+            activity.RunOnUiThread(() => StreamingPlaybackService.RequestAppend(activity, ToQueueEntry(username, file), playNext));
+        }
+
+        private static PlaybackQueueEntry ToQueueEntry(string username, FullFileInfo file) =>
+            new PlaybackQueueEntry(username, file.FullFileName, file.Size,
+                wasFilenameLatin1Decoded: file.wasFilenameLatin1Decoded,
+                wasFolderLatin1Decoded: file.wasFolderLatin1Decoded);
+
         public static void CleanAbandonedCache(string cacheDirectory) => StreamingPlayback.CleanAbandonedCache(cacheDirectory);
 
         internal void Attach()
@@ -95,6 +134,10 @@ namespace Seeker.Playback
             handler.RemoveCallbacks(tick);
             dialog?.Dismiss();
             dialog = null;
+            queueDialog?.Dismiss();
+            queueDialog = null;
+            queueList = null;
+            queueAdapter = null;
             miniArtwork.SetImageResource(Resource.Drawable.stream_artwork_placeholder);
             mini.Visibility = ViewStates.Gone;
             if (controllerFuture != null) MediaController.ReleaseFuture(controllerFuture);
@@ -181,6 +224,12 @@ namespace Seeker.Playback
             };
             pause = view.FindViewById<Button>(Resource.Id.streamPause);
             pause.Click += (_, __) => TogglePause();
+            previous = view.FindViewById<Button>(Resource.Id.streamPrevious);
+            previous.Click += (_, __) => Controls?.SeekToPreviousMediaItem();
+            next = view.FindViewById<Button>(Resource.Id.streamNext);
+            next.Click += (_, __) => Controls?.SeekToNextMediaItem();
+            openQueue = view.FindViewById<Button>(Resource.Id.streamQueue);
+            openQueue.Click += (_, __) => ShowQueueDialog();
             var window = new Google.Android.Material.Dialog.MaterialAlertDialogBuilder(activity)
                 .SetTitle(Resource.String.stream_player)
                 .SetView(view)
@@ -220,6 +269,7 @@ namespace Seeker.Playback
             }
             if (snapshot != null) Connect();
             bool full = dialog?.IsShowing == true;
+            UpdateQueueDialog(service);
             if (snapshot == null && pendingRequest == null && controllerFuture != null)
             {
                 MediaController.ReleaseFuture(controllerFuture);
@@ -238,6 +288,7 @@ namespace Seeker.Playback
                     artist.Visibility = album.Visibility = ViewStates.Gone;
                     status.SetText(pendingRequest != null ? Resource.String.stream_connecting : Resource.String.stream_stopped);
                     pause.Enabled = false;
+                    previous.Enabled = next.Enabled = openQueue.Enabled = false;
                     seekBar.Enabled = false;
                     seekBar.Progress = 0;
                     seekBar.SecondaryProgress = 0;
@@ -268,6 +319,9 @@ namespace Seeker.Playback
                         status.Text = activity.GetString(Resource.String.stream_failed, snapshot.Error);
                     else status.SetText(StatusResource(snapshot.Phase));
                     pause.Enabled = snapshot.Phase != PlaybackPhase.Error && Controls != null;
+                    previous.Enabled = Controls != null;
+                    next.Enabled = service?.Queue.HasNext == true && Controls != null;
+                    openQueue.Enabled = service?.Queue.Entries.Count > 0;
                     pause.SetText(snapshot.ShowPause ? Resource.String.stream_pause : Resource.String.stream_resume);
                     long seconds = Math.Max(0, snapshot.Position) / 1000;
                     long percent = snapshot.Size > 0 ? Math.Min(100, snapshot.Received * 100 / snapshot.Size) : 0;
@@ -290,6 +344,82 @@ namespace Seeker.Playback
             }
             // Position refresh exists only while this Activity is visible, never as a background poll.
             if (snapshot != null || pendingRequest != null) handler.PostDelayed(tick, 250);
+        }
+
+        private void ShowQueueDialog()
+        {
+            var service = StreamingPlaybackService.Current;
+            if (!attached || service == null || service.Queue.Entries.Count == 0) return;
+            queueRows = service.Queue.Entries.ToArray();
+            queueSignature = null;
+            queueAdapter = new QueueAdapter(activity, queueRows, service.Queue.Current?.Id);
+            queueList = new ListView(activity) { Adapter = queueAdapter };
+            queueList.ItemClick += (_, args) =>
+            {
+                // Use the stable ID from the row snapshot, never an index into a changed queue.
+                if (args.Position < 0 || args.Position >= queueRows.Length) return;
+                StreamingPlaybackService.Current?.SelectQueueEntry(queueRows[args.Position].Id);
+                queueDialog?.Dismiss();
+            };
+            queueList.ItemLongClick += (_, args) =>
+            {
+                if (args.Position < 0 || args.Position >= queueRows.Length) return;
+                var id = queueRows[args.Position].Id;
+                var options = new[] { activity.GetString(Resource.String.stream_play), activity.GetString(Resource.String.stream_remove) };
+                new Google.Android.Material.Dialog.MaterialAlertDialogBuilder(activity)
+                    .SetItems(options, (_, choice) =>
+                    {
+                        var current = StreamingPlaybackService.Current;
+                        if (choice.Which == 0) current?.SelectQueueEntry(id);
+                        else current?.RemoveQueueEntry(id);
+                    }).Show();
+            };
+            queueDialog = new Google.Android.Material.Dialog.MaterialAlertDialogBuilder(activity)
+                .SetTitle(Resource.String.stream_queue).SetView(queueList)
+                .SetNeutralButton(Resource.String.stream_queue_clear, (_, __) =>
+                {
+                    StreamingPlaybackService.Current?.ClearQueue();
+                    queueDialog?.Dismiss();
+                })
+                .SetNegativeButton(Resource.String.close, (_, __) => { }).Show();
+            queueDialog.DismissEvent += (_, __) => { queueDialog = null; queueList = null; queueAdapter = null; queueRows = Array.Empty<PlaybackQueueEntry>(); queueSignature = null; };
+            UpdateQueueDialog(service);
+        }
+
+        private PlaybackQueueEntry[] queueRows = Array.Empty<PlaybackQueueEntry>();
+
+        private void UpdateQueueDialog(StreamingPlaybackService service)
+        {
+            if (queueDialog?.IsShowing != true || queueList == null || activity.IsFinishing || activity.IsDestroyed) return;
+            var rows = service?.Queue.Entries.ToArray() ?? Array.Empty<PlaybackQueueEntry>();
+            string currentId = service?.Queue.Current?.Id;
+            string signature = string.Join("\u001f", rows.Select(entry => string.Join("\u001e",
+                new[] { entry.Id, entry.Metadata.Title, entry.Metadata.Artist, entry.State.ToString(), entry.Error ?? string.Empty })))
+                + "\u001d" + currentId;
+            if (signature == queueSignature) return;
+            queueSignature = signature;
+            queueRows = rows;
+            queueAdapter = new QueueAdapter(activity, queueRows, currentId);
+            queueList.Adapter = queueAdapter;
+        }
+
+        private sealed class QueueAdapter : ArrayAdapter<PlaybackQueueEntry>
+        {
+            private readonly string currentId;
+            public QueueAdapter(Context context, PlaybackQueueEntry[] entries, string currentId)
+                : base(context, Android.Resource.Layout.SimpleListItem1, entries) { this.currentId = currentId; }
+            public override View GetView(int position, View convertView, ViewGroup parent)
+            {
+                var view = (TextView)base.GetView(position, convertView, parent);
+                var entry = GetItem(position);
+                string prefix = entry.Id == currentId ? "▶  " : "";
+                string artist = string.IsNullOrWhiteSpace(entry.Metadata.Artist) ? "" : " · " + entry.Metadata.Artist;
+                string error = entry.State == PlaybackQueueEntryState.Failed && !string.IsNullOrWhiteSpace(entry.Error)
+                    ? "\n" + Context.GetString(Resource.String.stream_failed, entry.Error) : "";
+                view.Text = prefix + entry.Metadata.Title + artist + error;
+                view.SetPadding(24, 16, 24, 16);
+                return view;
+            }
         }
 
         private void HandleUserSeekProgress(int progressValue)

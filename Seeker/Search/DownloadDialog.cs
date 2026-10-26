@@ -228,6 +228,7 @@ namespace Seeker
             this.customAdapter = new DownloadCustomAdapter(SeekerState.MainActivityRef, adapterList);
             this.customAdapter.Owner = this;
             this.customAdapter.PlayFile = PlayFile;
+            this.customAdapter.QueueFile = QueueFile;
             listView.Adapter = (customAdapter);
         }
 
@@ -236,6 +237,13 @@ namespace Seeker
             var streamFile = BrowseUtils.GetFullFileInfos(new[] { file })[0];
             string streamUsername = SearchResponse.Username;
             SessionService.Instance.RunWithReconnect(() => Playback.StreamingPlaybackController.Show(SeekerState.ActiveActivityRef, streamUsername, streamFile));
+        }
+
+        private void QueueFile(File file, bool playNext)
+        {
+            var streamFile = BrowseUtils.GetFullFileInfos(new[] { file })[0];
+            SessionService.Instance.RunWithReconnect(() => Playback.StreamingPlaybackController.AddToQueue(
+                SeekerState.ActiveActivityRef, SearchResponse.Username, streamFile, playNext));
         }
 
         private void UpdateSubHeader()
@@ -639,6 +647,7 @@ namespace Seeker
         public List<int> SelectedPositions = new List<int>();
         public AndroidX.Fragment.App.DialogFragment Owner = null;
         public Action<File> PlayFile;
+        public Action<File, bool> QueueFile;
         public DownloadCustomAdapter(Context c, List<FileLockedUnlockedWrapper> items) : base(c, 0, items)
         {
         }
@@ -650,7 +659,7 @@ namespace Seeker
             {
                 itemView = DownloadItemView.Create(parent);
             }
-            itemView.setItem(GetItem(position), PlayFile);
+            itemView.setItem(GetItem(position), PlayFile, QueueFile);
 
             if (SelectedPositions.Contains(position))
             {
@@ -680,6 +689,7 @@ namespace Seeker
         private Button playButton;
         private File file;
         private Action<File> playFile;
+        private Action<File, bool> queueFile;
         public DownloadItemView(Context context) : base(context)
         {
             LayoutInflater.From(context).Inflate(Resource.Layout.download_row, this, true);
@@ -701,12 +711,14 @@ namespace Seeker
             viewAttributes = FindViewById<TextView>(Resource.Id.textView3);
             playButton = FindViewById<Button>(Resource.Id.streamPlayButton);
             playButton.Click += (_, __) => playFile?.Invoke(file);
+            SetOnLongClickListener(new QueueActions(this));
         }
 
-        public void setItem(FileLockedUnlockedWrapper wrapper, Action<File> playFile)
+        public void setItem(FileLockedUnlockedWrapper wrapper, Action<File> playFile, Action<File, bool> queueFile)
         {
             file = wrapper.File;
             this.playFile = playFile;
+            this.queueFile = queueFile;
             playButton.Visibility = !wrapper.IsLocked && playFile != null
                 && file.Filename.EndsWith(".mp3", StringComparison.OrdinalIgnoreCase)
                 ? ViewStates.Visible : ViewStates.Gone;
@@ -719,6 +731,20 @@ namespace Seeker
                 viewFilename.Text = SimpleHelpers.GetFileNameFromFile(wrapper.File.Filename).ToString();
             }
             viewAttributes.Text = SimpleHelpers.GetSizeLengthAttrString(wrapper.File);
+        }
+
+        private sealed class QueueActions : Java.Lang.Object, View.IOnLongClickListener
+        {
+            private readonly DownloadItemView owner;
+            public QueueActions(DownloadItemView owner) { this.owner = owner; }
+            public bool OnLongClick(View view)
+            {
+                if (owner.queueFile == null || owner.playButton.Visibility != ViewStates.Visible) return false;
+                var options = new[] { owner.Context.GetString(Resource.String.stream_play_next), owner.Context.GetString(Resource.String.stream_add_queue) };
+                new Google.Android.Material.Dialog.MaterialAlertDialogBuilder(owner.Context)
+                    .SetItems(options, (_, choice) => owner.queueFile?.Invoke(owner.file, choice.Which == 0)).Show();
+                return true;
+            }
         }
     }
 }

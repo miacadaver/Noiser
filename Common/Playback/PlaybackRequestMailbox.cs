@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace Common.Playback
 {
@@ -30,6 +31,35 @@ namespace Common.Playback
                 request = null;
                 key = null;
                 return true;
+            }
+        }
+    }
+
+    /// <summary>FIFO mailbox for independent queue additions; unlike replacement requests none supersede another.</summary>
+    public sealed class PlaybackAppendMailbox<T> where T : class
+    {
+        private readonly object sync = new object();
+        private readonly Dictionary<string, T> requests = new Dictionary<string, T>(StringComparer.Ordinal);
+
+        public string Publish(T value)
+        {
+            if (value == null) throw new ArgumentNullException(nameof(value));
+            lock (sync)
+            {
+                string key = Guid.NewGuid().ToString("N");
+                requests.Add(key, value);
+                return key;
+            }
+        }
+
+        public bool TryTake(string key, out T value)
+        {
+            lock (sync)
+            {
+                if (key != null && requests.TryGetValue(key, out value))
+                { requests.Remove(key); return true; }
+                value = null;
+                return false;
             }
         }
     }

@@ -22,6 +22,15 @@
         android:contentDescription="@string/stream_seek" />
     <TextView android:id="@+id/streamSeekStatus" android:layout_width="match_parent"
         android:layout_height="wrap_content" android:gravity="center_horizontal" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="8dp" android:gravity="center" android:orientation="horizontal">
+        <Button android:id="@+id/streamPrevious" android:layout_width="0dp"
+            android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/stream_previous" />
+        <Button android:id="@+id/streamNext" android:layout_width="0dp"
+            android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/stream_next" />
+        <Button android:id="@+id/streamQueue" android:layout_width="0dp"
+            android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/stream_queue" />
+    </LinearLayout>
     <Button android:id="@+id/streamPause" android:layout_width="match_parent"
         android:layout_height="wrap_content" android:layout_marginTop="12dp"
         android:text="@string/stream_pause" android:enabled="false" />

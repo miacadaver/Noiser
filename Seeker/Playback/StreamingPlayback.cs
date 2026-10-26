@@ -36,12 +36,15 @@ namespace Seeker.Playback
         private bool stopped;
         private volatile bool readableLocalFile;
         private int metadataRevision;
+        private readonly TaskCompletionSource<bool> initialMetadataReady =
+            new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         private AndroidX.Media3.Common.Metadata lastId3;
         private volatile TransferStates transferState;
         private volatile bool receiving;
         private SeekRangeSnapshot seekRange = new SeekRangeSnapshot(0, -1, false);
 
         public string Id { get; }
+        public string QueueEntryId { get; }
         public string Username { get; }
         public FullFileInfo FileInfo { get; }
         public TrackMetadata Metadata { get; private set; }
@@ -55,6 +58,17 @@ namespace Seeker.Playback
         public bool HasBytes => buffer != null ? buffer.AvailableLength > 0 : readableLocalFile;
         public bool IsQueued => transferState.HasFlag(TransferStates.Queued);
         public bool IsReceiving => receiving;
+
+        /// <summary>
+        /// Completes when the first parsed track metadata has reached the session, or the caller's
+        /// timeout expires. Playback start waits for this briefly so external scrobblers never see
+        /// the filename fallback as the track that started playing.
+        /// </summary>
+        public async Task WaitForInitialMetadataAsync(TimeSpan timeout)
+        {
+            if (initialMetadataReady.Task.IsCompleted) return;
+            await Task.WhenAny(initialMetadataReady.Task, Task.Delay(timeout)).ConfigureAwait(false);
+        }
         public SeekRangeSnapshot SeekRange
         {
             get
@@ -90,19 +104,20 @@ namespace Seeker.Playback
         }
 
         public StreamingPlayback(StreamingPlaybackService owner, IExoPlayer player, string id,
-            string username, FullFileInfo file, Task predecessor)
+            string queueEntryId, string username, FullFileInfo file, Task predecessor)
         {
             this.owner = owner;
             this.player = player;
             this.predecessor = predecessor;
             Id = id;
+            QueueEntryId = queueEntryId;
             Username = username;
             FileInfo = file;
             Metadata = TrackMetadataFallback.FromPath(file.FullFileName);
             SessionMetadata = StreamingMetadata.BuildSessionMetadata(Metadata, null);
         }
 
-        public void Start()
+        public void Start(bool playWhenReady = true)
         {
             try
             {
@@ -137,7 +152,8 @@ namespace Seeker.Playback
                 // The session may still cache the previous (or empty) track's commands.
                 // Expose the new track before Play checks whether transport is available.
                 owner.SessionPlayer.Refresh();
-                owner.SessionPlayer.Play();
+                if (playWhenReady) owner.SessionPlayer.Play();
+                else owner.SessionPlayer.Pause();
             }
             catch (Exception exception) { Fail(exception.Message); }
         }
@@ -202,15 +218,27 @@ namespace Seeker.Playback
             if (stopped || resourcesClosed || !owner.IsCurrent(this)) return;
             if (player.CurrentMediaItem?.MediaId != Id || !JNIEnv.IsSameObject(tracks.Handle, player.CurrentTracks.Handle)) return;
             AndroidX.Media3.Common.Metadata id3 = null;
+            bool audioGroupFound = false;
             foreach (Java.Lang.Object entry in tracks.Groups)
             {
                 var group = entry.JavaCast<Tracks.Group>();
                 if (!group.IsSelected || group.Type != C.TrackTypeAudio) continue;
                 for (int i = 0; i < group.Length; i++)
-                    if (group.IsTrackSelected(i)) { id3 = group.GetTrackFormat(i).Metadata; break; }
+                {
+                    if (!group.IsTrackSelected(i)) continue;
+                    audioGroupFound = true;
+                    id3 = group.GetTrackFormat(i).Metadata;
+                    break;
+                }
                 if (id3 != null) break;
             }
-            if (id3 == null || (lastId3 != null && JNIEnv.IsSameObject(lastId3.Handle, id3.Handle))) return;
+            if (id3 == null)
+            {
+                // No embedded tags will arrive for this track. The filename fallback is final.
+                if (audioGroupFound) initialMetadataReady.TrySetResult(true);
+                return;
+            }
+            if (lastId3 != null && JNIEnv.IsSameObject(lastId3.Handle, id3.Handle)) return;
             lastId3 = id3;
             int revision = Interlocked.Increment(ref metadataRevision);
             Task.Run(() =>
@@ -234,7 +262,9 @@ namespace Seeker.Playback
                         if (bitmap != null) Artwork = bitmap;
                         if (thumbnail != null) SessionArtwork = thumbnail;
                         SessionMetadata = StreamingMetadata.BuildSessionMetadata(Metadata, SessionArtwork);
+                        owner.UpdateQueueMetadata(this, Metadata);
                         owner.Publish();
+                        initialMetadataReady.TrySetResult(true);
                         if (bitmap != null) previousBitmap?.Dispose();
                     });
                 }
@@ -252,6 +282,7 @@ namespace Seeker.Playback
             if (duration <= 0 || duration == Metadata.DurationMilliseconds) return;
             Metadata = Metadata.WithEmbedded(new TrackMetadataValues { DurationMilliseconds = duration });
             SessionMetadata = StreamingMetadata.BuildSessionMetadata(Metadata, SessionArtwork);
+            owner.UpdateQueueMetadata(this, Metadata);
         }
 
         public void Fail(string message, PlaybackException nativeError = null)
@@ -277,6 +308,7 @@ namespace Seeker.Playback
         {
             if (resourcesClosed) return;
             resourcesClosed = true;
+            initialMetadataReady.TrySetResult(false);
             Interlocked.Increment(ref metadataRevision);
             cancellation.Cancel();
             dataSourceFactory?.CancelReads();

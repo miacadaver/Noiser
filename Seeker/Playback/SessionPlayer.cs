@@ -1,6 +1,7 @@
 using AndroidX.Media3.Common;
 using Google.Common.Util.Concurrent;
 using AndroidX.Concurrent.Futures;
+using Common.Playback;
 using System;
 using System.Collections.Generic;
 using Commands = AndroidX.Media3.Common.BasePlayer.InterfaceConsts;
@@ -12,12 +13,17 @@ namespace Seeker.Playback
     {
         private readonly IPlayer actualPlayer;
         private readonly Func<StreamingPlayback> current;
+        private readonly Func<PlaybackQueue> queue;
         private readonly Action stop;
         private readonly Func<bool, IListenableFuture> setPlayWhenReady;
+        private readonly Func<bool> next;
+        private readonly Func<bool> previous;
+        private readonly Func<string, bool> select;
 
-        public SessionPlayer(IPlayer player, Func<StreamingPlayback> current, Action stop,
-            Func<bool, IListenableFuture> setPlayWhenReady) : base(player)
-        { actualPlayer = player; this.current = current; this.stop = stop; this.setPlayWhenReady = setPlayWhenReady; }
+        public SessionPlayer(IPlayer player, Func<StreamingPlayback> current, Func<PlaybackQueue> queue,
+            Action stop, Func<bool, IListenableFuture> setPlayWhenReady, Func<bool> next,
+            Func<bool> previous, Func<string, bool> select) : base(player)
+        { actualPlayer = player; this.current = current; this.queue = queue; this.stop = stop; this.setPlayWhenReady = setPlayWhenReady; this.next = next; this.previous = previous; this.select = select; }
 
         public void Refresh() => InvalidateState();
 
@@ -43,25 +49,32 @@ namespace Seeker.Playback
                 commands.AddIf(command, actualPlayer.AvailableCommands.Contains(command));
             commands.AddIf(Commands.CommandPlayPause, track != null && track.Failure == null);
             commands.AddIf(Commands.CommandStop, track != null);
+            var playbackQueue = queue?.Invoke();
+            commands.AddIf(Commands.CommandSeekToNextMediaItem, track != null && playbackQueue?.HasNext == true);
+            commands.AddIf(Commands.CommandSeekToPreviousMediaItem, track != null);
+            commands.AddIf(Commands.CommandSeekToMediaItem, track != null && playbackQueue?.Entries.Count > 1);
             var seekRange = track?.SeekRange ?? default;
             commands.AddIf(Commands.CommandSeekInCurrentMediaItem,
                 track != null && track.Failure == null && seekRange.CanSeek);
             builder.SetAvailableCommands(commands.Build());
 
             var playlist = new List<MediaItemData>();
-            var item = actualPlayer.CurrentMediaItem;
-            if (track != null && item != null)
+            if (track != null && playbackQueue?.Entries.Count > 0)
             {
-                // Strip original Format/APIC data and publish only the merged metadata and
-                // bounded thumbnail. Seekability follows the extractor's completed-sample index.
-                playlist.Add(new MediaItemData.Builder(item)
-                    .SetMediaItem(item.BuildUpon().SetMediaMetadata(track.SessionMetadata).Build())
-                    .SetMediaMetadata(track.SessionMetadata)
-                    .SetIsSeekable(seekRange.CanSeek)
-                    .SetDurationUs(seekRange.DurationUs > 0 ? seekRange.DurationUs : C.TimeUnset)
-                    .Build());
+                for (int i = 0; i < playbackQueue.Entries.Count; i++)
+                {
+                    var entry = playbackQueue.Entries[i];
+                    bool isCurrent = i == playbackQueue.CurrentIndex;
+                    MediaMetadata metadata = isCurrent ? track.SessionMetadata : StreamingMetadata.BuildSessionMetadata(entry.Metadata, null);
+                    var item = new MediaItem.Builder().SetMediaId(entry.Id)
+                        .SetUri(Android.Net.Uri.Parse("noiser-queue:///" + Uri.EscapeDataString(entry.Id)))
+                        .SetMediaMetadata(metadata).Build();
+                    playlist.Add(new MediaItemData.Builder(entry.Id).SetMediaItem(item).SetMediaMetadata(metadata)
+                        .SetIsSeekable(isCurrent && seekRange.CanSeek)
+                        .SetDurationUs(isCurrent && seekRange.DurationUs > 0 ? seekRange.DurationUs : C.TimeUnset).Build());
+                }
             }
-            builder.SetPlaylist(playlist).SetCurrentMediaItemIndex(playlist.Count == 0 ? C.IndexUnset : 0);
+            builder.SetPlaylist(playlist).SetCurrentMediaItemIndex(playlist.Count == 0 ? C.IndexUnset : playbackQueue.CurrentIndex);
             if (track?.Failure != null)
                 builder.SetPlaybackState(Commands.StateIdle).SetIsLoading(false)
                     .SetPlayerError(track.Failure).SetPlayWhenReady(false, Commands.PlayWhenReadyChangeReasonUserRequest);
@@ -79,9 +92,18 @@ namespace Seeker.Playback
             var track = current?.Invoke();
             // Do not expose seek-back/forward increments or playlist operations. Every accepted
             // seek comes through the same per-track timestamp range as the in-app seek bar.
+            var playbackQueue = queue?.Invoke();
             if (seekCommand == Commands.CommandSeekInCurrentMediaItem
-                && track != null && (mediaItemIndex == C.IndexUnset || mediaItemIndex == 0))
+                && track != null && (mediaItemIndex == C.IndexUnset || mediaItemIndex == playbackQueue?.CurrentIndex))
                 track.TrySeekTo(positionMs);
+            else if (seekCommand == Commands.CommandSeekToNextMediaItem) next?.Invoke();
+            else if (seekCommand == Commands.CommandSeekToPreviousMediaItem) previous?.Invoke();
+            else if (seekCommand == Commands.CommandSeekToMediaItem && playbackQueue != null
+                && mediaItemIndex >= 0 && mediaItemIndex < playbackQueue.Entries.Count)
+            {
+                // An external controller may select a queued item, but can only start at zero.
+                if (positionMs == 0) select?.Invoke(playbackQueue.Entries[mediaItemIndex].Id);
+            }
             return CompletedFuture();
         }
 

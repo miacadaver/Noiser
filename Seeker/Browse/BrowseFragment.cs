@@ -28,6 +28,7 @@ using AndroidX.Fragment.App;
 using AndroidX.RecyclerView.Widget;
 using Common;
 using Common.Browse;
+using Common.Playback;
 using Google.Android.Material.BottomNavigation;
 using Google.Android.Material.BottomSheet;
 using Google.Android.Material.FloatingActionButton;
@@ -217,6 +218,9 @@ namespace Seeker
                     return true;
                 case Resource.Id.action_download_files:
                     DownloadUserFilesEntry(false, true);
+                    return true;
+                case Resource.Id.action_play_folder:
+                    PlayCurrentFolder();
                     return true;
                 case Resource.Id.action_show_folder_info:
                     var folderSummary = BrowseUtils.GetFolderSummary(state.DataItems);
@@ -896,6 +900,76 @@ namespace Seeker
             SessionService.Instance.RunWithReconnect(() => Playback.StreamingPlaybackController.Show(SeekerState.ActiveActivityRef, streamUsername, streamFile));
         }
 
+        private static bool IsUnlockedAudio(DataItem item) => item?.File != null
+            && item.Node?.IsLocked != true
+            && PlaybackQueue.IsSupportedAudio(item.File.Filename);
+
+        private static PlaybackQueueEntry ToQueueEntry(string username, FullFileInfo file) =>
+            new PlaybackQueueEntry(username, file.FullFileName, file.Size,
+                wasFilenameLatin1Decoded: file.wasFilenameLatin1Decoded,
+                wasFolderLatin1Decoded: file.wasFolderLatin1Decoded);
+
+        private void PlayCurrentFolder()
+        {
+            if (BrowseActionMode != null) return;
+            List<PlaybackQueueEntry> tracks;
+            lock (state.DataItems)
+                tracks = PlaybackQueue.Order(state.DataItems.Where(IsUnlockedAudio)
+                    .Select(item => ToQueueEntry(state.CurrentUsername, BrowseUtils.ToFullFileInfo(item)))).ToList();
+            PlayQueue(tracks);
+        }
+
+        private void PlayFolder(DataItem folder)
+        {
+            if (BrowseActionMode != null || folder?.Directory == null || folder.Node?.IsLocked == true) return;
+            string prefix = folder.Directory.Name;
+            var tracks = PlaybackQueue.Order(folder.Directory.Files
+                .Where(file => PlaybackQueue.IsSupportedAudio(file.Filename))
+                .Select(file => ToQueueEntry(state.CurrentUsername, new FullFileInfo
+                {
+                    FullFileName = string.IsNullOrEmpty(prefix) ? file.Filename : prefix.TrimEnd('\\', '/') + "\\" + file.Filename,
+                    Size = file.Size,
+                    Depth = 1,
+                    wasFilenameLatin1Decoded = file.IsLatin1Decoded,
+                    wasFolderLatin1Decoded = folder.Directory.DecodedViaLatin1
+                }))).ToList();
+            PlayQueue(tracks);
+        }
+
+        private void PlayFromHere(DataItem selected)
+        {
+            if (BrowseActionMode != null || !IsUnlockedAudio(selected)) return;
+            var selectedEntry = ToQueueEntry(state.CurrentUsername, BrowseUtils.ToFullFileInfo(selected));
+            var siblings = selected.Node.Data.Files
+                .Where(file => PlaybackQueue.IsSupportedAudio(file.Filename))
+                .Select(file => ToQueueEntry(state.CurrentUsername, new FullFileInfo
+                {
+                    FullFileName = selected.Node.Data.Name.TrimEnd('\\', '/') + "\\" + file.Filename,
+                    Size = file.Size,
+                    Depth = 1,
+                    wasFilenameLatin1Decoded = file.IsLatin1Decoded,
+                    wasFolderLatin1Decoded = selected.Node.Data.DecodedViaLatin1
+                })).ToList();
+            var ordered = PlaybackQueue.Order(siblings);
+            string id = ordered.FirstOrDefault(entry => entry.Username == selectedEntry.Username
+                && entry.RemotePath == selectedEntry.RemotePath)?.Id;
+            PlayQueue(ordered, id);
+        }
+
+        private void PlayQueue(IEnumerable<PlaybackQueueEntry> entries, string selectedEntryId = null)
+        {
+            var snapshot = entries?.ToList();
+            if (snapshot == null) return;
+            if (snapshot.Count == 0)
+            {
+                SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.stream_queue_empty), ToastLength.Short);
+                return;
+            }
+            selectedEntryId ??= snapshot[0].Id;
+            SessionService.Instance.RunWithReconnect(() =>
+                Playback.StreamingPlaybackController.ShowQueue(SeekerState.ActiveActivityRef, snapshot, selectedEntryId));
+        }
+
         private void ShowFileContextMenu(int position, DataItem dataItem)
         {
             var builder = new Google.Android.Material.Dialog.MaterialAlertDialogBuilder(this.Context);
@@ -916,6 +990,12 @@ namespace Seeker
             if (canStream)
             {
                 items.Add(SeekerApplication.GetString(Resource.String.stream_play));
+                icons.Add(Resource.Drawable.stream_play);
+                items.Add(SeekerApplication.GetString(Resource.String.stream_play_from_here));
+                icons.Add(Resource.Drawable.stream_play);
+                items.Add(SeekerApplication.GetString(Resource.String.stream_play_next));
+                icons.Add(Resource.Drawable.stream_play);
+                items.Add(SeekerApplication.GetString(Resource.String.stream_add_queue));
                 icons.Add(Resource.Drawable.stream_play);
             }
 
@@ -949,11 +1029,28 @@ namespace Seeker
                             PlayFile(dataItem);
                         }
                         break;
+                    case 4:
+                        if (canStream) PlayFromHere(dataItem);
+                        break;
+                    case 5:
+                        if (canStream) AddQueueFile(dataItem, true);
+                        break;
+                    case 6:
+                        if (canStream) AddQueueFile(dataItem, false);
+                        break;
                 }
             };
 
             builder.SetAdapter(adapter, handler);
             builder.Show();
+        }
+
+        private void AddQueueFile(DataItem dataItem, bool playNext)
+        {
+            if (BrowseActionMode != null || !IsUnlockedAudio(dataItem)) return;
+            var file = BrowseUtils.ToFullFileInfo(dataItem);
+            SessionService.Instance.RunWithReconnect(() => Playback.StreamingPlaybackController.AddToQueue(
+                SeekerState.ActiveActivityRef, state.CurrentUsername, file, playNext));
         }
 
         private sealed class IconMenuAdapter : ArrayAdapter<string>
@@ -1085,14 +1182,16 @@ namespace Seeker
                 SeekerApplication.GetString(Resource.String.download_folder),
                 SeekerApplication.GetString(Resource.String.QueueFolderAsPaused),
                 SeekerApplication.GetString(Resource.String.ShowFolderInfo),
-                SeekerApplication.GetString(Resource.String.CopyURL)
+                SeekerApplication.GetString(Resource.String.CopyURL),
+                SeekerApplication.GetString(Resource.String.stream_play_folder)
             };
             int[] icons = new int[]
             {
                 Resource.Drawable.download,
                 Resource.Drawable.paused,
                 Resource.Drawable.information_outline,
-                Resource.Drawable.link_variant
+                Resource.Drawable.link_variant,
+                Resource.Drawable.stream_play
             };
 
             var tintColor = UiHelpers.GetColorFromAttribute(Context, Resource.Attribute.colorOnSurface, Context.Theme);
@@ -1117,6 +1216,9 @@ namespace Seeker
                         string slskLink = CommonHelpers.CreateSlskLink(true, dataItem.Directory.Name, state.CurrentUsername);
                         CommonHelpers.CopyTextToClipboard(SeekerState.ActiveActivityRef, slskLink);
                         SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.LinkCopied), ToastLength.Short);
+                        break;
+                    case 4:
+                        PlayFolder(dataItem);
                         break;
                 }
             };

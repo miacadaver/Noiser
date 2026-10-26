@@ -1,5 +1,19 @@
 <resources>
     <string name="stream_play">Play</string>
+    <string name="stream_play_folder">Play Folder</string>
+    <string name="stream_play_from_here">Play From Here</string>
+    <string name="stream_add_queue">Add to Queue</string>
+    <string name="stream_play_next">Play Next</string>
+    <string name="stream_previous">Previous</string>
+    <string name="stream_next">Next</string>
+    <string name="stream_queue">Queue</string>
+    <string name="stream_queue_clear">Clear Queue</string>
+    <string name="stream_remove">Remove</string>
+    <string name="stream_queue_empty_label">Queue is empty</string>
+    <string name="stream_queue_item">%1$s%2$s</string>
+    <string name="stream_queue_artist"> · %1$s</string>
+    <string name="stream_queue_error">\nCould not play: %1$s</string>
+    <string name="stream_queue_empty">This folder has no playable MP3 files.</string>
     <string name="stream_player">Now playing</string>
     <string name="stream_open_player">Open player</string>
     <string name="stream_notification_channel">Music playback</string>

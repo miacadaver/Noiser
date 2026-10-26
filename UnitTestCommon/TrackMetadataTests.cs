@@ -64,6 +64,32 @@ namespace UnitTestCommon
             Assert.That(metadata.Artist, Is.Null);
         }
 
+        [TestCase("The Misfits - Walk Among Us - 06 - Hatebreeders.mp3", "The Misfits", "Walk Among Us", 6, "Hatebreeders")]
+        [TestCase("The Misfits- Walk Among Us - 06 - Hatebreeders.mp3", "The Misfits", "Walk Among Us", 6, "Hatebreeders")]
+        [TestCase("The Misfits - 06 - Hatebreeders.mp3", "The Misfits", null, 6, "Hatebreeders")]
+        [TestCase("Artist - Album - 06 - Title - Live.mp3", "Artist", "Album", 6, "Title - Live")]
+        public void FlatArtistAlbumTrackFilenameSuppliesInitialMetadata(
+            string filename, string artist, string? album, int track, string title)
+        {
+            var metadata = TrackMetadataFallback.FromPath(filename);
+            Assert.Multiple(() =>
+            {
+                Assert.That(metadata.Artist, Is.EqualTo(artist));
+                Assert.That(metadata.Album, Is.EqualTo(album));
+                Assert.That(metadata.TrackNumber, Is.EqualTo(track));
+                Assert.That(metadata.Title, Is.EqualTo(title));
+            });
+        }
+
+        [Test]
+        public void FlatFilenameMetadataIsUsedBeforeEmbeddedTagsArrive()
+        {
+            var metadata = TrackMetadataFallback.FromPath("The Misfits - Walk Among Us - 06 - Hatebreeders.mp3");
+            Assert.That(metadata.Title, Is.EqualTo("Hatebreeders"));
+            Assert.That(metadata.Artist, Is.EqualTo("The Misfits"));
+            Assert.That(metadata.Album, Is.EqualTo("Walk Among Us"));
+        }
+
         [Test]
         public void ContradictingFilenameAndFolderDoesNotGuessAlbum()
         {
