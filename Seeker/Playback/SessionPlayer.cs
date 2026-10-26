@@ -52,20 +52,22 @@ namespace Seeker.Playback
             commands.AddIf(Commands.CommandPlayPause, track != null && track.Failure == null);
             commands.AddIf(Commands.CommandStop, track != null);
             var playbackQueue = queue?.Invoke();
+            // Entries is a defensive copy. Take it once so a refresh stays linear in queue size.
+            var entries = playbackQueue?.Entries ?? Array.Empty<PlaybackQueueEntry>();
             commands.AddIf(Commands.CommandSeekToNextMediaItem, track != null && canNext?.Invoke() == true);
             commands.AddIf(Commands.CommandSeekToPreviousMediaItem, track != null && canPrevious?.Invoke() == true);
-            commands.AddIf(Commands.CommandSeekToMediaItem, track != null && playbackQueue?.Entries.Count > 1);
+            commands.AddIf(Commands.CommandSeekToMediaItem, track != null && entries.Count > 1);
             var seekRange = track?.SeekRange ?? default;
             commands.AddIf(Commands.CommandSeekInCurrentMediaItem,
                 track != null && track.Failure == null && seekRange.CanSeek);
             builder.SetAvailableCommands(commands.Build());
 
             var playlist = new List<MediaItemData>();
-            if (track != null && playbackQueue?.Entries.Count > 0)
+            if (track != null && entries.Count > 0)
             {
-                for (int i = 0; i < playbackQueue.Entries.Count; i++)
+                for (int i = 0; i < entries.Count; i++)
                 {
-                    var entry = playbackQueue.Entries[i];
+                    var entry = entries[i];
                     bool isCurrent = i == playbackQueue.CurrentIndex;
                     MediaMetadata metadata = isCurrent ? track.SessionMetadata : StreamingMetadata.BuildSessionMetadata(entry.Metadata, null);
                     var item = new MediaItem.Builder().SetMediaId(entry.Id)
@@ -100,13 +102,14 @@ namespace Seeker.Playback
                 track.TrySeekTo(positionMs);
             else if (seekCommand == Commands.CommandSeekToNextMediaItem) next?.Invoke();
             else if (seekCommand == Commands.CommandSeekToPreviousMediaItem) previous?.Invoke();
-            else if (seekCommand == Commands.CommandSeekToMediaItem && playbackQueue != null
-                && mediaItemIndex >= 0 && mediaItemIndex < playbackQueue.Entries.Count)
+            else if (seekCommand == Commands.CommandSeekToMediaItem && playbackQueue != null)
             {
+                var entries = playbackQueue.Entries;
                 // An external controller may select a queued item at zero. Media3's
                 // seekToDefaultPosition() supplies TimeUnset rather than zero.
-                if (positionMs == 0 || positionMs == C.TimeUnset)
-                    select?.Invoke(playbackQueue.Entries[mediaItemIndex].Id);
+                if (mediaItemIndex >= 0 && mediaItemIndex < entries.Count
+                    && (positionMs == 0 || positionMs == C.TimeUnset))
+                    select?.Invoke(entries[mediaItemIndex].Id);
             }
             return CompletedFuture();
         }

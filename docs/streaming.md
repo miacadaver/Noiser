@@ -1,4 +1,4 @@
-# Single-MP3 streaming prototype
+# MP3 streaming, seeking, and playback queues
 
 The prototype includes [embedded MP3 metadata, filename fallbacks, and bounded artwork display](streaming-metadata.md)
 and [service-owned background playback, Android media controls, and a mini-player](background-playback.md).
@@ -39,8 +39,9 @@ cover a fully received track while it is playing. Late transfer events retain to
 
 ## Current behavior and limits
 
-- One MP3 at a time; 256 MiB maximum advertised size. Seeking is limited to extracted audio in the
-  received prefix; remote ranges and folder queues are not supported.
+- One active MP3/peer transfer at a time; remote files have a 256 MiB maximum advertised size.
+  Folder queues select tracks sequentially. Seeking is limited to extracted audio in the received
+  prefix; remote ranges and prefetching are not supported.
 - ExoPlayer starts with approximately two seconds of decoded audio buffered; it may read further ahead.
   Starting does not depend on the complete file arriving. Leading ID3 tags can increase startup time.
 - A waiting peer gets up to three minutes before an empty-buffer read times out. Once bytes have arrived,
@@ -51,10 +52,33 @@ cover a fully received track while it is playing. Late transfer events retain to
 - Existing active normal downloads are not downloaded again. Play reports that the ordinary download must
   finish. Attempting to download a currently streaming file asks the user to stop playback first.
 - Closing the dialog shows the mini-player. Backgrounding or recreating the Activity leaves the same
-  service-owned player and transfer running. Stop, natural completion, and explicit application shutdown
-  release the stream. A killed process is not automatically resumed.
+  service-owned player and transfer running. Advancing the queue releases the old stream before the next
+  remote request. At the end of the queue, or with autoplay disabled, playback holds the current track
+  for replay. Stop and explicit application shutdown release it. A killed process is not automatically resumed.
 - Buffer deletion waits for transfer shutdown. Abandoned `.part` files are cleaned on application startup.
   A temporary file may contain the complete track while playback is still running.
+
+## Playback queue and controls
+
+Play beside a Browse or search-result track builds a queue from the available MP3 rows and starts at
+the selected song. Browse also offers folder playback. Existing row order is retained; folder-menu
+playback orders filenames case-insensitively. Unsupported files and locked Browse entries are excluded.
+Embedded tags arrive for the active track and update its queue metadata without reordering the queue.
+
+The player exposes Next, Previous, and Queue. Browse file actions and search-track long presses offer
+Play next and Add to queue. Queue rows can be selected or removed; clearing the queue stops playback.
+The dialog shows the current track and the tracks after it; Repeat All also shows the wrapped entries.
+Queues are in memory and are cleared by Stop or process death.
+
+Autoplay is enabled by default. Repeat cycles Off, All, One; selecting All or One enables autoplay,
+and disabling autoplay returns repeat to Off. Repeat One replays the current buffer; Repeat All wraps
+the queue. There is no prefetch, so advancing to another remote song may require queue/connection time.
+An error remains visible until the user selects another track or stops; failures are not auto-skipped.
+
+The same queue is exposed through MediaSession for supported external Next/Previous and track-selection
+commands. Timeline construction takes one defensive queue snapshot, avoiding repeated full-list copies.
+The initial metadata wait is independent of queue snapshots and is preserved; see
+[metadata startup behavior](streaming-metadata.md#metadata-and-fallback).
 
 ## Seeking
 
@@ -103,16 +127,10 @@ uses `ConstantBitrateSeeker` and estimates 28.7 seconds instead of the fixture's
 native parser and seek-map probe only: it does not instantiate the Android wrapper, run an audio decoder, or
 verify audible playback.
 
-Step 4 validation: **58 focused tests passed**; **677 Release host tests passed, 1 skipped** with
-`TestCategory!=RealData`; the Android Debug build succeeded; the generated Java Media3 callback and manifest
-checker passed, including extractor wrapper callbacks. The build reports existing package, analyzer, and
-resource warnings. Encrypted Debug-only fixtures need upstream's `SeekerEncryptKey`; they are excluded by the
-Release configuration. Live peer playback has not been exercised on an Android device here.
-
-After an environment restart, the existing Release test assembly was rerun: **677 passed, 1 skipped**;
-the focused buffer, seek-index, and streaming-download subgroup passed **23 tests**. The Android SDK and
-temporary native probe dependencies were unavailable after the restart, so the Android build and Media3
-probe results above precede the final received-byte accounting flag correction and were not rerun afterward.
+The host suite covers queue mutations, repeat/autoplay policy, request delivery, buffering, metadata,
+seeking bounds, transfer cleanup, and saved-data compatibility. Encrypted Debug-only fixtures need
+upstream's `SeekerEncryptKey`; the Release CI configuration excludes those fixtures.
+Current verification results are recorded in [background playback validation](background-playback.md#verification-and-device-acceptance).
 
 ## Device acceptance checks
 

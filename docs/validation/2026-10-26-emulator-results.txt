@@ -1,0 +1,28 @@
+Android emulator playback validation; generated silent MP3s; mocked peer transport.
+2026-10-26T03:23:35.9165464Z PASS: first playing snapshot already carries embedded title
+2026-10-26T03:23:35.9405388Z PASS: native decoding/playback starts before transfer completes
+2026-10-26T03:23:35.9452718Z PASS: embedded artist replaces filename fallback
+2026-10-26T03:23:35.9931329Z PASS: MediaController sees full queue and embedded title
+2026-10-26T03:23:36.0140280Z PASS: Android media notification exists
+2026-10-26T03:23:37.2978538Z PASS: native playback position advances
+2026-10-26T03:23:38.3759419Z PASS: MediaController pause retains position
+2026-10-26T03:23:38.4873424Z PASS: resume retains player/transfer identity
+2026-10-26T03:23:40.1201519Z PASS: seek within parsed audio does not start another transfer
+2026-10-26T03:23:41.8032430Z PASS: backgrounding Activity preserves playback
+2026-10-26T03:23:41.8034743Z GATE: screen-test-ready
+2026-10-26T03:23:49.2548741Z PASS: external screen-off/wake commands completed
+2026-10-26T03:23:49.2652938Z PASS: screen off/wake preserves session
+2026-10-26T03:23:51.3355782Z PASS: Activity recreation retains service-owned playback
+2026-10-26T03:23:51.7933548Z PASS: track switch waits for prior transfer cleanup
+2026-10-26T03:23:51.7944896Z PASS: next track publishes fresh session metadata
+2026-10-26T03:23:52.3754953Z PASS: Previous restores the first queue entry
+2026-10-26T03:23:52.4767375Z PASS: Stop cancels transfer and removes temporary file
+2026-10-26T03:23:57.0931386Z PASS: Repeat One reuses the completed buffer
+2026-10-26T03:24:00.2665911Z PASS: autoplay off holds queue and metadata at natural end
+2026-10-26T03:24:00.5844395Z PASS: Play after natural end restarts without another download
+2026-10-26T03:24:05.9391434Z PASS: Stop interrupts a stalled native loader promptly
+2026-10-26T03:24:06.0758370Z PASS: peer rejection becomes a visible terminal error without retry
+2026-10-26T03:24:07.2918199Z PASS: one reconnect resumes at committed byte offset
+2026-10-26T03:24:07.3773549Z PASS: all scenarios maintain one active transfer
+2026-10-26T03:24:07.3774877Z Device-only exclusions: real peer network, audible output, Bluetooth hardware, real scrobbler app.
+2026-10-26T03:24:07.3789342Z RESULT: 24 checks passed

@@ -25,6 +25,9 @@ Notes:
 
 - Debug configs use fast deployment by default so they are not standalone apks. 
   Use `-p:EmbedAssembliesIntoApk=true` for standalone apks.
+- `Debug Mock` explicitly enables debug symbols, keeping Android's debug JNI registration enabled
+  when assemblies are embedded in a standalone APK. Preserve that setting when editing this custom
+  configuration; the .NET SDK only defaults `DebugSymbols=true` for the exact `Debug` configuration.
 - `Debug` uses the real `SoulseekClient` and logs into the live
   Soulseek server. `Debug Mock` uses an in process mock server `MockSoulseekClient` — search, 
   download, upload behavior can be controlled via keywords (`n:N`, `t:N`, `speed:N`, `failat:N`, `stall`, etc).

@@ -1,7 +1,8 @@
 # MP3 metadata for streaming
 
-This documents Step 2's metadata extraction and limits. Step 3 moves playback ownership to a
-[MediaSessionService](background-playback.md), reusing this extraction and adding bounded session artwork.
+This documents the current metadata extraction and limits. Playback is owned by a
+[MediaSessionService](background-playback.md), with bounded artwork in the session and metadata updates
+for the active queue entry.
 
 ## Architecture inspected
 
@@ -18,9 +19,8 @@ The project originally had no MediaSession or streaming track metadata model. Th
 reads the selected audio format's original ID3 metadata through `onTracksChanged`, keeping extraction
 independent of the merged session metadata and avoiding metadata feedback loops.
 
-The Soulseek transfer service, buffer, data source, startup buffering thresholds, retry behavior, and
-temporary-file lifecycle are unchanged. Metadata inspection uses the same Media3 extractor input,
-on the loader thread, so there is no second transfer, separate partial request, or full-file scan.
+Metadata inspection uses the same Media3 extractor input on the loader thread, so there is no second
+transfer, separate partial request, or full-file scan.
 MP3 audio follows its leading tags; a large leading tag must arrive or be skipped before audio starts.
 
 ## Metadata and fallback
@@ -33,9 +33,16 @@ Snapshots merge valid embedded fields over fallback fields. Missing/invalid valu
 Media3 maps TIT2, TPE1, TALB, TPE2, TRCK, TYER/TDRC/TDRL, and APIC to its `MediaMetadata` fields.
 Release year takes precedence over recording year; the latter covers legacy TYER tags. Front cover
 selection uses Media3's existing artwork preference. Duration is accepted only when the player reports
-a positive value. The existing non-seekable streamed extractor often reports no duration, even for a
-Xing-tagged MP3; we do not estimate it from file size/bitrate. Completed ordinary-download playback
-retains the native extractor's duration support and uses the same metadata allocation guard.
+a positive value. The bounded, seekable MP3 extractor uses native Xing/Info/VBRI data or an incremental
+sample index. Duration can remain unknown while streaming; it is not estimated from advertised file
+size/bitrate. Completed ordinary-download playback uses the same metadata allocation guard.
+
+After the foreground notification is ready, initial Play/resume waits up to **1.5 seconds** for parsed
+audio-track metadata to reach the session before starting audible playback. Tagged tracks can complete
+the wait early; a selected audio track without tags makes the filename fallback final and also completes
+the wait. The timeout bounds startup delay when a peer is queued or tags are slow. This helps external
+scrobblers see the embedded title/artist at playback start, but cannot guarantee their behavior or that
+metadata arrives before the timeout. Queue refresh optimizations do not alter this wait.
 
 `TrackMetadataFallback` handles Windows/Unix peer paths and preserves Unicode. It removes the MP3
 extension and common numeric prefixes. An unambiguous `Artist - Title` supplies artist/title.
@@ -89,7 +96,9 @@ dotnet test UnitTestCommon/UnitTestCommon.csproj --configuration Release --filte
 ```
 
 Android compilation and the GitHub APK workflow verify binding/resource integration. A physical Android
-device has not been used for this change. The following remain device acceptance checks:
+device has not been used for this change. [Android 15 emulator checks](validation/2026-10-26-emulator.md)
+confirmed native MP3 decoding, initial embedded session tags, and notification text using generated
+fixtures; a real scrobbler and artwork rendering remain unverified. The following remain device acceptance checks:
 
 1. Install `3.11.2-stream.5`, stream a tagged MP3 from a throttled test peer, and confirm audible playback
    while Received is below 100%, with the correct title/artist/album/cover in the existing dialog.
@@ -104,8 +113,8 @@ device has not been used for this change. The following remain device acceptance
 6. Confirm pause/stop, slow-peer buffering, reconnect/resume, cache deletion, normal downloads, and
    streaming duplicate protection still behave as documented. Observe one peer transfer per stream.
 
-Local validation: the Release suite with the CI filter passed **649 tests**, with **1 skipped**, including
-35 new metadata tests and all 11 existing streaming tests. The final Android `Compile` target passed.
+The Release CI suite includes metadata and ID3-header tests alongside streaming and queue tests.
+See [current validation results](background-playback.md#verification-and-device-acceptance).
 These checks do not claim successful native decoding, rendered artwork, or live audio on a device.
 
 ## Files

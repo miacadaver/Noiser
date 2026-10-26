@@ -1,18 +1,16 @@
-# Background playback, MediaSession, and mini-player (Step 3)
+# Background playback, MediaSession, and mini-player
 
-Version **3.11.2-stream.5** (Android version code 148) adds service-owned playback to the existing
-single-MP3 prototype. Minimum Android API is 23; target API is 36. There is one ExoPlayer, one
-MediaSession, and at most one active peer stream. No queue, folder playback, seeking, playback
-resumption after process death, or direct scrobbling implementation is introduced.
+The manifest reports version **3.11.2-stream.5** (Android version code 148). Minimum Android API is 23;
+target API is 36. There is one ExoPlayer, one MediaSession, and at most one active peer stream.
+The current code includes MP3 folder queues, repeat/autoplay controls, and bounded seeking.
+Playback resumption after process death and direct scrobbling are not implemented.
 
 ## Ownership and data flow
 
-Before this change, `StreamingPlaybackController` owned both the Activity dialog and ExoPlayer, and
-the foreground lifecycle tracker stopped it when the app was backgrounded. The original stream uses
+`StreamingPlaybackController` owns the Activity's dialog and controller proxy. The service uses
 `DownloadService.StreamAsync` with the authenticated Soulseek client, a private `ProgressiveBuffer`,
 and a blocking `ProgressiveDataSource` read at the available byte frontier. Its Media3 MP3 extractor
-already supplies ID3 metadata. Neither the Soulseek streaming implementation nor those buffer/data
-source classes changes in Step 3.
+supplies ID3 metadata and tracks safe seek points in the parsed audio prefix.
 
 ```text
 Soulseek StreamAsync -> growing private cache -> ProgressiveDataSource -> one ExoPlayer
@@ -35,31 +33,36 @@ reader and waits for its transfer cleanup before starting the new peer request.
 User selections are single-use in-process requests, not replayable filenames in exported service
 intents. Rapid selections supersede pending selections. The service is `NotSticky`: if Android kills
 the process, a dead peer connection is never assumed resumable. Relaunching cleans abandoned cache
-files; the user can select Play again. Explicit Stop, natural completion, and app Shutdown cancel reads,
-release the transfer reservation, and delete temporary data after transfer shutdown. Pausing retains
-the current position and allows the existing transfer to continue receiving.
+files; the user can select Play again. Explicit Stop and app Shutdown cancel reads, release the transfer
+reservation, and delete temporary data after transfer shutdown. Advancing the queue performs the same
+cleanup for the old track before starting the next remote request. Natural completion advances, repeats,
+or holds the current track according to the queue controls. A held track retains its buffer for replay
+until another selection or Stop. Pausing retains position and allows the transfer to continue receiving.
 
 ## Session and metadata
 
 `SessionPlayer` is a `ForwardingSimpleBasePlayer` adapter around the same ExoPlayer, not another player
 instance. Native Media3 listener handling forwards actual playback state and position. A restricted
-command set exposes play/pause, stop, volume, and metadata/timeline information. Next, previous,
-seeking, and playlist mutation are not advertised. Stop also cancels the Soulseek transfer and clears
-the active track. Terminal transfer errors become session player errors and disable Play until a new
+command set exposes play/pause, stop, volume, metadata/timeline information, available Next/Previous,
+queue selection, and seeking within the current track's validated range. General external playlist
+mutation is not advertised. Stop also cancels the Soulseek transfer and clears the queue.
+Terminal transfer errors become session player errors and disable Play until a new
 selection; the mini-player and dialog show the failure.
 
-The session's single-item timeline publishes the merged `TrackMetadata`: title, artist, album, album
+The session's queue timeline publishes the merged `TrackMetadata`: title, artist, album, album
 artist, track number, release year, and reliable duration when the native player supplies it. Extraction
 reads the original selected audio format's ID3 data on the existing stream; it makes no extra network
 request. Missing fields retain the established conservative filename/folder fallback. Revision and
-track ownership checks reject late work from previous songs.
+track ownership checks reject late work from previous songs. Non-current entries use their stored
+metadata without artwork; only the active entry uses the current session metadata and artwork.
+Each refresh takes one defensive queue snapshot and reuses it throughout timeline construction.
 
 Artwork decoding remains on a worker with Step 2's limits. The in-app cover is at most approximately
 512 pixels per side. Session artwork is an additional thumbnail at most 256 pixels per side and
 128 KiB encoded. The session timeline excludes original audio format/APIC bytes so multi-megabyte
 artwork cannot be sent accidentally through session IPC. Late metadata updates invalidate session
 state and update controls without preparing a new source or restarting playback. Streamed MP3
-duration is often unknown with the existing non-seekable extractor; no guessed duration is published.
+duration can remain unknown until the extractor establishes it; no file-size/bitrate guess is published.
 
 ## Foreground service, notification, and audio focus
 
@@ -70,11 +73,13 @@ network, wake-lock, and Wi-Fi permissions. File selection starts the service fro
 There is no second manually managed media notification or background timer.
 
 Play/resume initially publishes a pending buffering/play intent. The service observes completion of
-Media3's normal notification update and starts the underlying ExoPlayer after foreground promotion.
+Media3's normal notification update and starts the underlying ExoPlayer after foreground promotion
+and a bounded initial metadata wait of up to 1.5 seconds. The wait helps scrobblers receive parsed tags
+at audible playback start; see [metadata behavior](streaming-metadata.md#metadata-and-fallback).
 This preserves Android 15+ audio-focus ordering. Pause, track switches, errors, and Stop retire pending
 play requests so a late notification completion cannot start an old track. Repeated Play while already
-playing completes immediately. The notification includes play/pause and a supported Stop preference;
-exact layout depends on the Android version. Dismissal is handled through Media3's stop action.
+playing completes immediately. Notification preferences include play/pause, available Previous/Next,
+and Stop; exact layout depends on the Android version. Dismissal is handled through Media3's stop action.
 
 ExoPlayer handles media audio focus and audio-becoming-noisy events. It responds to focus loss,
 interruptions, and headphone unplug events using native behavior. Its local wake mode protects audio
@@ -99,7 +104,8 @@ when the main interface is visible. A 250 ms position refresh runs only while th
 Notification and Bluetooth commands use the same MediaSession. The Activity normally controls it
 through a MediaController proxy; while the proxy is connecting it can call the same session player
 in-process. It never constructs another playback instance. Old titles/artwork are cleared while a new
-request is waiting and when playback ends.
+request is waiting and when playback is explicitly stopped. A track held at natural completion keeps
+its metadata available for replay and queue navigation.
 
 Compatible scrobblers can inspect Android's standard active media session and notification, with title,
 artist, album, album artist, duration when known, and native playback transitions. There is no Last.fm
@@ -118,7 +124,9 @@ Created:
   classes, preserving the complete Java bridge contract from Step 2.
 - `Seeker/Main/MainActivity.Playback.cs`: attach/detach the Activity's controls.
 - `Seeker/Resources/layout/stream_mini_player.xml`, `drawable/stream_pause.xml`: compact player assets.
-- `UnitTestCommon/PlaybackLifecycleTests.cs`: 16 request/state cases.
+- `UnitTestCommon/PlaybackLifecycleTests.cs`: request handoff and presentation-state cases.
+- `Common/Playback/PlaybackQueue.cs`, `PlaybackControls.cs`, `ProgressiveSeekIndex.cs`: queue,
+  repeat/autoplay, and parsed-audio seek boundaries, with corresponding host tests.
 - `docs/background-playback.md`: architecture and acceptance checks.
 
 Modified:
@@ -133,29 +141,44 @@ Modified:
 - `.github/scripts/check_media3_contracts.py`: session override exports and generated manifest checks.
 - `README.md`, `docs/streaming.md`, `docs/streaming-metadata.md`: current behavior and validation.
 
-The only new functional NuGet dependency is **Xamarin.AndroidX.Media3.Session 1.11.1**, matching the
-existing ExoPlayer. Session requires AndroidX Core 1.19, which includes the former core-ktx classes;
-the old transitive `Core.Core.Ktx` package's assets are excluded to prevent D8 duplicate-class errors.
-Future completion uses the already transitive AndroidX Concurrent Futures package. No new metadata,
-image, notification, or scrobbling library is added.
+**Xamarin.AndroidX.Media3.Session 1.11.1** matches ExoPlayer. Session requires AndroidX Core 1.19,
+which includes the former core-ktx classes; the `Core.Core.Ktx` package's assets are excluded to prevent
+D8 duplicate-class errors, while its version matches Lifecycle's minimum. Lifecycle LiveData, Process,
+and ViewModelSavedState are aligned with Session's Service/Runtime 2.11 requirements. DataStore
+Preferences 1.2.1 matches the resolved DataStore family instead of Firebase Common's older minimum.
+Common uses MessagePack and its analyzer at 2.5.307, staying on the existing major version while
+incorporating the [upstream security patches](https://github.com/MessagePack-CSharp/MessagePack-CSharp/releases/tag/v2.5.307).
+The existing saved-data fixtures verify serialization compatibility.
 
 ## Verification and device acceptance
 
-Completed in this workspace:
+Maintenance validation on October 26, 2026:
 
-- Release host suite using the CI filter: **665 passed, 1 skipped**. The 16 new cases cover one-time
+- Release host suite using the CI filter: **696 passed, 1 skipped, 0 failed**. Coverage includes one-time
   request delivery, rapid track supersession, unknown/replayed intents, process recreation, concurrent
   delivery, and stopped/error/queued/connecting/buffering/playing/paused/focus-suppressed presentation.
-- Existing streaming and metadata tests pass in that suite, including reads before transfer completion,
-  frontier waits, cancellation, retry/reservation behavior, metadata fallback, and malformed ID3 headers.
-- Android build with SDK 36/JDK 21, including resources, Java compilation, D8, and debug APK packaging.
-  The local packaging check uses fast deployment; GitHub Actions builds the installable standalone APK.
+- Streaming, queue, metadata, and saved-data compatibility tests pass in that suite, including reads
+  before transfer completion, frontier waits, cancellation, retry/reservation behavior, metadata fallback,
+  malformed ID3 headers, and existing MessagePack cache fixtures.
+- Restoring the Android project reports no NuGet dependency-range conflicts or vulnerability warnings.
+  NuGet audits of the Android and host-test projects, including transitive packages, report no known
+  vulnerabilities with the current advisory feed.
+- An isolated 1,000-entry queue traversal allocation check produces the same checksum with both paths:
+  repeated `Entries` access allocates 16,056,024 bytes; one snapshot allocates 8,024 bytes. This measures
+  list traversal only, not total Android media-session allocations or device performance.
+- Standalone Android Debug build with SDK 36/JDK 21 and `EmbedAssembliesIntoApk=true` passed, including
+  resources, Java compilation, D8, and debug APK signing. The build reports 411 compiler, analyzer,
+  assembly-reference, and resource warnings and no errors; the NuGet warnings addressed here are gone.
 - Generated Java/AAR checks: all 37 Player.Listener methods, six extractor factory methods, seven
-  extractor methods, four session-player overrides, and two service overrides are exported. The generated
+  extractor methods, five session-player overrides, and two service overrides are exported. The generated
   manifest has the exported mediaPlayback service, intent filter, and required foreground permission.
+- The native Media3 MP3 seek probe passes for CBR, VBR, ID3-prefixed VBR, and its unmasked control.
 
-ADB found **no connected Android device**. Host tests and packaging cannot verify native audio or OS
-lifecycle behavior. The following are required device checks, not claimed passes:
+Subsequent [Android 15 emulator validation](validation/2026-10-26-emulator.md) passed 24 runtime assertions
+with generated MP3s and a simulated peer, including metadata timing, media controls, background playback,
+queue transitions, and cleanup. It also exposed and fixed standalone Debug Mock startup configuration.
+Physical phone, Bluetooth, live-peer, and real-scrobbler validation remain outstanding. The following is
+the broader device acceptance checklist; the emulator report identifies the subset actually exercised:
 
 1. Stream from a throttled peer; verify audio starts with Received below 100%, then lock the phone and
    switch apps during buffering and playback. Observe the same transfer and continuous audio.
