@@ -60,4 +60,6 @@ python3 .github/scripts/development-signing.py verify-apk --apk /path/to/Noiser.
 
 The tests use disposable fixture keys and cover identical certificates across fresh runner restores, missing/malformed secrets, certificate mismatch, private file permissions, overwrite refusal, and rejecting invalid or incorrectly signed APKs. Verifying a real APK additionally requires Android SDK build-tools (`apksigner`). A physical-device update retaining settings remains an acceptance check.
 
+The first published APK's certificate and current CI results are recorded in the [signing validation record](validation/2026-10-26-development-signing.md).
+
 References: [GitHub Actions secrets](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets), [Microsoft Android signing properties](https://learn.microsoft.com/en/dotnet/android/building-apps/build-properties#androidkeystore).
