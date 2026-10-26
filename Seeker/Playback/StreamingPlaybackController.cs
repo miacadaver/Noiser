@@ -127,6 +127,7 @@ namespace Seeker.Playback
             if (attached) return;
             attached = true;
             StreamingPlaybackService.Changed += Update;
+            if (StreamingPlaybackService.Current == null && PlaybackQueueStorage.HasSavedQueue(activity)) Connect();
             Update();
         }
 
@@ -177,6 +178,11 @@ namespace Seeker.Playback
         {
             var snapshot = StreamingPlaybackService.Current?.Snapshot();
             if (snapshot == null || snapshot.Phase == PlaybackPhase.Error) return;
+            if (snapshot.Phase == PlaybackPhase.Saved)
+            {
+                StreamingPlaybackService.Current?.SelectQueueEntry(snapshot.TrackId);
+                return;
+            }
             if (snapshot.ShowPause) Controls?.Pause();
             else Controls?.Play();
         }
@@ -185,7 +191,8 @@ namespace Seeker.Playback
         {
             StreamingPlaybackService.CancelPending(pendingRequest);
             pendingRequest = null;
-            Controls?.Stop();
+            if (StreamingPlaybackService.Current?.Playback == null) StreamingPlaybackService.Current?.StopPlayback();
+            else Controls?.Stop();
             Update();
         }
 
@@ -235,9 +242,19 @@ namespace Seeker.Playback
                 Update();
             };
             previous = view.FindViewById<Button>(Resource.Id.streamPrevious);
-            previous.Click += (_, __) => Controls?.SeekToPreviousMediaItem();
+            previous.Click += (_, __) =>
+            {
+                var service = StreamingPlaybackService.Current;
+                if (service?.Playback == null) service?.SkipToPrevious();
+                else Controls?.SeekToPreviousMediaItem();
+            };
             next = view.FindViewById<Button>(Resource.Id.streamNext);
-            next.Click += (_, __) => Controls?.SeekToNextMediaItem();
+            next.Click += (_, __) =>
+            {
+                var service = StreamingPlaybackService.Current;
+                if (service?.Playback == null) service?.SkipToNext();
+                else Controls?.SeekToNextMediaItem();
+            };
             openQueue = view.FindViewById<Button>(Resource.Id.streamQueue);
             openQueue.Click += (_, __) => ShowQueueDialog();
             repeat = view.FindViewById<Button>(Resource.Id.streamRepeat);
@@ -284,7 +301,7 @@ namespace Seeker.Playback
             if (snapshot != null) Connect();
             bool full = dialog?.IsShowing == true;
             UpdateQueueDialog(service);
-            if (snapshot == null && pendingRequest == null && controllerFuture != null)
+            if (snapshot == null && pendingRequest == null && controller != null)
             {
                 MediaController.ReleaseFuture(controllerFuture);
                 controllerFuture = null;
@@ -318,16 +335,20 @@ namespace Seeker.Playback
             }
             else
             {
-                string title = snapshot.Metadata.IsTagReadComplete
+                bool saved = snapshot.Phase == PlaybackPhase.Saved;
+                string title = saved ? activity.GetString(Resource.String.stream_saved_queue)
+                    : snapshot.Metadata.IsTagReadComplete
                     ? snapshot.Metadata.Title : activity.GetString(Resource.String.stream_player);
-                string trackArtist = snapshot.Metadata.IsTagReadComplete ? snapshot.Metadata.Artist : null;
+                string trackArtist = saved ? snapshot.Metadata.OriginalFilename
+                    : snapshot.Metadata.IsTagReadComplete ? snapshot.Metadata.Artist : null;
                 miniTitle.Text = title;
                 miniArtist.Text = trackArtist;
                 miniArtist.Visibility = string.IsNullOrEmpty(trackArtist) ? ViewStates.Gone : ViewStates.Visible;
                 SetArtwork(miniArtwork, snapshot);
                 miniPause.SetImageResource(snapshot.ShowPause ? Resource.Drawable.stream_pause : Resource.Drawable.stream_play);
-                miniPause.ContentDescription = activity.GetString(snapshot.ShowPause ? Resource.String.stream_pause : Resource.String.stream_resume);
-                miniPause.Enabled = snapshot.Phase != PlaybackPhase.Error && Controls != null;
+                miniPause.ContentDescription = activity.GetString(saved ? Resource.String.stream_play
+                    : snapshot.ShowPause ? Resource.String.stream_pause : Resource.String.stream_resume);
+                miniPause.Enabled = snapshot.Phase != PlaybackPhase.Error && (saved || Controls != null);
                 if (full)
                 {
                     dialog.SetTitle(title);
@@ -339,15 +360,15 @@ namespace Seeker.Playback
                     if (snapshot.Phase == PlaybackPhase.Error)
                         status.Text = activity.GetString(Resource.String.stream_failed, snapshot.Error);
                     else status.SetText(StatusResource(snapshot.Phase));
-                    pause.Enabled = snapshot.Phase != PlaybackPhase.Error && Controls != null;
+                    pause.Enabled = snapshot.Phase != PlaybackPhase.Error && (saved || Controls != null);
                     bool canRetry = PlaybackPresentation.CanRetry(snapshot.Phase);
                     retry.Visibility = canRetry ? ViewStates.Visible : ViewStates.Gone;
                     retry.Enabled = canRetry;
                     retryTrackId = canRetry ? snapshot.TrackId : null;
-                    previous.Enabled = service?.CanSkipPrevious == true && Controls != null;
-                    next.Enabled = service?.CanSkipNext == true && Controls != null;
+                    previous.Enabled = service?.CanSkipPrevious == true && (saved || Controls != null);
+                    next.Enabled = service?.CanSkipNext == true && (saved || Controls != null);
                     openQueue.Enabled = service?.Queue.CurrentIndex >= 0;
-                    repeat.Enabled = autoplay.Enabled = Controls != null;
+                    repeat.Enabled = autoplay.Enabled = service != null;
                     repeat.SetText(snapshot.RepeatMode switch
                     {
                         PlaybackRepeatMode.All => Resource.String.stream_repeat_all,
@@ -356,11 +377,13 @@ namespace Seeker.Playback
                     });
                     autoplay.SetText(snapshot.Autoplay
                         ? Resource.String.stream_autoplay_on : Resource.String.stream_autoplay_off);
-                    pause.SetText(snapshot.ShowPause ? Resource.String.stream_pause : Resource.String.stream_resume);
+                    pause.SetText(saved ? Resource.String.stream_play
+                        : snapshot.ShowPause ? Resource.String.stream_pause : Resource.String.stream_resume);
                     long seconds = Math.Max(0, snapshot.Position) / 1000;
                     long percent = snapshot.Size > 0 ? Math.Min(100, snapshot.Received * 100 / snapshot.Size) : 0;
                     progress.Text = activity.GetString(Resource.String.stream_progress, new Java.Lang.Object[]
                     { Java.Lang.Long.ValueOf(percent) });
+                    if (saved) progress.Text = string.Empty;
                     if (trackingSeekBar && trackingTrackId != snapshot.TrackId)
                     {
                         trackingSeekBar = false;
@@ -373,11 +396,13 @@ namespace Seeker.Playback
                     {
                         seekBar.Progress = snapshot.SeekRange.SliderProgress(Math.Max(0, snapshot.Position) * 1000, seekBar.Max);
                         UpdateSeekStatus(Math.Max(0, snapshot.Position) * 1000, snapshot.SeekRange);
+                        if (saved) seekStatus.Text = string.Empty;
                     }
                 }
             }
             // Position refresh exists only while this Activity is visible, never as a background poll.
-            if (snapshot != null || pendingRequest != null) handler.PostDelayed(tick, 250);
+            if ((snapshot != null && snapshot.Phase != PlaybackPhase.Saved) || pendingRequest != null)
+                handler.PostDelayed(tick, 250);
         }
 
         private void ShowQueueDialog()
@@ -521,6 +546,7 @@ namespace Seeker.Playback
             PlaybackPhase.Buffering => Resource.String.stream_buffering,
             PlaybackPhase.Reconnecting => Resource.String.stream_reconnecting,
             PlaybackPhase.Stalled => Resource.String.stream_stalled,
+            PlaybackPhase.Saved => Resource.String.stream_saved_queue_status,
             _ => Resource.String.stream_stopped
         };
     }

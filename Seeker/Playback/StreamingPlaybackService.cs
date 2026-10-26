@@ -44,6 +44,10 @@ namespace Seeker.Playback
         private bool handlingEvents;
         private bool destroyed;
         private ResolvableFuture pendingPlay;
+        private PlaybackQueue savedQueue;
+        private long savedQueueRevision;
+        private PlaybackRepeatMode savedRepeatMode;
+        private bool savedAutoplay;
 
         internal static StreamingPlaybackService Current { get; private set; }
         internal static event Action Changed;
@@ -134,6 +138,13 @@ namespace Seeker.Playback
         public override void OnCreate()
         {
             base.OnCreate();
+            var saved = PlaybackQueueStorage.Load(this);
+            if (saved != null)
+            {
+                Queue = saved.Queue;
+                controls.Restore(saved.RepeatMode, saved.Autoplay);
+            }
+            RememberSavedQueue();
             actualPlayer = new ExoPlayerBuilder(ApplicationContext)
                 .SetLoadControl(new DefaultLoadControl.Builder().SetBufferDurationsMs(15000, 60000, 2000, 4000).Build())
                 .SetWakeMode(C.WakeModeLocal)
@@ -356,6 +367,7 @@ namespace Seeker.Playback
             var selected = Queue.Remove(entryId, out wasCurrent);
             if (!wasCurrent) { Publish(); return; }
             if (selected == null) { StopPlayback(); return; }
+            if (Playback == null) { Publish(); return; }
             selected.MarkPlaying();
             StartQueueEntry(selected, SessionPlayer.PlayWhenReady);
             Publish();
@@ -463,6 +475,7 @@ namespace Seeker.Playback
                 Queue.Select(next.Id);
             }
             if (next == null) return false;
+            if (Playback == null) { Publish(); return true; }
             next.MarkPlaying();
             StartQueueEntry(next, true);
             Publish();
@@ -486,6 +499,7 @@ namespace Seeker.Playback
                 return false;
             }
             if (previous == null) return false;
+            if (Playback == null) { Publish(); return true; }
             previous.MarkPlaying();
             StartQueueEntry(previous, true);
             Publish();
@@ -529,6 +543,12 @@ namespace Seeker.Playback
         internal void Publish()
         {
             if (destroyed) return;
+            if (!ReferenceEquals(savedQueue, Queue) || savedQueueRevision != Queue.Revision
+                || savedRepeatMode != RepeatMode || savedAutoplay != Autoplay)
+            {
+                RememberSavedQueue();
+                PlaybackQueueStorage.Save(this, Queue, RepeatMode, Autoplay);
+            }
             if (Playback?.Failure != null && pendingPlay != null)
             {
                 var pending = pendingPlay;
@@ -538,6 +558,14 @@ namespace Seeker.Playback
             UpdateTransferLocks();
             SessionPlayer?.Refresh();
             NotifyViews();
+        }
+
+        private void RememberSavedQueue()
+        {
+            savedQueue = Queue;
+            savedQueueRevision = Queue.Revision;
+            savedRepeatMode = RepeatMode;
+            savedAutoplay = Autoplay;
         }
 
         private static void NotifyViews()
@@ -552,7 +580,13 @@ namespace Seeker.Playback
 
         internal PlaybackSnapshot Snapshot()
         {
-            if (destroyed || Playback == null) return null;
+            if (destroyed) return null;
+            if (Playback == null)
+            {
+                var selected = Queue.Current;
+                return selected == null ? null : new PlaybackSnapshot(selected.Metadata, null, PlaybackPhase.Saved,
+                    0, 0, selected.Size, null, selected.Id, default, false, RepeatMode, Autoplay);
+            }
             var track = Playback;
             var phase = PlaybackPresentation.Resolve(true, track.Failure != null, actualPlayer.PlaybackState,
                 SessionPlayer.PlayWhenReady, actualPlayer.IsPlaying, actualPlayer.PlaybackSuppressionReason != 0,
@@ -579,7 +613,8 @@ namespace Seeker.Playback
 
         public override void OnTaskRemoved(Intent rootIntent)
         {
-            if (!IsPlaybackOngoing) StopPlayback();
+            // Dismissing a paused task closes its resources, but keeps the saved queue.
+            if (!IsPlaybackOngoing) StopSelf();
             base.OnTaskRemoved(rootIntent);
         }
 

@@ -33,7 +33,8 @@ reader and waits for its transfer cleanup before starting the new peer request.
 User selections are single-use in-process requests, not replayable filenames in exported service
 intents. Rapid selections supersede pending selections. The service is `NotSticky`: if Android kills
 the process, a dead peer connection is never assumed resumable. Relaunching cleans abandoned cache
-files; the user can select Play again. Explicit Stop and app Shutdown cancel reads, release the transfer
+files and restores the saved queue paused; Play starts the selected song from the beginning.
+Explicit Stop and app Shutdown cancel reads, release the transfer
 reservation, and delete temporary data after transfer shutdown. Advancing the queue performs the same
 cleanup for the old track before starting the next remote request. Natural completion advances, repeats,
 or holds the current track according to the queue controls. A held track retains its buffer for replay
@@ -125,8 +126,30 @@ ordinary downloads and uploads retain their existing behavior.
 
 Media3 manages paused foreground-service demotion and notification updates. Ongoing playback remains
 when the task is swiped away; a paused task removal stops and cleans the track. Long-paused playback
-is not guaranteed to survive process reclamation. Explicit application Shutdown releases the session,
+is not guaranteed to survive process reclamation, but its queue is preserved. Explicit application Shutdown releases the session,
 player, transfer, and locks before closing the Soulseek client.
+
+## Saved queue
+
+Queue edits and selection changes save a versioned JSON source list in dedicated private Android
+preferences. Repeat/autoplay settings are saved with it. Preferences update in memory immediately and
+write asynchronously through Android's normal preference mechanism. A queue source revision and
+settings checkpoint prevent serializing/writing during ordinary position, byte-progress or metadata
+updates. Snapshots preserve source peer, remote filename, size, stable IDs, order, disc number and the
+filename/folder encoding flags. They omit tags, artwork, errors, playing state, cache data and position.
+
+Opening MainActivity with a saved queue binds the playback service and restores a **Saved queue**
+view. It does not select a player source, transfer bytes, acquire playback/transfer locks, or publish
+an active song's identifying session metadata. Next/Previous and removing a saved queue row only
+change the saved selection/list. Play or explicitly selecting a row starts that song from the beginning
+using the normal source/foreground-notification path and fresh tag extraction. A restored queue adds
+no position refresh timer while idle. There is no boot-time or process-restart autoplay.
+
+Stop/Clear Queue remove the saved snapshot. Service destruction, app shutdown, and dismissing a
+paused task release live resources without deleting the saved queue. Invalid/unsupported snapshots
+are ignored and discarded. The JSON is bounded to 2 MiB of characters and 10,000 entries; an oversized
+replacement is not saved and removes the older snapshot so it cannot later restore a different queue.
+The codec uses generated System.Text.Json metadata so Android trimming does not depend on reflection.
 
 ## In-app use and scrobblers
 

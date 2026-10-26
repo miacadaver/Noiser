@@ -1,6 +1,6 @@
 namespace Common.Playback
 {
-    public enum PlaybackPhase { Stopped, Connecting, Queued, Buffering, Playing, Paused, Error, Reconnecting, Stalled }
+    public enum PlaybackPhase { Stopped, Connecting, Queued, Buffering, Playing, Paused, Error, Reconnecting, Stalled, Saved }
 
     public static class PlaybackPresentation
     {

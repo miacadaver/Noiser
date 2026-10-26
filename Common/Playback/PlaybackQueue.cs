@@ -76,6 +76,7 @@ namespace Common.Playback
         public bool HasNext => currentIndex >= 0 && currentIndex + 1 < entries.Count;
         public bool HasPrevious => currentIndex > 0;
         private int currentIndex = -1;
+        public long Revision { get; private set; }
 
         /// <summary>Replace atomically after validation. A failed folder build must not discard the playing queue.</summary>
         public bool Replace(IEnumerable<PlaybackQueueEntry> source, string? selectedEntryId = null)
@@ -91,6 +92,7 @@ namespace Common.Playback
             entries.Clear();
             entries.AddRange(replacement);
             currentIndex = selected;
+            Revision++;
             return true;
         }
 
@@ -98,6 +100,7 @@ namespace Common.Playback
         {
             int found = entries.FindIndex(entry => entry.Id == id);
             if (found < 0) return null;
+            if (currentIndex != found) Revision++;
             currentIndex = found;
             return Current;
         }
@@ -108,6 +111,7 @@ namespace Common.Playback
             if (completed) Current?.MarkPlayed();
             else Current?.MarkSkipped();
             currentIndex++;
+            Revision++;
             return Current;
         }
 
@@ -116,6 +120,7 @@ namespace Common.Playback
             if (!HasPrevious) return null;
             Current?.MarkPending();
             currentIndex--;
+            Revision++;
             return Current;
         }
 
@@ -124,6 +129,7 @@ namespace Common.Playback
             if (entry == null) throw new ArgumentNullException(nameof(entry));
             if (!IsSupportedAudio(entry.RemotePath) || entries.Any(existing => existing.Id == entry.Id)) return false;
             entries.Add(entry.Copy());
+            Revision++;
             if (currentIndex < 0) currentIndex = 0;
             return true;
         }
@@ -134,6 +140,7 @@ namespace Common.Playback
             if (!IsSupportedAudio(entry.RemotePath) || entries.Any(existing => existing.Id == entry.Id)) return false;
             int insertion = currentIndex < 0 ? 0 : currentIndex + 1;
             entries.Insert(insertion, entry.Copy());
+            Revision++;
             if (currentIndex < 0) currentIndex = 0;
             return true;
         }
@@ -145,13 +152,18 @@ namespace Common.Playback
             removedCurrent = index >= 0 && index == currentIndex;
             if (index < 0) return Current;
             entries.RemoveAt(index);
+            Revision++;
             if (entries.Count == 0) currentIndex = -1;
             else if (index < currentIndex) currentIndex--;
             else if (index == currentIndex) currentIndex = Math.Min(index, entries.Count - 1);
             return Current;
         }
 
-        public void Clear() { entries.Clear(); currentIndex = -1; }
+        public void Clear()
+        {
+            if (entries.Count > 0) Revision++;
+            entries.Clear(); currentIndex = -1;
+        }
 
         /// <summary>
         /// Rows for the queue dialog: the current song and everything after it in folder order.

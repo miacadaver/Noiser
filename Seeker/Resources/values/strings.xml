@@ -7,6 +7,8 @@
     <string name="stream_previous">Previous</string>
     <string name="stream_next">Next</string>
     <string name="stream_queue">Queue</string>
+    <string name="stream_saved_queue">Saved queue</string>
+    <string name="stream_saved_queue_status">Queue restored. Tap Play to start this song from the beginning.</string>
     <string name="stream_repeat_off">Repeat: Off</string>
     <string name="stream_repeat_all">Repeat: All</string>
     <string name="stream_repeat_one">Repeat: One</string>

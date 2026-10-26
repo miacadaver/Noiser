@@ -17,6 +17,8 @@ Playback supports MP3 folder queues, Next/Previous, Play next/Add to queue, repe
 One track is received at a time, with buffering and up to three reconnect attempts. Seeking is limited to
 audio already received and parsed; it cannot jump to an unreceived part of a remote file.
 At the end of the queue, the current track stays available for replay until Stop or another selection.
+The queue and selected song are saved across app restarts and return paused. Tap Play to start the
+selected song from the beginning; playback position is not yet restored. Stop clears the saved queue.
 See [streaming implementation and device checks](docs/streaming.md)
 and [background playback architecture and validation](docs/background-playback.md), plus the upstream
 [development instructions](DEVELOPMENT.md).

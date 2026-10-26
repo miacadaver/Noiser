@@ -75,7 +75,12 @@ Embedded tags arrive for the active track and update its queue metadata without 
 The player exposes Next, Previous, and Queue. Browse file actions and search-track long presses offer
 Play next and Add to queue. Queue rows can be selected or removed; clearing the queue stops playback.
 The dialog shows the current track and the tracks after it; Repeat All also shows the wrapped entries.
-Queues are in memory and are cleared by Stop or process death.
+Queue sources, order, selection and repeat/autoplay settings are saved in private preferences and
+restored paused after a process restart. The mini-player shows **Saved queue**; Play starts the
+selected song from the beginning. Saved queue navigation and removal do not start transfers. Stop
+and Clear Queue discard the saved queue; app shutdown and dismissal of a paused task preserve it.
+Playback positions, cached audio, error states and trusted tag metadata are not persisted. Tags are
+read again before the new playback session exposes identifying media metadata.
 
 Autoplay is enabled by default. Repeat cycles Off, All, One; selecting All or One enables autoplay,
 and disabling autoplay returns repeat to Off. Repeat One replays the current buffer; Repeat All wraps
