@@ -17,6 +17,6 @@
             android:textSize="12sp" android:textColor="?attr/cellTextColorSubdued" android:singleLine="true" android:ellipsize="end" />
     </LinearLayout>
     <ImageButton android:id="@+id/streamMiniPause" android:layout_width="48dp" android:layout_height="48dp"
-        android:background="?android:attr/selectableItemBackgroundBorderless" android:tint="?attr/normalTextColor"
+        android:background="?android:attr/selectableItemBackgroundBorderless" android:tint="?attr/mainTextColor"
         android:src="@drawable/stream_play" android:contentDescription="@string/stream_pause" />
 </LinearLayout>

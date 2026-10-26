@@ -274,7 +274,7 @@
     <string name="always_light">Selalu terang</string>
     <string name="always_dark">Selalu gelap</string>
     <!-- theme variant color names (AMOLED variants are composed in code as "AMOLED - <color>") -->
-    <string name="theme_purple">Ungu</string>
+    <string name="theme_purple">Noiser Mint</string>
     <string name="theme_grey">Abu-abu</string>
     <string name="theme_blue">Biru</string>
     <string name="theme_red">Merah</string>

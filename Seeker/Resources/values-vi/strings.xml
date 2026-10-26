@@ -274,7 +274,7 @@
 	<string name="always_light">Luôn sáng</string>
 	<string name="always_dark">Luôn tối</string>
 	<!-- theme variant color names (AMOLED variants are composed in code as "AMOLED - <color>") -->
-	<string name="theme_purple">Tím</string>
+	<string name="theme_purple">Noiser Mint</string>
 	<string name="theme_grey">Xám</string>
 	<string name="theme_blue">Xanh dương</string>
 	<string name="theme_red">Đỏ</string>

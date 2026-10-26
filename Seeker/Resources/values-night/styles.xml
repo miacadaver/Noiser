@@ -24,37 +24,42 @@
     </style>
 
     <style name="AppTheme.NoActionBar">
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
-        <item name="colorPrimary">#4f58c4</item>
-        <item name="mainPurple">#4f58c4</item>
-        <item name="swipeToRefreshProgress">#ffffffff</item>
-        <item name="swipeToRefreshBackground">#ff585858</item>
-        <item name="mainPurpleStatusBar">@color/colorPrimaryDark</item>
+        <item name="colorPrimary">@color/noiserMint</item>
+        <item name="mainPurple">@color/noiserChrome</item>
+        <item name="swipeToRefreshProgress">@color/noiserMint</item>
+        <item name="swipeToRefreshBackground">@color/noiserDarkSurface</item>
+        <item name="mainPurpleStatusBar">@color/noiserChrome</item>
 
 
-        <item name="whitePurpleForNavBar">#858ddd</item>
+        <item name="whitePurpleForNavBar">@color/noiserNavIndicator</item>
 
         <item name="checkBoxColor">@color/colorAccent</item>
         <item name="checkboxStyle">@style/checkBoxStyle</item>
 
         <item name="mainPurpleForNavBar">?attr/mainPurple</item>
 
-        <item name="slskAccent">#437eab</item>
+        <item name="slskAccent">@color/noiserMint</item>
 
         <item name="windowActionModeOverlay">true</item>
-        <item name="android:actionModeBackground">?attr/colorPrimary</item>
-        <item name="actionModeBackground">?attr/colorPrimary</item>
+        <item name="android:actionModeBackground">?attr/mainPurple</item>
+        <item name="actionModeBackground">?attr/mainPurple</item>
         <!-- Needed, otherwise in dark mode, icons that the system provides (back, 3 dot menu) are 60% opacity -->
         <item name="actionModeTheme">@style/ThemeOverlay.Material3.Dark.ActionBar</item>
 
         <item name="bottomSheetDialogTheme">@style/SeekerBottomSheetDialog</item>
+        <item name="colorAccent">@color/noiserMint</item>
+        <item name="colorSecondaryContainer">@color/noiserDarkContainer</item>
+        <item name="android:windowBackground">@color/noiserDarkBackground</item>
     </style>
 
     <style name="SeekerBottomSheetDialog" parent="ThemeOverlay.Material3.BottomSheetDialog" />
 
     <style name="SeekerButtonStyle">
-        <item name="android:textColor">#ffffff</item>
+        <item name="android:textColor">@color/noiserOnChrome</item>
         <item name="android:paddingLeft">10dp</item>
         <item name="android:paddingRight">10dp</item>
         <item name="android:background">@drawable/rounded_button</item>
@@ -74,11 +79,11 @@
     </style>
 
     <style name="navTextInactive">
-        <item name="android:textColor">#ffffff</item>
+        <item name="android:textColor">@color/noiser_navigation</item>
     </style>
 
     <style name="navTextActive">
-        <item name="android:textColor">#ffffff</item>
+        <item name="android:textColor">@color/noiser_navigation</item>
     </style>
 
     <style
@@ -86,9 +91,17 @@
         parent="ThemeOverlay.MaterialComponents.Dark.ActionBar"
     >
         <item name="actionModeStyle">@style/MyActionMode</item>
+        <item name="colorControlNormal">@color/noiserOnChrome</item>
+        <item name="android:textColorPrimary">@color/noiserOnChrome</item>
+        <item name="android:textColorSecondary">@color/noiserNavInactive</item>
     </style>
 
-    <style name="AppTheme.PopupOverlay" parent="ThemeOverlay.Material3.Dark" />
+    <style name="AppTheme.PopupOverlay" parent="ThemeOverlay.Material3.Dark">
+        <item name="colorSurface">?attr/dialog_background</item>
+        <item name="colorSurfaceContainerHigh">?attr/dialog_background</item>
+        <item name="colorOnSurface">?attr/normalTextColor</item>
+        <item name="android:textColorPrimary">?attr/normalTextColor</item>
+    </style>
 
     <!--<style name="Widget.App.BottomNavigationView" parent="Widget.MaterialComponents.BottomNavigationView.Colored">
     <item name="materialThemeOverlay">@style/ThemeOverlay.App.BottomNavigationView</item>

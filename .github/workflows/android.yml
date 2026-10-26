@@ -37,6 +37,9 @@ jobs:
       - name: Test development signing safeguards
         run: python3 -m unittest discover -s .github/scripts -p 'test_development_signing.py'
 
+      - name: Check Noiser theme resources and contrast
+        run: python3 .github/scripts/check_noiser_theme.py
+
       - name: Prepare persistent development key
         id: signing
         if: env.PERSISTENT_SIGNING == 'true'

@@ -47,7 +47,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="10:00"
-        android:textColor="#C0C0C0"
+        android:textColor="?attr/cellTextColorSubdued"
         android:textSize="10sp"
         app:layout_constraintBottom_toBottomOf="@+id/card_gchat_message_me"
         app:layout_constraintRight_toLeftOf="@+id/card_gchat_message_me"

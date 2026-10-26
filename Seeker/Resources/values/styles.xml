@@ -17,7 +17,7 @@
 	</style>
 
 	<style name="MyActionModeTitle" parent="TextAppearance.AppCompat.Widget.ActionMode.Title">
-        <item name="android:textColor">?attr/colorOnPrimary</item>
+        <item name="android:textColor">@color/noiserOnChrome</item>
 	</style>
 
     <style name="OutlinedRoundedBox" parent="">
@@ -35,23 +35,25 @@
     </style>
 
     <style name="AppTheme.NoActionBar">
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
-        <item name="colorPrimary">#4f58c4</item>
-        <item name="colorSecondaryContainer">#e4e6f6</item>
-        <item name="mainPurple">#4f58c4</item>
-        <item name="swipeToRefreshProgress">#4f58c4</item>
-        <item name="swipeToRefreshBackground">#ffffffff</item>
-        <item name="mainPurpleStatusBar">@color/colorPrimaryDark</item>
+        <item name="colorPrimary">@color/noiserTeal</item>
+        <item name="colorSecondaryContainer">@color/noiserLightContainer</item>
+        <item name="mainPurple">@color/noiserChrome</item>
+        <item name="swipeToRefreshProgress">@color/noiserTeal</item>
+        <item name="swipeToRefreshBackground">@color/noiserLightSurface</item>
+        <item name="mainPurpleStatusBar">@color/noiserChrome</item>
 
-        <item name="whitePurpleForNavBar">#858ddd</item>
+        <item name="whitePurpleForNavBar">@color/noiserNavIndicator</item>
 
         <item name="mainPurpleForNavBar">?attr/mainPurple</item>
 
         <item name="checkBoxColor">@color/colorAccent</item>
         <item name="checkboxStyle">@style/checkBoxStyle</item>
 
-        <item name="slskAccent">#437eab</item>
+        <item name="slskAccent">@color/noiserTeal</item>
 
         <item name="snackbarButtonStyle">@style/Seeker.Snackbar.Action</item>
 
@@ -61,9 +63,11 @@
         <item name="actionModeTheme">@style/ThemeOverlay.Material3.Dark.ActionBar</item>
 
         <!-- Without this, BottomSheetDialogFragment falls back to Theme.Design.Light.BottomSheetDialog,
-             whose colorPrimary is Material's default teal, not the app's purple. That mismatch is
-             visible on any MaterialButton/MaterialButtonToggleGroup/MaterialCheckBox inside a sheet. -->
+             whose colors can differ from the host application's palette. That mismatch is
+             visible on Material buttons, toggle groups, and checkboxes inside a sheet. -->
         <item name="bottomSheetDialogTheme">@style/SeekerBottomSheetDialog</item>
+        <item name="colorAccent">@color/noiserTeal</item>
+        <item name="android:windowBackground">@color/noiserLightBackground</item>
     </style>
 
     <style name="SeekerBottomSheetDialog" parent="ThemeOverlay.Material3.BottomSheetDialog" />
@@ -89,7 +93,7 @@
     </style>
 
     <style name="SeekerButtonStyle">
-        <item name="android:textColor">#ffffff</item>
+        <item name="android:textColor">@color/noiserOnChrome</item>
         <item name="android:paddingLeft">10dp</item>
         <item name="android:paddingRight">10dp</item>
         <item name="android:background">@drawable/rounded_button</item>
@@ -115,11 +119,11 @@
     </style>
 
     <style name="navTextInactive">
-        <item name="android:textColor">#ffffff</item>
+        <item name="android:textColor">@color/noiser_navigation</item>
     </style>
 
     <style name="navTextActive">
-        <item name="android:textColor">#ffffff</item>
+        <item name="android:textColor">@color/noiser_navigation</item>
     </style>
 
     <style
@@ -127,9 +131,17 @@
         parent="ThemeOverlay.Material3.Dark.ActionBar"
     >
         <item name="actionModeStyle">@style/MyActionMode</item>
+        <item name="colorControlNormal">@color/noiserOnChrome</item>
+        <item name="android:textColorPrimary">@color/noiserOnChrome</item>
+        <item name="android:textColorSecondary">@color/noiserNavInactive</item>
     </style>
 
-    <style name="AppTheme.PopupOverlay" parent="ThemeOverlay.Material3.Light" />
+    <style name="AppTheme.PopupOverlay" parent="ThemeOverlay.Material3.Light">
+        <item name="colorSurface">?attr/dialog_background</item>
+        <item name="colorSurfaceContainerHigh">?attr/dialog_background</item>
+        <item name="colorOnSurface">?attr/normalTextColor</item>
+        <item name="android:textColorPrimary">?attr/normalTextColor</item>
+    </style>
 
     <!--<style name="Widget.App.BottomNavigationView" parent="Widget.MaterialComponents.BottomNavigationView.Colored">
     <item name="materialThemeOverlay">@style/ThemeOverlay.App.BottomNavigationView</item>

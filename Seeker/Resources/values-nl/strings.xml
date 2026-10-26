@@ -274,7 +274,7 @@
     <string name="always_light">Always light</string>
     <string name="always_dark">Always dark</string>
     <!-- theme variant color names (AMOLED variants are composed in code as "AMOLED - <color>") -->
-    <string name="theme_purple">Purple</string>
+    <string name="theme_purple">Noiser Mint</string>
     <string name="theme_grey">Grey</string>
     <string name="theme_blue">Blue</string>
     <string name="theme_red">Red</string>

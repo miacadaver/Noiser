@@ -274,7 +274,7 @@
     <string name="always_light">浅色</string>
     <string name="always_dark">深色</string>
     <!-- theme variant color names (AMOLED variants are composed in code as "AMOLED - <color>") -->
-    <string name="theme_purple">紫色</string>
+    <string name="theme_purple">Noiser Mint</string>
     <string name="theme_grey">灰色</string>
     <string name="theme_blue">蓝色</string>
     <string name="theme_red">红色</string>

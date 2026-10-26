@@ -1,6 +1,6 @@
 # Background playback, MediaSession, and mini-player
 
-The manifest reports version **3.11.2-stream.9** (Android version code 152), with the Noiser label and refreshed bird artwork. Minimum Android API is 23;
+The manifest reports version **3.11.2-stream.10** (Android version code 153), with the Noiser label and refreshed bird artwork. Minimum Android API is 23;
 target API is 36. There is one ExoPlayer, one MediaSession, and at most one active peer stream.
 The current code includes MP3 folder queues, repeat/autoplay controls, and bounded seeking.
 Playback resumption after process death and direct scrobbling are not implemented.

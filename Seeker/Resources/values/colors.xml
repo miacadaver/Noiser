@@ -1,64 +1,64 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <resources>
-    <color name="colorPrimary">#437eab</color>
-    <color name="colorPrimaryDark">#1B3147</color>
-    <color name="colorAccent">#3498db</color>
-    <color name="colorSurface">#FF0000</color>
-    <color name="cellbackSelected">#3498db</color>
-    <color name="batchSelectHighlight">#BAD3F2</color>
+    <color name="colorPrimary">@color/noiserTeal</color>
+    <color name="colorPrimaryDark">@color/noiserChrome</color>
+    <color name="colorAccent">@color/noiserTeal</color>
+    <color name="colorSurface">@color/noiserLightSurface</color>
+    <color name="cellbackSelected">@color/noiserLightContainer</color>
+    <color name="batchSelectHighlight">@color/noiserLightContainer</color>
 
-    <color name="mainPurpleTransparent">#994f58c4</color>
+    <color name="mainPurpleTransparent">#99246B5B</color>
     <!--light transparency-->
-    <color name="lightPurpleNotTransparent">#959BDC</color>
+    <color name="lightPurpleNotTransparent">@color/noiserMint</color>
 
-    <color name="androidStockMessagesNewBlue">#0B57D0</color>
+    <color name="androidStockMessagesNewBlue">@color/noiserTeal</color>
 
-    <color name="defaultTextColor">#ff737373</color>
+    <color name="defaultTextColor">@color/noiserLightSecondaryText</color>
 
     <color name="offline">#F7636A</color>
     <color name="away">#FFCD87</color>
-    <color name="online">#89B38F</color>
+    <color name="online">@color/noiserTeal</color>
     <color name="queueColor">#F7636A</color>
     <color name="hardErrorRed">#cc0000</color>
-    <color name="colorButtonText">#437eab</color>
-    <color name="mainPurpleTurnedOff">#77437eab</color>
-    <color name="chatBoxSplitterElevation">#e0e0e0</color>
+    <color name="colorButtonText">@color/noiserTeal</color>
+    <color name="mainPurpleTurnedOff">#77246B5B</color>
+    <color name="chatBoxSplitterElevation">@color/noiserLightDivider</color>
 
-    <color name="currentPage">#ff0C9DCE</color>
+    <color name="currentPage">@color/noiserTeal</color>
 
-    <color name="subTextColor">#ff757575</color>
+    <color name="subTextColor">@color/noiserLightSecondaryText</color>
     <color name="slightTint">#18000000</color>
     <color name="bolderTint">#40000000</color>
 
-    <color name="dialog_background">#ffffffff</color>
+    <color name="dialog_background">@color/noiserLightDialog</color>
 
-    <color name="chipSeparatorColor">#ff606060</color>
+    <color name="chipSeparatorColor">@color/noiserLightDivider</color>
 
     <color name="absoluteBackColor1">#ff000000</color>
-    <color name="absoluteBackColor2">#ff303030</color>
-    <color name="absoluteBackColor3">#ffffff</color>
+    <color name="absoluteBackColor2">@color/noiserDarkBackground</color>
+    <color name="absoluteBackColor3">@color/noiserLightBackground</color>
 
-    <color name="checkCircleSelected">#303030</color>
-    <color name="checkCircleUnselected">#303030</color>
+    <color name="checkCircleSelected">@color/noiserTeal</color>
+    <color name="checkCircleUnselected">@color/noiserLightMutedText</color>
 
-    <color name="transferChipCompletedText">#2E9E5E</color>
-    <color name="transferChipCompletedBg">#1A2E9E5E</color>
-    <color name="transferChipDownloadingText">#2A7DE1</color>
-    <color name="transferChipDownloadingBg">#1A2A7DE1</color>
+    <color name="transferChipCompletedText">@color/noiserTeal</color>
+    <color name="transferChipCompletedBg">#1A246B5B</color>
+    <color name="transferChipDownloadingText">@color/noiserTeal</color>
+    <color name="transferChipDownloadingBg">#1A246B5B</color>
     <color name="transferChipQueuedText">#E8A000</color>
     <color name="transferChipQueuedBg">#1AFFA726</color>
-    <color name="transferChipPausedText">#5C6BC0</color>
-    <color name="transferChipPausedBg">#1A5C6BC0</color>
+    <color name="transferChipPausedText">@color/noiserLightSecondaryText</color>
+    <color name="transferChipPausedBg">@color/noiserLightContainer</color>
     <color name="transferChipFailedText">#C62828</color>
     <color name="transferChipFailedBg">#1AF44336</color>
 
-    <color name="transferProgressTrack">#1A000000</color>
-    <color name="transferSpeedSubdued">#707070</color>
-    <color name="transferUsernameSubdued">#999999</color>
+    <color name="transferProgressTrack">@color/noiserLightDivider</color>
+    <color name="transferSpeedSubdued">@color/noiserLightSecondaryText</color>
+    <color name="transferUsernameSubdued">@color/noiserLightMutedText</color>
 
-    <color name="statusConnectedDot">#4CAF50</color>
-    <color name="statusConnectedText">#2E7D32</color>
-    <color name="statusConnectedChipBg">#1A4CAF50</color>
+    <color name="statusConnectedDot">@color/noiserTeal</color>
+    <color name="statusConnectedText">@color/noiserTeal</color>
+    <color name="statusConnectedChipBg">#1A246B5B</color>
     <color name="statusConnectingDot">#FFA726</color>
     <color name="statusConnectingText">#E65100</color>
     <color name="statusConnectingChipBg">#1AFFA726</color>
@@ -70,8 +70,8 @@
 
     <color name="searchChipFlacText">#E65100</color>
     <color name="searchChipFlacBg">#1AE65100</color>
-    <color name="searchChipMp3Text">#1565C0</color>
-    <color name="searchChipMp3Bg">#1A1565C0</color>
+    <color name="searchChipMp3Text">@color/noiserTeal</color>
+    <color name="searchChipMp3Bg">#1A246B5B</color>
     <color name="searchChipWavText">#2E7D32</color>
     <color name="searchChipWavBg">#1A2E7D32</color>
     <color name="searchChipM4aText">#6A1B9A</color>

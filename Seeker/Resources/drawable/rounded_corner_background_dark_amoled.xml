@@ -1,8 +1,8 @@
 ﻿<?xml version="1.0" encoding="UTF-8" ?>
 <shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <solid android:color="#282828" />
+    <solid android:color="@color/noiserAmoledSurface" />
     <!--This color (slightestContrastColor) has to be hardcoded as color attributes are not allowed in drawables-->
-    <stroke android:width="3dp" android:color="#282828" />
+    <stroke android:width="3dp" android:color="@color/noiserAmoledSurface" />
 
     <padding
         android:left="1dp"

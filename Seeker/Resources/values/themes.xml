@@ -10,30 +10,30 @@
 	</style>-->
 
     <style name="DefaultLight" parent="AppTheme.NoActionBar">
-        <item name="colorOnPrimary">#ffffff</item>
-        <item name="colorSurface">#FEF7FF</item>
-        <item name="colorSurfaceLogin">#FEF7FF</item>
-        <item name="colorOnSurface">?attr/normalTextColor</item>
-		<item name="colorOnBackground">?attr/normalTextColor</item>
+        <item name="colorOnPrimary">@color/noiserOnChrome</item>
+        <item name="colorSurface">@color/noiserLightBackground</item>
+        <item name="colorSurfaceLogin">@color/noiserLightBackground</item>
+        <item name="colorOnSurface">@color/noiserLightText</item>
+        <item name="colorOnBackground">@color/noiserLightText</item>
 
-        <item name="normalTextColor">#000000</item>
-        <item name="normalTextColorNonTinted">#000000</item>
+        <item name="normalTextColor">@color/noiserLightText</item>
+        <item name="normalTextColorNonTinted">@color/noiserLightText</item>
 
         <item name="destructiveColor">#B3261E</item>
 
-		<item name="chat_left">#a12e2e</item>
+        <item name="chat_left">#a12e2e</item>
         <item name="chat_join">#2e8a5f</item>
         <!--<item name="dialogBackground">#52000000</item>-->
-        <item name="cellbackColor">#00000000</item>
-        <item name="cellback">#ffffff</item>
-        <item name="user_info_chip_background">#ffffff</item>
+        <item name="cellbackColor">@color/noiserLightBackground</item>
+        <item name="cellback">@color/noiserLightBackground</item>
+        <item name="user_info_chip_background">@color/noiserLightSurface</item>
         <item name="CustomSelector">@drawable/CustomSelector_ffffff</item>
-        <item name="cellbackColorDownloadDialog">#00000000</item>
-        <item name="expandIconColor">#888CB5</item>
-        <item name="cellStroke">#994f58c4</item>
+        <item name="cellbackColorDownloadDialog">@color/noiserLightDialog</item>
+        <item name="expandIconColor">@color/noiserTeal</item>
+        <item name="cellStroke">@color/noiserLightOutline</item>
 
 		<!-- this will be shown on opposite color background so use the colorPrimary dark variant for it-->
-        <item name="snackbarActionColor">#8AB4F8</item>
+        <item name="snackbarActionColor">@color/noiserMint</item>
 
         <item name="rounded_input_edit">
             @drawable/rounded_text_input_background_light
@@ -42,43 +42,43 @@
             @drawable/chat_input_background_light
         </item>
 
-        <item name="android_default_notification_blue_color">#4978B8</item>
+        <item name="android_default_notification_blue_color">@color/noiserTeal</item>
         <item name="android_default_notification_complementary_color">
             #B88949
         </item>
-        <item name="seeker_notification_other_person_color">#6449B7</item>
+        <item name="seeker_notification_other_person_color">@color/noiserTeal</item>
 
-        <item name="floating_action_bar_to_bottom_icon">#5F5F5F</item>
-        <item name="floating_action_bar_to_bottom_background">#FAFAFA</item>
+        <item name="floating_action_bar_to_bottom_icon">@color/noiserTeal</item>
+        <item name="floating_action_bar_to_bottom_background">@color/noiserLightSurface</item>
 
-        <item name="dialog_background">#ffffffff</item>
-        <item name="surface_variant1">#F3EDF7</item>
-        <item name="searchBottomSheetBackground">#F2F5FA</item>
+        <item name="dialog_background">@color/noiserLightDialog</item>
+        <item name="surface_variant1">@color/noiserLightContainer</item>
+        <item name="searchBottomSheetBackground">@color/noiserLightDialog</item>
 
-        <item name="pseudo_window_background_color">#00000000</item>
+        <item name="pseudo_window_background_color">@color/noiserLightBackground</item>
 
-        <item name="secondaryColor">#cccccc</item>
-        <item name="cellTextColor">#2c3e50</item>
-        <item name="cellTextColorSubdued">#cc2c3e50</item>
-        <item name="cellTextColorMoreSubdued">#a02c3e50</item>
-        <item name="cellTextColorVerySubdued">#802c3e50</item>
-        <item name="slightestContrastColor">#e0e0e0</item>
-        <item name="slightContrastColor">#c7c7c7</item>
-        <item name="settingsDividerColor">#A3A3A3</item>
-        <item name="linkDividerColor">#70A3A3A3</item>
-        <item name="mainTextColor">#4f58c4</item>
+        <item name="secondaryColor">@color/noiserLightContainer</item>
+        <item name="cellTextColor">@color/noiserLightText</item>
+        <item name="cellTextColorSubdued">@color/noiserLightSecondaryText</item>
+        <item name="cellTextColorMoreSubdued">@color/noiserLightMutedText</item>
+        <item name="cellTextColorVerySubdued">@color/noiserLightMutedText</item>
+        <item name="slightestContrastColor">@color/noiserLightDivider</item>
+        <item name="slightContrastColor">@color/noiserLightOutline</item>
+        <item name="settingsDividerColor">@color/noiserLightDivider</item>
+        <item name="linkDividerColor">@color/noiserLightDivider</item>
+        <item name="mainTextColor">@color/noiserTeal</item>
 
-        <item name="searchTabHeader">#303030</item>
-        <item name="searchTabPillInactiveColor">#e0e0e0</item>
-        <item name="mainTextColorHinted">#4D4D4D</item>
-        <item name="mainTextColorHintedFlair">#959BDC</item>
-        <item name="searchTabButtonColor">?attr/mainPurple</item>
+        <item name="searchTabHeader">@color/noiserLightText</item>
+        <item name="searchTabPillInactiveColor">@color/noiserLightContainer</item>
+        <item name="mainTextColorHinted">@color/noiserLightSecondaryText</item>
+        <item name="mainTextColorHintedFlair">@color/noiserTeal</item>
+        <item name="searchTabButtonColor">@color/noiserTeal</item>
 
         <item name="expandableModernChevronBg">#00F5F5F5</item>
-        <item name="expandableModernFilesBg">#ffffff</item>
-        <item name="expandableModernSeparatorColor">#18000000</item>
+        <item name="expandableModernFilesBg">@color/noiserLightSurface</item>
+        <item name="expandableModernSeparatorColor">@color/noiserLightDivider</item>
 
-        <item name="searchHeaderBackground">@android:color/transparent</item>
+        <item name="searchHeaderBackground">@color/noiserLightBackground</item>
 
         <item name="the_rounded_corner_background_drawable">
             @drawable/rounded_corner_background_light
@@ -91,8 +91,48 @@
         >
             ?attr/the_rounded_corner_dialog_background_drawable
         </item>
-		<item name="actionModeStyle">@style/MyActionMode</item>
-	</style>
+        <item name="actionModeStyle">@style/MyActionMode</item>
+        <item name="colorPrimary">@color/noiserTeal</item>
+        <item name="colorAccent">@color/noiserTeal</item>
+        <item name="colorPrimaryContainer">@color/noiserLightContainer</item>
+        <item name="colorOnPrimaryContainer">@color/noiserLightText</item>
+        <item name="colorSecondary">@color/noiserTeal</item>
+        <item name="colorOnSecondary">@color/noiserOnChrome</item>
+        <item name="colorSecondaryContainer">@color/noiserLightContainer</item>
+        <item name="colorOnSecondaryContainer">@color/noiserLightText</item>
+        <item name="colorTertiary">@color/noiserTeal</item>
+        <item name="colorOnTertiary">@color/noiserOnChrome</item>
+        <item name="colorTertiaryContainer">@color/noiserLightContainer</item>
+        <item name="colorOnTertiaryContainer">@color/noiserLightText</item>
+        <item name="colorSurfaceVariant">@color/noiserLightContainer</item>
+        <item name="colorOnSurfaceVariant">@color/noiserLightSecondaryText</item>
+        <item name="colorSurfaceContainer">@color/noiserLightSurface</item>
+        <item name="colorSurfaceContainerLow">@color/noiserLightSurface</item>
+        <item name="colorSurfaceContainerLowest">@color/noiserLightBackground</item>
+        <item name="colorSurfaceContainerHigh">@color/noiserLightDialog</item>
+        <item name="colorSurfaceContainerHighest">@color/noiserLightContainer</item>
+        <item name="colorSurfaceBright">@color/noiserLightDialog</item>
+        <item name="colorSurfaceDim">@color/noiserLightBackground</item>
+        <item name="colorOutline">@color/noiserLightOutline</item>
+        <item name="colorOutlineVariant">@color/noiserLightDivider</item>
+        <item name="colorSurfaceInverse">@color/noiserDarkSurface</item>
+        <item name="colorOnSurfaceInverse">@color/noiserDarkText</item>
+        <item name="colorPrimaryInverse">@color/noiserMint</item>
+        <item name="android:colorBackground">@color/noiserLightBackground</item>
+        <item name="android:windowBackground">@color/noiserLightBackground</item>
+        <item name="android:textColorPrimary">@color/noiserLightText</item>
+        <item name="android:textColorSecondary">@color/noiserLightSecondaryText</item>
+        <item name="android:colorControlActivated">@color/noiserTeal</item>
+        <item name="colorControlActivated">@color/noiserTeal</item>
+        <item name="mainPurple">@color/noiserChrome</item>
+        <item name="mainPurpleStatusBar">@color/noiserChrome</item>
+        <item name="mainPurpleForNavBar">@color/noiserChrome</item>
+        <item name="whitePurpleForNavBar">@color/noiserNavIndicator</item>
+        <item name="slskAccent">@color/noiserTeal</item>
+        <item name="checkBoxColor">@color/noiserTeal</item>
+        <item name="swipeToRefreshProgress">@color/noiserTeal</item>
+        <item name="swipeToRefreshBackground">@color/noiserLightSurface</item>
+    </style>
 
 	<style name="MyActionMode" parent="Widget.AppCompat.ActionMode">
 		<item name="background">?attr/mainPurple</item>
@@ -100,7 +140,7 @@
 	</style>
 
 	<style name="MyActionModeTitle" parent="TextAppearance.AppCompat.Widget.ActionMode.Title">
-        <item name="android:textColor">?attr/colorOnPrimary</item>
+        <item name="android:textColor">@color/noiserOnChrome</item>
 	</style>
 
     <style name="DefaultLight_Blue" parent="DefaultLight">
@@ -182,46 +222,46 @@
     </style>
 
     <style name="DefaultDark" parent="AppTheme.NoActionBar">
-        <item name="colorOnPrimary">#ffffff</item>
-        <item name="colorPrimary">#7C8DEB</item>
-        <item name="colorSurface">#303030</item>
-        <item name="colorSurfaceLogin">#404040</item>
-        <item name="colorOnSurface">?attr/normalTextColor</item>
-		<item name="colorOnBackground">?attr/normalTextColor</item>
-        <item name="mainTextColor">#bcc1f7</item>
-        <item name="checkBoxColor">#4f58c4</item>
+        <item name="colorOnPrimary">@color/noiserChrome</item>
+        <item name="colorPrimary">@color/noiserMint</item>
+        <item name="colorSurface">@color/noiserDarkBackground</item>
+        <item name="colorSurfaceLogin">@color/noiserDarkBackground</item>
+        <item name="colorOnSurface">@color/noiserDarkText</item>
+        <item name="colorOnBackground">@color/noiserDarkText</item>
+        <item name="mainTextColor">@color/noiserMint</item>
+        <item name="checkBoxColor">@color/noiserMint</item>
 
         <item name="destructiveColor">#F2B8B5</item>
 
-		<item name="chat_left">#F7636A</item>
+        <item name="chat_left">#F7636A</item>
         <item name="chat_join">#89B38F</item>
 
 		<!-- this will be shown on opposite color background so use the colorPrimary light variant for it-->
-        <item name="snackbarActionColor">#4f58c4</item>
+        <item name="snackbarActionColor">@color/noiserTeal</item>
 
 
-        <item name="floating_action_bar_to_bottom_icon">#d4d4d4</item>
-        <item name="floating_action_bar_to_bottom_background">#202020</item>
+        <item name="floating_action_bar_to_bottom_icon">@color/noiserMint</item>
+        <item name="floating_action_bar_to_bottom_background">@color/noiserDarkSurface</item>
 
-        <item name="android_default_notification_blue_color">#8AB4F8</item>
+        <item name="android_default_notification_blue_color">@color/noiserMint</item>
         <item name="android_default_notification_complementary_color">
             #f8ce8a
         </item>
 
-        <item name="seeker_notification_other_person_color">#AF9AF4</item>
+        <item name="seeker_notification_other_person_color">@color/noiserMint</item>
 
-        <item name="pseudo_window_background_color">#ff303030</item>
-        <item name="expandIconColor">#ffffffff</item>
-        <item name="normalTextColor">#FFFFFF</item>
-        <item name="normalTextColorNonTinted">#FFFFFF</item>
-        <item name="cellStroke">#959BDC</item>
+        <item name="pseudo_window_background_color">@color/noiserDarkBackground</item>
+        <item name="expandIconColor">@color/noiserMint</item>
+        <item name="normalTextColor">@color/noiserDarkText</item>
+        <item name="normalTextColorNonTinted">@color/noiserDarkText</item>
+        <item name="cellStroke">@color/noiserDarkOutline</item>
         <!--<item name="dialogBackground">#52000000</item>-->
-        <item name="cellbackColor">#ff303030</item>
-        <item name="cellback">#ff303030</item>
-        <item name="user_info_chip_background">#ff404040</item>
+        <item name="cellbackColor">@color/noiserDarkBackground</item>
+        <item name="cellback">@color/noiserDarkBackground</item>
+        <item name="user_info_chip_background">@color/noiserDarkSurface</item>
         <item name="CustomSelector">@drawable/CustomSelector_ff303030</item>
 
-        <item name="cellbackColorDownloadDialog">#ff424242</item>
+        <item name="cellbackColorDownloadDialog">@color/noiserDarkDialog</item>
 
         <item name="rounded_input_edit">
             @drawable/rounded_text_input_background_dark
@@ -230,19 +270,19 @@
             @drawable/chat_input_background_dark
         </item>
 
-        <item name="dialog_background">#ff424242</item>
-        <item name="surface_variant1">#ff424242</item>
-        <item name="searchBottomSheetBackground">#ff424242</item>
+        <item name="dialog_background">@color/noiserDarkDialog</item>
+        <item name="surface_variant1">@color/noiserDarkContainer</item>
+        <item name="searchBottomSheetBackground">@color/noiserDarkDialog</item>
 
-        <item name="secondaryColor">#ff424242</item>
-        <item name="cellTextColor">#ffffffff</item>
-        <item name="cellTextColorSubdued">#ccffffff</item>
-        <item name="cellTextColorMoreSubdued">#a0ffffff</item>
-        <item name="cellTextColorVerySubdued">#80ffffff</item>
-        <item name="slightestContrastColor">#4E4E4E</item>
-        <item name="slightContrastColor">#6d6d6d</item>
-        <item name="settingsDividerColor">#595959</item>
-        <item name="linkDividerColor">#70595959</item>
+        <item name="secondaryColor">@color/noiserDarkContainer</item>
+        <item name="cellTextColor">@color/noiserDarkText</item>
+        <item name="cellTextColorSubdued">@color/noiserDarkSecondaryText</item>
+        <item name="cellTextColorMoreSubdued">@color/noiserDarkMutedText</item>
+        <item name="cellTextColorVerySubdued">@color/noiserDarkMutedText</item>
+        <item name="slightestContrastColor">@color/noiserDarkDivider</item>
+        <item name="slightContrastColor">@color/noiserDarkOutline</item>
+        <item name="settingsDividerColor">@color/noiserDarkDivider</item>
+        <item name="linkDividerColor">@color/noiserDarkDivider</item>
 
         <item name="the_rounded_corner_background_drawable">
             @drawable/rounded_corner_background_dark
@@ -257,16 +297,54 @@
         </item>
 
         <item name="expandableModernChevronBg">#00424242</item>
-        <item name="expandableModernFilesBg">#3A3A3A</item>
-        <item name="expandableModernSeparatorColor">#18FFFFFF</item>
+        <item name="expandableModernFilesBg">@color/noiserDarkSurface</item>
+        <item name="expandableModernSeparatorColor">@color/noiserDarkDivider</item>
 
-        <item name="searchTabHeader">#dddddd</item>
-        <item name="searchTabPillInactiveColor">#525252</item>
-        <item name="mainTextColorHinted">#dddddd</item>
-        <item name="mainTextColorHintedFlair">#bcc1f7</item>
-        <item name="searchTabButtonColor">?attr/mainTextColorHinted</item>
+        <item name="searchTabHeader">@color/noiserDarkText</item>
+        <item name="searchTabPillInactiveColor">@color/noiserDarkContainer</item>
+        <item name="mainTextColorHinted">@color/noiserDarkSecondaryText</item>
+        <item name="mainTextColorHintedFlair">@color/noiserMint</item>
+        <item name="searchTabButtonColor">@color/noiserMint</item>
 
-        <item name="searchHeaderBackground">#303030</item>
+        <item name="searchHeaderBackground">@color/noiserDarkBackground</item>
+        <item name="colorAccent">@color/noiserMint</item>
+        <item name="colorPrimaryContainer">@color/noiserDarkContainer</item>
+        <item name="colorOnPrimaryContainer">@color/noiserDarkText</item>
+        <item name="colorSecondary">@color/noiserMint</item>
+        <item name="colorOnSecondary">@color/noiserChrome</item>
+        <item name="colorSecondaryContainer">@color/noiserDarkContainer</item>
+        <item name="colorOnSecondaryContainer">@color/noiserDarkText</item>
+        <item name="colorTertiary">@color/noiserMint</item>
+        <item name="colorOnTertiary">@color/noiserChrome</item>
+        <item name="colorTertiaryContainer">@color/noiserDarkContainer</item>
+        <item name="colorOnTertiaryContainer">@color/noiserDarkText</item>
+        <item name="colorSurfaceVariant">@color/noiserDarkContainer</item>
+        <item name="colorOnSurfaceVariant">@color/noiserDarkSecondaryText</item>
+        <item name="colorSurfaceContainer">@color/noiserDarkSurface</item>
+        <item name="colorSurfaceContainerLow">@color/noiserDarkSurface</item>
+        <item name="colorSurfaceContainerLowest">@color/noiserDarkBackground</item>
+        <item name="colorSurfaceContainerHigh">@color/noiserDarkDialog</item>
+        <item name="colorSurfaceContainerHighest">@color/noiserDarkContainer</item>
+        <item name="colorSurfaceBright">@color/noiserDarkDialog</item>
+        <item name="colorSurfaceDim">@color/noiserDarkBackground</item>
+        <item name="colorOutline">@color/noiserDarkOutline</item>
+        <item name="colorOutlineVariant">@color/noiserDarkDivider</item>
+        <item name="colorSurfaceInverse">@color/noiserLightSurface</item>
+        <item name="colorOnSurfaceInverse">@color/noiserLightText</item>
+        <item name="colorPrimaryInverse">@color/noiserTeal</item>
+        <item name="android:colorBackground">@color/noiserDarkBackground</item>
+        <item name="android:windowBackground">@color/noiserDarkBackground</item>
+        <item name="android:textColorPrimary">@color/noiserDarkText</item>
+        <item name="android:textColorSecondary">@color/noiserDarkSecondaryText</item>
+        <item name="android:colorControlActivated">@color/noiserMint</item>
+        <item name="colorControlActivated">@color/noiserMint</item>
+        <item name="mainPurple">@color/noiserChrome</item>
+        <item name="mainPurpleStatusBar">@color/noiserChrome</item>
+        <item name="mainPurpleForNavBar">@color/noiserChrome</item>
+        <item name="whitePurpleForNavBar">@color/noiserNavIndicator</item>
+        <item name="slskAccent">@color/noiserMint</item>
+        <item name="swipeToRefreshProgress">@color/noiserMint</item>
+        <item name="swipeToRefreshBackground">@color/noiserDarkSurface</item>
     </style>
 
     <style name="DefaultDark_Blue" parent="DefaultDark">
@@ -349,50 +427,50 @@
 
     <style name="Amoled" parent="DefaultDark">
         <item name="expandableModernChevronBg">#001A1A1A</item>
-        <item name="expandableModernFilesBg">#1A1A1A</item>
-        <item name="colorSurface">#000000</item>
-        <item name="colorSurfaceLogin">#1A1A1A</item>
+        <item name="expandableModernFilesBg">@color/noiserAmoledSurface</item>
+        <item name="colorSurface">@color/noiserAmoledBackground</item>
+        <item name="colorSurfaceLogin">@color/noiserAmoledBackground</item>
         <item name="floating_action_bar_to_bottom_icon">#d8d8d8</item>
-        <item name="floating_action_bar_to_bottom_background">#303030</item>
-        <item name="swipeToRefreshBackground">#ff343434</item>
-        <item name="expandIconColor">#ffffffff</item>
-        <item name="normalTextColor">#bcc1f7</item>
-        <item name="normalTextColorNonTinted">#FFFFFF</item>
+        <item name="floating_action_bar_to_bottom_background">@color/noiserAmoledSurface</item>
+        <item name="swipeToRefreshBackground">@color/noiserAmoledSurface</item>
+        <item name="expandIconColor">@color/noiserMint</item>
+        <item name="normalTextColor">@color/noiserDarkText</item>
+        <item name="normalTextColorNonTinted">@color/noiserDarkText</item>
 
 		<!-- this will be shown on opposite color background so use the colorPrimary dark variant for it-->
-        <item name="snackbarActionColor">#bcc1f7</item>
+        <item name="snackbarActionColor">@color/noiserTeal</item>
 
         <!--Setting the window background color causes real bad UI issues on API19 emulator
 		    So therefore the pseudo window background color attribute is needed.
 		    Otherwise it will simply not draw the backgrouund causing a "smearing" effect
 			  where say a button when scrolling, the previously drawn buttons will not 
 			  invalidate.-->
-        <item name="android:windowBackground">#000000</item>
-        <item name="pseudo_window_background_color">#ff000000</item>
+        <item name="android:windowBackground">@color/noiserAmoledBackground</item>
+        <item name="pseudo_window_background_color">@color/noiserAmoledBackground</item>
 
-        <item name="cellStroke">#90959BDC</item>
+        <item name="cellStroke">@color/noiserDarkOutline</item>
 
-        <item name="cellbackColor">#ff000000</item>
-        <item name="cellback">#ff000000</item>
-        <item name="user_info_chip_background">#ff141414</item>
+        <item name="cellbackColor">@color/noiserAmoledBackground</item>
+        <item name="cellback">@color/noiserAmoledBackground</item>
+        <item name="user_info_chip_background">@color/noiserAmoledSurface</item>
         <item name="CustomSelector">@drawable/CustomSelector_ff000000</item>
 
-        <item name="cellbackColorDownloadDialog">#ff202020</item>
+        <item name="cellbackColorDownloadDialog">@color/noiserAmoledDialog</item>
 
         <item name="slightestContrastColor">#282828</item>
         <item name="slightContrastColor">#4E4E4E</item>
         <item name="settingsDividerColor">#3F3F3F</item>
         <item name="linkDividerColor">#703F3F3F</item>
 
-        <item name="dialog_background">#ff202020</item>
-        <item name="surface_variant1">#ff202020</item>
-        <item name="searchBottomSheetBackground">#ff202020</item>
+        <item name="dialog_background">@color/noiserAmoledDialog</item>
+        <item name="surface_variant1">@color/noiserAmoledSurface</item>
+        <item name="searchBottomSheetBackground">@color/noiserAmoledDialog</item>
 
-        <item name="secondaryColor">#ff202020</item>
-        <item name="cellTextColor">#ffE4E4E4</item>
-        <item name="cellTextColorSubdued">#ccE4E4E4</item>
-        <item name="cellTextColorMoreSubdued">#aaE4E4E4</item>
-        <item name="cellTextColorVerySubdued">#a0E4E4E4</item>
+        <item name="secondaryColor">@color/noiserAmoledSurface</item>
+        <item name="cellTextColor">@color/noiserDarkText</item>
+        <item name="cellTextColorSubdued">@color/noiserDarkSecondaryText</item>
+        <item name="cellTextColorMoreSubdued">@color/noiserDarkMutedText</item>
+        <item name="cellTextColorVerySubdued">@color/noiserDarkMutedText</item>
 
         <item name="the_rounded_corner_background_drawable">
             @drawable/rounded_corner_background_dark_amoled
@@ -406,9 +484,16 @@
             ?attr/the_rounded_corner_dialog_background_drawable
         </item>
         <!--<item name="dialogBackground">#52000000</item>-->
-        <item name="searchTabPillInactiveColor">#303030</item>
+        <item name="searchTabPillInactiveColor">@color/noiserDarkContainer</item>
 
-        <item name="searchHeaderBackground">#00000000</item>
+        <item name="searchHeaderBackground">@color/noiserAmoledBackground</item>
+        <item name="android:colorBackground">@color/noiserAmoledBackground</item>
+        <item name="colorSurfaceContainerLowest">@color/noiserAmoledBackground</item>
+        <item name="colorSurfaceDim">@color/noiserAmoledBackground</item>
+        <item name="colorSurfaceContainer">@color/noiserAmoledSurface</item>
+        <item name="colorSurfaceContainerLow">@color/noiserAmoledSurface</item>
+        <item name="colorSurfaceContainerHigh">@color/noiserAmoledDialog</item>
+        <item name="colorSurfaceBright">@color/noiserAmoledDialog</item>
     </style>
 
     <style name="Amoled_Grey" parent="Amoled">

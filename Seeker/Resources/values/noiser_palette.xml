@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Keep chrome aligned with the launcher artwork in both appearance modes. -->
+    <color name="noiserChrome">#102C32</color>
+    <color name="noiserOnChrome">#F0F8F5</color>
+    <color name="noiserMint">#8DE5C2</color>
+    <color name="noiserTeal">#246B5B</color>
+    <color name="noiserNavIndicator">#28534E</color>
+    <color name="noiserNavInactive">#B7CCC6</color>
+
+    <color name="noiserLightBackground">#F2F8F5</color>
+    <color name="noiserLightSurface">#FFFFFF</color>
+    <color name="noiserLightContainer">#E1F0E9</color>
+    <color name="noiserLightDialog">#F8FCFA</color>
+    <color name="noiserLightText">#18362F</color>
+    <color name="noiserLightSecondaryText">#49685E</color>
+    <color name="noiserLightMutedText">#526B62</color>
+    <color name="noiserLightOutline">#79998C</color>
+    <color name="noiserLightDivider">#C5D8CE</color>
+
+    <color name="noiserDarkBackground">#102C32</color>
+    <color name="noiserDarkSurface">#17383E</color>
+    <color name="noiserDarkContainer">#28534E</color>
+    <color name="noiserDarkDialog">#1D4247</color>
+    <color name="noiserDarkText">#E7F3EF</color>
+    <color name="noiserDarkSecondaryText">#B5CAC4</color>
+    <color name="noiserDarkMutedText">#ACC6BC</color>
+    <color name="noiserDarkOutline">#78998E</color>
+    <color name="noiserDarkDivider">#365B5B</color>
+
+    <color name="noiserAmoledBackground">#000000</color>
+    <color name="noiserAmoledSurface">#0B2428</color>
+    <color name="noiserAmoledDialog">#123036</color>
+</resources>

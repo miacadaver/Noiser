@@ -8,21 +8,22 @@
             android:layout_height="72dp" android:layout_gravity="center_horizontal"
             android:layout_marginBottom="8dp" android:scaleType="centerCrop"
             android:importantForAccessibility="no" android:src="@drawable/stream_artwork_placeholder" />
-        <TextView android:id="@+id/streamArtist" android:layout_width="match_parent"
+        <TextView android:id="@+id/streamArtist" android:textColor="?attr/normalTextColor" android:layout_width="match_parent"
             android:layout_height="wrap_content" android:textSize="16sp"
             android:maxLines="2" android:ellipsize="end" android:visibility="gone" />
-        <TextView android:id="@+id/streamAlbum" android:layout_width="match_parent"
+        <TextView android:id="@+id/streamAlbum" android:textColor="?attr/cellTextColorSubdued" android:layout_width="match_parent"
             android:layout_height="wrap_content" android:layout_marginBottom="4dp"
             android:maxLines="2" android:ellipsize="end" android:visibility="gone" />
-        <TextView android:id="@+id/streamStatus" android:layout_width="match_parent"
+        <TextView android:id="@+id/streamStatus" android:textColor="?attr/mainTextColor" android:layout_width="match_parent"
             android:layout_height="wrap_content" android:text="@string/stream_connecting"
             android:accessibilityLiveRegion="polite" />
-        <TextView android:id="@+id/streamProgress" android:layout_width="match_parent"
+        <TextView android:id="@+id/streamProgress" android:textColor="?attr/cellTextColorSubdued" android:layout_width="match_parent"
             android:layout_height="wrap_content" android:layout_marginTop="8dp" />
         <SeekBar android:id="@+id/streamSeekBar" android:layout_width="match_parent"
             android:layout_height="wrap_content" android:max="1000" android:enabled="false"
+            android:progressTint="?attr/colorPrimary" android:thumbTint="?attr/colorPrimary"
             android:contentDescription="@string/stream_seek" />
-        <TextView android:id="@+id/streamSeekStatus" android:layout_width="match_parent"
+        <TextView android:id="@+id/streamSeekStatus" android:textColor="?attr/cellTextColorSubdued" android:layout_width="match_parent"
             android:layout_height="wrap_content" android:gravity="center_horizontal" />
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
             android:layout_marginTop="4dp" android:gravity="center" android:orientation="horizontal">
