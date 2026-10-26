@@ -137,6 +137,7 @@ namespace Seeker.Services
 
             private void Recompute()
             {
+                if (StartupFailure.Current != null) return;
                 if (SetNetworkState(appContext))
                 {
                     SharingService.SetUnsetSharingBasedOnConditions(true);

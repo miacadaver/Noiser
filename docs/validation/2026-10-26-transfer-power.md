@@ -4,6 +4,8 @@
 after a Samsung Galaxy A07 / Android 16 startup-crash report. The downloaded `d3485cb` APK launched
 on Android 15 and Android 16 emulators, including with a saved queue, so its connection to the phone's
 crash remains unconfirmed. The results below describe the earlier optimization, not the recovery build.
+The phone subsequently still crashed on `stream.6`; see the
+[startup compatibility investigation](2026-10-26-startup-compatibility.md).
 
 Previously, `IsReceiving` kept the transfer CPU and high-performance Wi-Fi locks held for the entire
 request, including peer queues, reconnect delays and stalled transfers. Streaming now uses a bounded

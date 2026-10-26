@@ -17,6 +17,9 @@ namespace Seeker
         {
             base.OnDestroy();
             SeekerApplication.Activities.Remove(ourWeakRef);
+            // Initialization may have stopped before preferences/transfers were restored.
+            // Saving that partial state would overwrite the user's existing data.
+            if (StartupFailure.Current != null) return;
             if (SeekerApplication.Activities.Count == 0)
             {
                 Logger.Debug("----- On Destory ------ Last Activity ------");
@@ -30,6 +33,12 @@ namespace Seeker
 
         protected override void OnCreate(Bundle savedInstanceState)
         {
+            if (StartupFailure.Current != null)
+            {
+                base.OnCreate(savedInstanceState);
+                StartupFailure.Show(this);
+                return;
+            }
             UiHelpers.SetActivityTheme(this);
             ourWeakRef = new WeakReference<ThemeableActivity>(this, false);
 

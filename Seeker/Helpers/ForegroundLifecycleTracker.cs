@@ -47,6 +47,7 @@ namespace Seeker
 
         void Application.IActivityLifecycleCallbacks.OnActivityResumed(Activity activity)
         {
+            if (StartupFailure.Current != null || activity is StartupErrorActivity) return;
             // A transfer that began while we were backgrounded could not start its foreground
             // service (API 26+ forbids it). Now that we are foreground again, retry.
             SeekerApplication.RetryStartTransferServicesIfNeeded(activity?.ApplicationContext);
@@ -109,6 +110,7 @@ namespace Seeker
 
         void Application.IActivityLifecycleCallbacks.OnActivityStarted(Activity activity)
         {
+            if (StartupFailure.Current != null || activity is StartupErrorActivity) return;
             SeekerState.ActiveActivityRef = activity as FragmentActivity;
             if (SeekerState.ActiveActivityRef == null)
             {
@@ -142,6 +144,7 @@ namespace Seeker
 
         void Application.IActivityLifecycleCallbacks.OnActivityStopped(Activity activity)
         {
+            if (StartupFailure.Current != null || activity is StartupErrorActivity) return;
             DiagLastStopped = activity.GetType().Name.ToString();
             bool isRecreating = activity.IsChangingConfigurations;
             Logger.Debug("OnActivityStopped " + DiagLastStopped + " isChangingConfigurations " + isRecreating);
