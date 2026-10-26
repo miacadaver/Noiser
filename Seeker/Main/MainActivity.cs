@@ -52,7 +52,7 @@ using ActivityFlags = Android.Content.ActivityFlags;
 //\Xamarin\Android\Xamarin.Android.CSharp.targets" />
 namespace Seeker
 {
-    [Activity(Label = "@string/app_name", Theme = "@style/AppTheme.NoActionBar", LaunchMode = Android.Content.PM.LaunchMode.SingleTop, MainLauncher = true, Exported = true, WindowSoftInputMode = Android.Views.SoftInput.AdjustPan)]
+    [Activity(Label = "Noiser rollback", Theme = "@style/AppTheme.NoActionBar", LaunchMode = Android.Content.PM.LaunchMode.SingleTop, MainLauncher = true, Exported = true, WindowSoftInputMode = Android.Views.SoftInput.AdjustPan)]
     public partial class MainActivity :
         ThemeableActivity, 
         ActivityCompat.IOnRequestPermissionsResultCallback, 
@@ -165,21 +165,10 @@ namespace Seeker
 
         protected override void OnCreate(Bundle savedInstanceState)
         {
-            base.OnCreate(savedInstanceState);
-            if (StartupFailure.Current != null) return;
-            try { CreateMainScreen(savedInstanceState); }
-            catch (Exception exception)
-            {
-                StartupFailure.Record("Home screen", exception);
-                StartupFailure.Show(this);
-            }
-        }
-
-        private void CreateMainScreen(Bundle savedInstanceState)
-        {
             bool reborn = savedInstanceState != null;
             Logger.Debug($"Main Activity On Create reborn? {reborn}");
 
+            base.OnCreate(savedInstanceState);
             //System.Threading.Thread.CurrentThread.Name = "Main Activity Thread";
             SetContentView(Resource.Layout.activity_main);
 
@@ -531,7 +520,6 @@ namespace Seeker
 
         protected override void OnStart()
         {
-            if (StartupFailure.Current != null) { base.OnStart(); return; }
             //this fixes a bug as follows:
             //previously we only set MainActivityRef on Create.
             //therefore if one launches MainActivity via a new intent (i.e. go to user list, then search users files) it will be set with the new search user activity.
@@ -539,12 +527,7 @@ namespace Seeker
             //so then the FragmentManager will be null among other things...
             SeekerState.MainActivityRef = this;
             base.OnStart();
-            try { RestorePlaybackUi(); }
-            catch (Exception exception)
-            {
-                StartupFailure.Record("Saved player", exception);
-                StartupFailure.Show(this);
-            }
+            RestorePlaybackUi();
         }
         public static bool fromNotificationMoveToUploads = false;
         protected override void OnNewIntent(Intent intent)

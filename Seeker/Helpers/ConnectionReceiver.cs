@@ -29,7 +29,6 @@ namespace Seeker
     {
         public override void OnReceive(Context context, Intent intent)
         {
-            if (StartupFailure.Current != null) return;
             NetworkInfo netInfo = intent?.GetParcelableExtra("networkInfo") as NetworkInfo;
             bool isConnected = NetworkHandoffDetector.ProcessEvent(netInfo);
 
@@ -49,18 +48,18 @@ namespace Seeker
 #if DEBUG
                 ConnectivityManager cm = (ConnectivityManager)context.GetSystemService(Context.ConnectivityService);
 
-                var networkInfo = cm?.ActiveNetworkInfo;
+                var networkInfo = cm.ActiveNetworkInfo;
                 if (networkInfo != null && networkInfo.IsConnected)
                 {
                     Logger.Debug("info: " + networkInfo.GetDetailedState().ToString());
                     SeekerApplication.Toaster.ShowToast("Is Connected", ToastLength.Long);
                     NetworkInfo info = cm.GetNetworkInfo(ConnectivityType.Wifi);
-                    if (info?.IsConnected == true)
+                    if (info.IsConnected)
                     {
                         SeekerApplication.Toaster.ShowToast("Is Connected Wi-Fi", ToastLength.Long);
                     }
                     info = cm.GetNetworkInfo(ConnectivityType.Mobile);
-                    if (info?.IsConnected == true)
+                    if (info.IsConnected)
                     {
                         SeekerApplication.Toaster.ShowToast("Is Connected Mobile", ToastLength.Long);
                     }

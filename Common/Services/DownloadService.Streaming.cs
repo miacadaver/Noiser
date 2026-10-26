@@ -41,8 +41,7 @@ namespace Seeker.Services
         /// It owns no persisted transfer row and never enters the permanent-file completion continuation.
         /// </summary>
         public async Task StreamAsync(string username, FullFileInfo file, ProgressiveBuffer buffer,
-            Action<TransferStates> stateChanged, CancellationToken cancellationToken, bool retainUntilReleased = false,
-            Action? reconnecting = null)
+            Action<TransferStates> stateChanged, CancellationToken cancellationToken, bool retainUntilReleased = false)
         {
             var key = (username, file.FullFileName);
             // Inspect the transfer list outside requestGate; UI callers can hold list locks when retrying.
@@ -84,15 +83,12 @@ namespace Seeker.Services
                         succeeded = true;
                         return;
                     }
-                    catch (Exception exception) when (!cancellationToken.IsCancellationRequested
-                        && StreamingRetryPolicy.TryGetDelay(exception, attempt, out var delay))
+                    catch (Exception exception) when (attempt == 0 && !cancellationToken.IsCancellationRequested && CanRetryStream(exception))
                     {
                         // Retain every committed byte; a reconnect may put us back in the peer's queue.
-                        buffer.BeginRecovery(StreamingRetryPolicy.RecoveryReadTimeout);
-                        logger.Debug($"Resuming MP3 stream ({attempt + 1}/{StreamingRetryPolicy.MaximumRetries}): " + exception.Message);
+                        logger.Debug("Resuming MP3 stream: " + exception.Message);
                         stateChanged(TransferStates.Queued);
-                        reconnecting?.Invoke();
-                        await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+                        await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
                     }
                 }
             }
@@ -106,6 +102,13 @@ namespace Seeker.Services
                 if (!succeeded || !retainUntilReleased) ReleaseStream(username, file.FullFileName, buffer);
                 SpeedLimitHelper.RemoveDownloadUser(username);
             }
+        }
+
+        private static bool CanRetryStream(Exception exception)
+        {
+            var kind = DownloadFailureClassifier.Classify(exception);
+            return kind == DownloadFailureKind.TimedOut || kind == DownloadFailureKind.CannotConnect
+                || kind == DownloadFailureKind.ReportedFailed || kind == DownloadFailureKind.ConnectionClosed;
         }
     }
 }

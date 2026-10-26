@@ -14,12 +14,9 @@ The same playback session continues in the background and exposes Android notifi
 and headset play/pause controls. **Stop** ends playback and removes the temporary file after transfer shutdown.
 
 Playback supports MP3 folder queues, Next/Previous, Play next/Add to queue, repeat modes, and autoplay.
-One track is received at a time, with buffering and up to three reconnect attempts. Seeking is limited to
+One track is received at a time, with buffering and one reconnect attempt. Seeking is limited to
 audio already received and parsed; it cannot jump to an unreceived part of a remote file.
 At the end of the queue, the current track stays available for replay until Stop or another selection.
-The queue and selected song are saved across app restarts and return paused. Tap Play to start the
-selected song at its saved position. A stream may need to receive audio up to that point before it
-can resume. Stop clears the saved queue and position.
 See [streaming implementation and device checks](docs/streaming.md)
 and [background playback architecture and validation](docs/background-playback.md), plus the upstream
 [development instructions](DEVELOPMENT.md).

@@ -7,12 +7,6 @@
     <string name="stream_previous">Previous</string>
     <string name="stream_next">Next</string>
     <string name="stream_queue">Queue</string>
-    <string name="stream_saved_queue">Saved queue</string>
-    <string name="stream_saved_queue_status">Queue restored. Tap Play to start this song from the beginning.</string>
-    <string name="stream_saved_resume_status">Queue restored. Tap Play to resume at %1$s.</string>
-    <string name="stream_saved_position">Saved position: %1$s</string>
-    <string name="stream_resume_wait">Resuming at %1$s · %2$s</string>
-    <string name="stream_resume_failed">The saved position could not be restored. Use Retry from start.</string>
     <string name="stream_repeat_off">Repeat: Off</string>
     <string name="stream_repeat_all">Repeat: All</string>
     <string name="stream_repeat_one">Repeat: One</string>
@@ -34,10 +28,7 @@
     <string name="stream_stop">Stop</string>
     <string name="stream_connecting">Connecting to peer…</string>
     <string name="stream_queued">Waiting in the peer’s upload queue…</string>
-    <string name="stream_buffering">Buffering audio…</string>
-    <string name="stream_reconnecting">Trying to reconnect to the peer…</string>
-    <string name="stream_stalled">No audio received for a while. Still waiting for the peer…</string>
-    <string name="stream_retry">Retry from start</string>
+    <string name="stream_buffering">Buffering…</string>
     <string name="stream_playing">Playing</string>
     <string name="stream_paused">Paused</string>
     <string name="stream_finished">Finished</string>

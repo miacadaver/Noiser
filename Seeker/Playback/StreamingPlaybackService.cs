@@ -44,15 +44,6 @@ namespace Seeker.Playback
         private bool handlingEvents;
         private bool destroyed;
         private ResolvableFuture pendingPlay;
-        private PlaybackQueue savedQueue;
-        private long savedQueueRevision;
-        private PlaybackRepeatMode savedRepeatMode;
-        private bool savedAutoplay;
-        private long selectedPosition;
-        private PlaybackQueueEntry checkpointEntry;
-        private long checkpointPosition = -1;
-        private Java.Lang.Runnable positionTick;
-        private bool positionTickScheduled;
 
         internal static StreamingPlaybackService Current { get; private set; }
         internal static event Action Changed;
@@ -143,23 +134,6 @@ namespace Seeker.Playback
         public override void OnCreate()
         {
             base.OnCreate();
-            var saved = PlaybackQueueStorage.Load(this);
-            if (saved != null)
-            {
-                Queue = saved.Queue;
-                controls.Restore(saved.RepeatMode, saved.Autoplay);
-                selectedPosition = PlaybackQueueStorage.LoadPosition(this, Queue.Current, saved.PositionMilliseconds);
-            }
-            checkpointEntry = Queue.Current;
-            checkpointPosition = selectedPosition;
-            positionTick = new Java.Lang.Runnable(() =>
-            {
-                positionTickScheduled = false;
-                if (destroyed) return;
-                CheckpointPosition(Playback);
-                SchedulePositionCheckpoint();
-            });
-            RememberSavedQueue();
             actualPlayer = new ExoPlayerBuilder(ApplicationContext)
                 .SetLoadControl(new DefaultLoadControl.Builder().SetBufferDurationsMs(15000, 60000, 2000, 4000).Build())
                 .SetWakeMode(C.WakeModeLocal)
@@ -196,7 +170,6 @@ namespace Seeker.Playback
         {
             if (!playWhenReady)
             {
-                CheckpointPosition(Playback);
                 var pending = pendingPlay;
                 pendingPlay = null;
                 actualPlayer.Pause();
@@ -259,10 +232,7 @@ namespace Seeker.Playback
             try
             {
                 if (track != null)
-                {
                     await track.WaitForInitialMetadataAsync(InitialMetadataWait).ConfigureAwait(false);
-                    await track.WaitForResumeAsync().ConfigureAwait(false);
-                }
             }
             catch (Exception exception)
             {
@@ -318,13 +288,11 @@ namespace Seeker.Playback
             var selected = replacement.Current;
             if (selected == null) return;
             bool retainCurrent = Playback != null && Playback.Failure == null
-                && Playback.Username == selected.Username && Playback.FileInfo.FullFileName == selected.RemotePath
-                && Playback.FileInfo.Size == selected.Size;
+                && Playback.Username == selected.Username && Playback.FileInfo.FullFileName == selected.RemotePath;
             Queue = replacement;
             selected.MarkPlaying();
             if (retainCurrent)
             {
-                CheckpointPosition(Playback);
                 SessionPlayer.Play();
                 Publish();
                 return;
@@ -333,13 +301,12 @@ namespace Seeker.Playback
             Publish();
         }
 
-        private void StartQueueEntry(PlaybackQueueEntry entry, bool playWhenReady, long resumePosition = 0)
+        private void StartQueueEntry(PlaybackQueueEntry entry, bool playWhenReady)
         {
             var pending = pendingPlay;
             pendingPlay = null;
             var previous = Playback;
             Playback = null;
-            SetSelectedPosition(resumePosition);
             Task cleanup = previous?.Stop() ?? Task.CompletedTask;
             // Include all prior cleanup. A local-file interlude has no transfer task of its own,
             // but must not let an earlier remote stream overlap the next remote request.
@@ -355,7 +322,7 @@ namespace Seeker.Playback
             };
             // Playback IDs are transition-specific even when the queue entry itself stays stable.
             Playback = new StreamingPlayback(this, actualPlayer, Guid.NewGuid().ToString("N"),
-                entry.Id, entry.Username, file, previousCleanup, resumePosition);
+                entry.Id, entry.Username, file, previousCleanup);
             Playback.Start(playWhenReady);
         }
 
@@ -389,7 +356,6 @@ namespace Seeker.Playback
             var selected = Queue.Remove(entryId, out wasCurrent);
             if (!wasCurrent) { Publish(); return; }
             if (selected == null) { StopPlayback(); return; }
-            if (Playback == null) { SetSelectedPosition(0); Publish(); return; }
             selected.MarkPlaying();
             StartQueueEntry(selected, SessionPlayer.PlayWhenReady);
             Publish();
@@ -417,7 +383,7 @@ namespace Seeker.Playback
                     Queue.Current?.MarkFailed(actualPlayer.PlayerError.Message);
                     Playback?.Fail(actualPlayer.PlayerError.Message, actualPlayer.PlayerError);
                 }
-                else if (actualPlayer.PlaybackState == NativePlayer.StateEnded && Playback?.IsRestoringPosition != true) AdvanceOnCompletion();
+                else if (actualPlayer.PlaybackState == NativePlayer.StateEnded) AdvanceOnCompletion();
                 Playback?.UpdateDuration();
                 Publish();
             }
@@ -497,7 +463,6 @@ namespace Seeker.Playback
                 Queue.Select(next.Id);
             }
             if (next == null) return false;
-            if (Playback == null) { SetSelectedPosition(0); Publish(); return true; }
             next.MarkPlaying();
             StartQueueEntry(next, true);
             Publish();
@@ -521,7 +486,6 @@ namespace Seeker.Playback
                 return false;
             }
             if (previous == null) return false;
-            if (Playback == null) { SetSelectedPosition(0); Publish(); return true; }
             previous.MarkPlaying();
             StartQueueEntry(previous, true);
             Publish();
@@ -537,27 +501,13 @@ namespace Seeker.Playback
             bool retainCurrent = sameEntry && Playback != null && Playback.Failure == null
                 && actualPlayer.PlaybackState != NativePlayer.StateEnded
                 && Playback.Username == selected.Username
-                && Playback.FileInfo.FullFileName == selected.RemotePath && Playback.FileInfo.Size == selected.Size;
+                && Playback.FileInfo.FullFileName == selected.RemotePath;
             if (!retainCurrent)
             {
                 if (!sameEntry && oldCurrent?.State == PlaybackQueueEntryState.Playing) oldCurrent.MarkSkipped();
                 selected.MarkPlaying();
-                StartQueueEntry(selected, true, Playback == null && sameEntry ? selectedPosition : 0);
+                StartQueueEntry(selected, true);
             }
-            Publish();
-            return true;
-        }
-
-        internal bool RetryPlayback(string expectedTrackId)
-        {
-            var snapshot = Snapshot();
-            if (snapshot == null || snapshot.TrackId != expectedTrackId
-                || !PlaybackPresentation.CanRetry(snapshot.Phase)
-                || Queue.Current?.Id != Playback.QueueEntryId) return false;
-            // StartQueueEntry retires the old player source and waits for all transfer cleanup
-            // before requesting bytes again. A retry keeps the queue but starts this song over.
-            Queue.Current.MarkPlaying();
-            StartQueueEntry(Queue.Current, playWhenReady: true);
             Publish();
             return true;
         }
@@ -565,14 +515,6 @@ namespace Seeker.Playback
         internal void Publish()
         {
             if (destroyed) return;
-            Playback?.AdvanceResume();
-            if (actualPlayer?.IsPlaying != true) CheckpointPosition(Playback);
-            if (!ReferenceEquals(savedQueue, Queue) || savedQueueRevision != Queue.Revision
-                || savedRepeatMode != RepeatMode || savedAutoplay != Autoplay)
-            {
-                RememberSavedQueue();
-                PlaybackQueueStorage.Save(this, Queue, RepeatMode, Autoplay, selectedPosition);
-            }
             if (Playback?.Failure != null && pendingPlay != null)
             {
                 var pending = pendingPlay;
@@ -580,52 +522,8 @@ namespace Seeker.Playback
                 pending.Set(null);
             }
             UpdateTransferLocks();
-            SchedulePositionCheckpoint();
             SessionPlayer?.Refresh();
             NotifyViews();
-        }
-
-        private void SetSelectedPosition(long position)
-        {
-            selectedPosition = position;
-            var entry = Queue.Current;
-            if (entry == null || (ReferenceEquals(checkpointEntry, entry) && checkpointPosition == position)) return;
-            checkpointEntry = entry;
-            checkpointPosition = position;
-            PlaybackQueueStorage.SavePosition(this, entry, position);
-        }
-
-        internal void CheckpointPosition(StreamingPlayback track)
-        {
-            var entry = Queue.Current;
-            if (track == null || !IsCurrent(track) || track.Failure != null || entry == null
-                || track.Username != entry.Username || track.FileInfo.FullFileName != entry.RemotePath
-                || track.FileInfo.Size != entry.Size) return;
-            SetSelectedPosition(actualPlayer.PlaybackState == NativePlayer.StateEnded && !track.IsRestoringPosition ? 0
-                : track.PositionForPersistence(actualPlayer.CurrentPosition));
-        }
-
-        private void SchedulePositionCheckpoint()
-        {
-            bool playing = !destroyed && actualPlayer?.IsPlaying == true;
-            if (!playing && positionTickScheduled)
-            {
-                handler.RemoveCallbacks(positionTick);
-                positionTickScheduled = false;
-            }
-            else if (playing && !positionTickScheduled)
-            {
-                positionTickScheduled = true;
-                handler.PostDelayed(positionTick, 5000);
-            }
-        }
-
-        private void RememberSavedQueue()
-        {
-            savedQueue = Queue;
-            savedQueueRevision = Queue.Revision;
-            savedRepeatMode = RepeatMode;
-            savedAutoplay = Autoplay;
         }
 
         private static void NotifyViews()
@@ -640,21 +538,15 @@ namespace Seeker.Playback
 
         internal PlaybackSnapshot Snapshot()
         {
-            if (destroyed) return null;
-            if (Playback == null)
-            {
-                var selected = Queue.Current;
-                return selected == null ? null : new PlaybackSnapshot(selected.Metadata, null, PlaybackPhase.Saved,
-                    selectedPosition, 0, selected.Size, null, selected.Id, default, false, RepeatMode, Autoplay);
-            }
+            if (destroyed || Playback == null) return null;
             var track = Playback;
             var phase = PlaybackPresentation.Resolve(true, track.Failure != null, actualPlayer.PlaybackState,
                 SessionPlayer.PlayWhenReady, actualPlayer.IsPlaying, actualPlayer.PlaybackSuppressionReason != 0,
-                track.HasBytes, track.IsQueued, track.IsReconnecting, track.IsStalled);
-            return new PlaybackSnapshot(track.Metadata, track.Artwork, phase, track.PositionForPersistence(actualPlayer.CurrentPosition),
+                track.HasBytes, track.IsQueued);
+            return new PlaybackSnapshot(track.Metadata, track.Artwork, phase, actualPlayer.CurrentPosition,
                 track.Received, track.FileInfo.Size, track.Failure?.Message, track.Id, track.SeekRange,
                 SessionPlayer.PlayWhenReady && actualPlayer.PlaybackSuppressionReason == 0,
-                RepeatMode, Autoplay, track.ResumePositionMilliseconds);
+                RepeatMode, Autoplay);
         }
 
         internal void StopPlayback()
@@ -666,7 +558,6 @@ namespace Seeker.Playback
             if (previous != null) previousCleanup = Task.WhenAll(previousCleanup, previous.Stop());
             else { actualPlayer?.Pause(); actualPlayer?.Stop(); actualPlayer?.ClearMediaItems(); }
             Queue.Clear();
-            selectedPosition = 0;
             pending?.Set(null);
             Publish();
             StopSelf();
@@ -674,8 +565,7 @@ namespace Seeker.Playback
 
         public override void OnTaskRemoved(Intent rootIntent)
         {
-            // Dismissing a paused task closes its resources, but keeps the saved queue.
-            if (!IsPlaybackOngoing) StopSelf();
+            if (!IsPlaybackOngoing) StopPlayback();
             base.OnTaskRemoved(rootIntent);
         }
 
@@ -695,9 +585,6 @@ namespace Seeker.Playback
         private void Shutdown()
         {
             if (destroyed) return;
-            CheckpointPosition(Playback);
-            handler.RemoveCallbacks(positionTick);
-            positionTickScheduled = false;
             destroyed = true;
             if (ReferenceEquals(Current, this)) Current = null;
             var previous = Playback;
@@ -768,10 +655,9 @@ namespace Seeker.Playback
         public bool ShowPause { get; }
         public PlaybackRepeatMode RepeatMode { get; }
         public bool Autoplay { get; }
-        public long ResumePositionMilliseconds { get; }
         public PlaybackSnapshot(TrackMetadata metadata, Bitmap artwork, PlaybackPhase phase, long position,
             long received, long size, string error, string trackId, Common.Playback.SeekRangeSnapshot seekRange,
-            bool showPause, PlaybackRepeatMode repeatMode, bool autoplay, long resumePositionMilliseconds = 0)
-        { Metadata = metadata; Artwork = artwork; Phase = phase; Position = position; Received = received; Size = size; Error = error; TrackId = trackId; SeekRange = seekRange; ShowPause = showPause; RepeatMode = repeatMode; Autoplay = autoplay; ResumePositionMilliseconds = resumePositionMilliseconds; }
+            bool showPause, PlaybackRepeatMode repeatMode, bool autoplay)
+        { Metadata = metadata; Artwork = artwork; Phase = phase; Position = position; Received = received; Size = size; Error = error; TrackId = trackId; SeekRange = seekRange; ShowPause = showPause; RepeatMode = repeatMode; Autoplay = autoplay; }
     }
 }

@@ -6,9 +6,6 @@
     <AndroidManagedSymbols>true</AndroidManagedSymbols>
     <TargetFramework>net10.0-android36.0</TargetFramework>
     <SupportedOSPlatformVersion>23</SupportedOSPlatformVersion>
-    <!-- Use managed JNI registration while investigating device-specific startup crashes.
-         https://github.com/dotnet/android/issues/10910 -->
-    <AndroidEnableMarshalMethods>false</AndroidEnableMarshalMethods>
     <AssemblyTitle>AndriodApp1</AssemblyTitle>
     <Product>AndriodApp1</Product>
     <Copyright>Copyright ©  2018</Copyright>

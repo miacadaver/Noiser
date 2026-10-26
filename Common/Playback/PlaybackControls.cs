@@ -12,13 +12,6 @@ namespace Common.Playback
         public PlaybackRepeatMode RepeatMode { get; private set; } = PlaybackRepeatMode.Off;
         public bool Autoplay { get; private set; } = true;
 
-        public void Restore(PlaybackRepeatMode repeatMode, bool autoplay)
-        {
-            RepeatMode = autoplay && System.Enum.IsDefined(typeof(PlaybackRepeatMode), repeatMode)
-                ? repeatMode : PlaybackRepeatMode.Off;
-            Autoplay = autoplay;
-        }
-
         public void CycleRepeatMode()
         {
             RepeatMode = RepeatMode switch

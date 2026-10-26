@@ -33,8 +33,7 @@ reader and waits for its transfer cleanup before starting the new peer request.
 User selections are single-use in-process requests, not replayable filenames in exported service
 intents. Rapid selections supersede pending selections. The service is `NotSticky`: if Android kills
 the process, a dead peer connection is never assumed resumable. Relaunching cleans abandoned cache
-files and restores the saved queue paused; Play resumes the selected song at its checkpoint.
-Explicit Stop and app Shutdown cancel reads, release the transfer
+files; the user can select Play again. Explicit Stop and app Shutdown cancel reads, release the transfer
 reservation, and delete temporary data after transfer shutdown. Advancing the queue performs the same
 cleanup for the old track before starting the next remote request. Natural completion advances, repeats,
 or holds the current track according to the queue controls. A held track retains its buffer for replay
@@ -48,37 +47,7 @@ command set exposes play/pause, stop, volume, metadata/timeline information, ava
 queue selection, and seeking within the current track's validated range. General external playlist
 mutation is not advertised. Stop also cancels the Soulseek transfer and clears the queue.
 Terminal transfer errors become session player errors and disable Play until a new
-selection or explicit retry; the mini-player and dialog show the failure.
-
-The full player distinguishes connecting, waiting in the peer's queue, ordinary audio buffering,
-and the bounded automatic reconnect attempts. Queue status remains visible even after some bytes
-have already arrived. When playback is waiting for audio and an unfinished transfer has received no
-new bytes for 20 seconds, the player reports that it is still waiting for the peer. This is a lack of
-progress, not a claim that the device is offline. Buffered playback, user pauses, focus suppression,
-known peer queues and completed downloads do not show a stalled warning.
-
-**Retry from start** appears for a terminal failure or a stalled wait. It restarts the current song
-from the beginning and keeps the queue, repeat mode and autoplay setting. The service validates the
-displayed track ID and current state before accepting the action; stale or repeated taps cannot restart
-another track or interrupt playback that has already recovered. It uses the existing serialized source
-replacement and transfer cleanup, so the old request is retired before a new one starts. This does not
-extend the automatic retry budget or restore the old playback position. Stall presentation uses the existing
-visible-Activity refresh; it adds no background polling timer.
-
-Automatic recovery allows three reconnects per live stream, separated by 2-, 4- and 8-second
-cancellation-aware delays. It retains the committed audio prefix and requests the next missing byte,
-using fresh transfer tokens and awaiting each request before starting the next. Connection closures,
-timeouts and temporary socket/network failures are eligible. Rejections, offline peers, changed sizes,
-disk errors and cancellation are not retried. An initial missing login fails immediately; a missing
-login encountered during recovery can use the remaining attempts while the app reconnects its server
-session. Playback recovery does not itself log in or change network settings.
-
-At the first transient failure in an outage, buffer readers get an allowance until 90 seconds later,
-so the usual 45-second read timeout does not prematurely cut off reconnection. A longer normal
-initial queue wait is preserved. Further failures without new bytes cannot renew this allowance.
-Committed non-empty writes clear it so a subsequent outage can start its own window; the total
-three-reconnect budget still applies to the entire live stream. Terminal errors wake readers
-immediately, and Stop/track replacement cancels both a pending delay and the active peer request.
+selection; the mini-player and dialog show the failure.
 
 The session's queue timeline publishes the merged `TrackMetadata`: title, artist, album, album
 artist, track number, release year, and reliable duration when the native player supplies it. Extraction
@@ -126,48 +95,8 @@ ordinary downloads and uploads retain their existing behavior.
 
 Media3 manages paused foreground-service demotion and notification updates. Ongoing playback remains
 when the task is swiped away; a paused task removal stops and cleans the track. Long-paused playback
-is not guaranteed to survive process reclamation, but its queue is preserved. Explicit application Shutdown releases the session,
+is not guaranteed to survive process reclamation. Explicit application Shutdown releases the session,
 player, transfer, and locks before closing the Soulseek client.
-
-## Saved queue
-
-Queue edits and selection changes save a versioned JSON source list in dedicated private Android
-preferences. Repeat/autoplay settings are saved with it. Preferences update in memory immediately and
-write asynchronously through Android's normal preference mechanism. A queue source revision and
-settings checkpoint prevent serializing/writing during ordinary position, byte-progress or metadata
-updates. Snapshots preserve source peer, remote filename, size, stable IDs, order, disc number and the
-filename/folder encoding flags and the selected song's position. They omit tags, artwork, errors,
-playing state and cache data. Queue schema 2 adds the position; schema 1 remains readable at zero.
-
-Opening MainActivity with a saved queue binds the playback service and restores a **Saved queue**
-view. It does not select a player source, transfer bytes, acquire playback/transfer locks, or publish
-an active song's identifying session metadata. Next/Previous and removing a saved queue row only
-change the saved selection/list. Play on the selected row resumes its position; selecting a different row starts it from zero
-using the normal source/foreground-notification path and fresh tag extraction. A restored queue adds
-no position refresh timer while idle. There is no boot-time or process-restart autoplay.
-
-Stop/Clear Queue remove the saved snapshot. Service destruction, app shutdown, and dismissing a
-paused task release live resources without deleting the saved queue. Invalid/unsupported snapshots
-are ignored and discarded. The JSON is bounded to 2 MiB of characters and 10,000 entries; an oversized
-replacement is not saved and removes the older snapshot so it cannot later restore a different queue.
-The codec uses generated System.Text.Json metadata so Android trimming does not depend on reflection.
-
-The live position checkpoint uses a separate, small private preferences file, so a five-second
-checkpoint does not serialize or rewrite a large queue. A Handler checkpoint runs only while audio
-is actually playing, including with the Activity hidden. Pause, accepted seek, failure and service
-shutdown capture the latest position; an abrupt kill can lose about five seconds. Checkpoints match
-entry ID, peer, remote path and size before restoring. Stop/Clear Queue remove both stores.
-
-Resume does not request arbitrary remote byte ranges or trust old tag metadata. Remote streams may
-need to receive the prefix again; completed local downloads use the existing local-source path. After explicit Play,
-the normal sequential source is prepared with audible playback held back. If the target lies beyond
-the initial paused buffer, the player seeks forward in steps within its validated parsed-audio range
-to let loading/indexing continue. Only after the final target seek is accepted can the normal
-foreground-notification/metadata start gate release playback. Manual seeking is unavailable during
-this preparation; the player shows the resume target and current queue/buffering state. Pause never
-allows a late resume callback to start playback, and Stop/track replacement retire the old target.
-Natural completion resets the bookmark; a position beyond a known duration resets to zero. If the
-file cannot support a safe resume, the player reports failure and offers Retry from start.
 
 ## In-app use and scrobblers
 

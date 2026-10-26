@@ -187,12 +187,6 @@ namespace Seeker
         public override void OnCreate()
         {
             base.OnCreate();
-            try { InitializeApplication(); }
-            catch (Exception exception) { StartupFailure.Record("App setup", exception); }
-        }
-
-        private void InitializeApplication()
-        {
             ApplicationContext = this;
             Toaster = new AndroidToaster();
             Services.SessionService.Instance = new Services.SessionService();
@@ -222,6 +216,8 @@ namespace Seeker
                     .DetectNetwork()
                     .DetectCustomSlowCalls()
                     .PenaltyLog()
+                    .PenaltyFlashScreen()
+                    .PenaltyDeathOnNetwork()
                     .Build());
 
             Android.OS.StrictMode.SetVmPolicy(
@@ -396,7 +392,6 @@ namespace Seeker
         public override void OnConfigurationChanged(Android.Content.Res.Configuration newConfig)
         {
             base.OnConfigurationChanged(newConfig);
-            if (StartupFailure.Current != null) return;
             if (LocaleHelper.HasProperPerAppLanguageSupport())
             {
                 return;

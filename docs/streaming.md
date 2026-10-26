@@ -45,16 +45,9 @@ cover a fully received track while it is playing. Late transfer events retain to
 - ExoPlayer starts with approximately two seconds of decoded audio buffered; it may read further ahead.
   Starting does not depend on the complete file arriving. Leading ID3 tags can increase startup time.
 - A waiting peer gets up to three minutes before an empty-buffer read times out. Once bytes have arrived,
-  an empty-buffer read normally waits up to 45 seconds. During automatic recovery it may wait until
-  90 seconds after the first failure in that outage, preserving any longer normal initial queue wait.
-  Repeated failures cannot keep renewing that allowance without new audio bytes. Stop remains available.
-- Up to three reconnects are allowed per stream for temporary connection/network failures, timeouts,
-  or a peer-reported failure, with cancellation-aware delays of 2, 4 and 8 seconds. Each attempt resumes
-  at the committed byte offset and may return to the peer's upload queue. The same buffer and player
-  remain active, so recovery does not restart the song or discard downloaded audio.
-  The full player labels reconnects and peer queue waits separately. If playback is waiting and no
-  bytes arrive for 20 seconds, it reports the stalled wait. **Retry from start** is available for that
-  wait or a terminal error; it keeps the queue but replaces the current request and restarts the song.
+  an empty-buffer read waits up to 45 seconds. Stop remains available during these waits.
+- One retry is allowed for connection closure, connection setup failure, timeout, or a peer-reported failure.
+  Retry resumes at the committed byte offset and may return to the peer's upload queue.
 - A rejected, unavailable, changed-size, malformed, or stalled file produces a visible error.
 - Existing active normal downloads are not downloaded again. Play reports that the ordinary download must
   finish. Attempting to download a currently streaming file asks the user to stop playback first.
@@ -75,18 +68,7 @@ Embedded tags arrive for the active track and update its queue metadata without 
 The player exposes Next, Previous, and Queue. Browse file actions and search-track long presses offer
 Play next and Add to queue. Queue rows can be selected or removed; clearing the queue stops playback.
 The dialog shows the current track and the tracks after it; Repeat All also shows the wrapped entries.
-Queue sources, order, selection and repeat/autoplay settings are saved in private preferences and
-restored paused after a process restart. The mini-player shows **Saved queue**; Play starts the
-selected song at its saved position. Saved queue navigation and removal do not start transfers. Stop
-and Clear Queue discard the saved queue; app shutdown and dismissal of a paused task preserve it.
-The selected song's position is checkpointed about every five seconds during playback, and on pause,
-accepted seeks and service shutdown. Sudden process death may lose up to about five seconds.
-Cached audio, error states and trusted tag metadata are not persisted. Tags are
-read again before the new playback session exposes identifying media metadata.
-On resume the same sequential transfer receives the prefix again. Playback stays silent while the
-paused player advances through validated seek points until it can reach the target; this may take
-time on a slow peer. Next/Previous, a different selection, natural completion and Retry from start
-reset the current bookmark. A target past a known track end restarts from zero.
+Queues are in memory and are cleared by Stop or process death.
 
 Autoplay is enabled by default. Repeat cycles Off, All, One; selecting All or One enables autoplay,
 and disabling autoplay returns repeat to Off. Repeat One replays the current buffer; Repeat All wraps
