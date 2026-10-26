@@ -53,6 +53,8 @@ namespace Seeker.Playback
         private long checkpointPosition = -1;
         private Java.Lang.Runnable positionTick;
         private bool positionTickScheduled;
+        private Java.Lang.Runnable transferPowerTick;
+        private long transferCpuRenewAt;
 
         internal static StreamingPlaybackService Current { get; private set; }
         internal static event Action Changed;
@@ -160,6 +162,7 @@ namespace Seeker.Playback
                 SchedulePositionCheckpoint();
             });
             RememberSavedQueue();
+            transferPowerTick = new Java.Lang.Runnable(UpdateTransferLocks);
             actualPlayer = new ExoPlayerBuilder(ApplicationContext)
                 .SetLoadControl(new DefaultLoadControl.Builder().SetBufferDurationsMs(15000, 60000, 2000, 4000).Build())
                 .SetWakeMode(C.WakeModeLocal)
@@ -717,9 +720,11 @@ namespace Seeker.Playback
             NotifyViews();
         }
 
-        private void UpdateTransferLocks()
+        internal void UpdateTransferLocks()
         {
-            if (Playback?.IsReceiving != true || Playback.Failure != null) { ReleaseTransferLocks(); return; }
+            if (transferPowerTick != null) handler.RemoveCallbacks(transferPowerTick);
+            var remaining = destroyed ? TimeSpan.Zero : Playback?.TransferPowerRemaining ?? TimeSpan.Zero;
+            if (remaining <= TimeSpan.Zero) { ReleaseTransferLocks(); return; }
             if (transferCpuLock == null)
             {
                 transferCpuLock = ((PowerManager)GetSystemService(PowerService)).NewWakeLock(WakeLockFlags.Partial, "noiser:stream-transfer");
@@ -728,12 +733,21 @@ namespace Seeker.Playback
                 transferWifiLock = wifi?.CreateWifiLock(Android.Net.WifiMode.FullHighPerf, "noiser:stream-transfer");
                 transferWifiLock?.SetReferenceCounted(false);
             }
-            if (!transferCpuLock.IsHeld) transferCpuLock.Acquire();
+            // Renew only while transfer work is recent. The OS timeout also bounds the CPU
+            // lock if the main looper stops servicing our expiry callback.
+            long now = SystemClock.UptimeMillis();
+            if (!transferCpuLock.IsHeld || now >= transferCpuRenewAt)
+            {
+                transferCpuLock.Acquire((long)Common.Streaming.StreamingPowerLease.IdleTimeout.TotalMilliseconds + 1000);
+                transferCpuRenewAt = now + 5000;
+            }
             if (transferWifiLock?.IsHeld == false) transferWifiLock.Acquire();
+            handler.PostDelayed(transferPowerTick, Math.Max(1, (long)Math.Min(5000, Math.Ceiling(remaining.TotalMilliseconds))));
         }
 
         private void ReleaseTransferLocks()
         {
+            if (transferPowerTick != null) handler.RemoveCallbacks(transferPowerTick);
             if (transferCpuLock?.IsHeld == true) transferCpuLock.Release();
             if (transferWifiLock?.IsHeld == true) transferWifiLock.Release();
         }

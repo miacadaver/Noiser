@@ -55,6 +55,39 @@ namespace UnitTestCommon
         }
 
         [Test]
+        public async Task ProgressCallbackObservesCommittedBytesAndIgnoresUnchangedReports()
+        {
+            using var buffer = CreateBuffer();
+            var client = Dummy<ISoulseekClient>();
+            ((Stub)(object)client).Handle = (method, args) =>
+            {
+                if (method.Name == nameof(ISoulseekClient.GetNextToken)) return 1;
+                if (method.Name == nameof(ISoulseekClient.DownloadAsync)) return Download(args);
+                return null;
+            };
+            async Task<Transfer> Download(object?[] args)
+            {
+                var writer = await ((Func<Task<Stream>>)args[2]!)();
+                var options = (TransferOptions)args[6]!;
+                Transfer Report(long bytes) => new Transfer(TransferDirection.Download, "stream-test-peer",
+                    Track().FullFileName, 1, TransferStates.InProgress, 4, 0, bytes);
+                options.ProgressUpdated!((0, Report(0)));
+                await writer.WriteAsync(new byte[] { 1, 2 });
+                options.ProgressUpdated!((0, Report(2)));
+                options.ProgressUpdated!((2, Report(2)));
+                await writer.WriteAsync(new byte[] { 3, 4 });
+                options.ProgressUpdated!((2, Report(4)));
+                return Report(4);
+            }
+            var service = new DownloadService(Dummy<IToaster>(), Dummy<IFileSystemService>(), Dummy<ISessionService>(),
+                Dummy<IMainThreadRunner>(), () => client, Dummy<ILoggerBackend>(), Dummy<INetworkStatus>());
+            var observed = new List<long>();
+            await service.StreamAsync("stream-test-peer", Track(), buffer, _ => { }, CancellationToken.None,
+                progress: () => observed.Add(buffer.AvailableLength));
+            Assert.That(observed, Is.EqualTo(new long[] { 2, 4 }));
+        }
+
+        [Test]
         public async Task ReconnectResumesAfterCommittedPrefix()
         {
             int attempts = 0;

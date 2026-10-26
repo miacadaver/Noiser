@@ -45,6 +45,11 @@ namespace Seeker.Playback
         private volatile TransferStates transferState;
         private volatile bool receiving;
         private volatile bool reconnecting;
+        private readonly System.Diagnostics.Stopwatch transferClock = System.Diagnostics.Stopwatch.StartNew();
+        private readonly StreamingPowerLease powerLease = new StreamingPowerLease();
+        private int powerRefreshPending;
+        public TimeSpan TransferPowerRemaining => receiving && !stopped && Failure == null && Received < FileInfo.Size
+            ? powerLease.Remaining(transferClock.Elapsed) : TimeSpan.Zero;
         private SeekRangeSnapshot seekRange = new SeekRangeSnapshot(0, -1, false);
 
         public string Id { get; }
@@ -247,6 +252,7 @@ namespace Seeker.Playback
                     state =>
                     {
                         transferState = state;
+                        powerLease.StateChanged(state, transferClock.Elapsed);
                         if ((state & (TransferStates.Queued | TransferStates.InProgress | TransferStates.Completed)) != 0)
                             reconnecting = false;
                         owner.RunOnMain(() => { if (owner.IsCurrent(this)) owner.Publish(); });
@@ -254,6 +260,17 @@ namespace Seeker.Playback
                     {
                         reconnecting = true;
                         owner.RunOnMain(() => { if (owner.IsCurrent(this)) owner.Publish(); });
+                    }, progress: () =>
+                    {
+                        // Healthy transfers need no per-chunk main-thread work. Only wake the
+                        // lock owner when bytes restart an expired lease; its timer handles expiry.
+                        if (!powerLease.Progress(buffer.AvailableLength, transferClock.Elapsed)
+                            || Interlocked.Exchange(ref powerRefreshPending, 1) != 0) return;
+                        owner.RunOnMain(() =>
+                        {
+                            Interlocked.Exchange(ref powerRefreshPending, 0);
+                            if (owner.IsCurrent(this)) owner.UpdateTransferLocks();
+                        });
                     }).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
