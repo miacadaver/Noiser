@@ -97,6 +97,28 @@ class ApkPublicationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "pinned development certificate"):
             self.verify("Signer #1 certificate SHA-256 digest: " + "b" * 64 + "\n")
 
+    def test_accepts_scheme_labels_from_new_build_tools(self):
+        self.verify("V3.0 Signer: certificate SHA-256 digest: " + "a" * 64 + "\n")
+
+    def test_accepts_sdk_range_labels_and_repeated_pinned_certificate(self):
+        self.verify("Signer (minSdkVersion=28, maxSdkVersion=32) certificate SHA-256 digest: " + "a" * 64 + "\n"
+                    "Signer (minSdkVersion=33, maxSdkVersion=2147483647) certificate SHA-256 digest: " + "a" * 64 + "\n")
+
+    def test_rejects_different_app_certificate_in_another_scheme(self):
+        with self.assertRaisesRegex(ValueError, "pinned development certificate"):
+            self.verify("V2 Signer: certificate SHA-256 digest: " + "a" * 64 + "\n"
+                        "V3.0 Signer: certificate SHA-256 digest: " + "b" * 64 + "\n")
+
+    def test_source_stamp_does_not_override_app_certificate(self):
+        with self.assertRaisesRegex(ValueError, "pinned development certificate"):
+            self.verify("Signer #1 certificate SHA-256 digest: " + "b" * 64 + "\n"
+                        "Source Stamp Signer certificate SHA-256 digest: " + "a" * 64 + "\n")
+
+    def test_ignores_source_stamp_and_public_key_when_app_certificate_matches(self):
+        self.verify("Signer #1 certificate SHA-256 digest: " + "a" * 64 + "\n"
+                    "Signer #1 public key SHA-256 digest: " + "b" * 64 + "\n"
+                    "Source Stamp Signer certificate SHA-256 digest: " + "c" * 64 + "\n")
+
     def test_rejects_invalid_apk_even_if_output_mentions_pinned_certificate(self):
         with self.assertRaisesRegex(ValueError, "signature verification failed"):
             self.verify("Signer #1 certificate SHA-256 digest: " + "a" * 64 + "\n", returncode=1)

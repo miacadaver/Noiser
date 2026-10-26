@@ -36,7 +36,7 @@ Notes:
 
 ## Development APK signing
 
-Persistent signing is prepared but awaits its repository secret before activation.
+Main-branch CI APKs use a persistent development signing key.
 See [development signing](docs/development-signing.md) for setup, key backup, and
 the one-time transition from older disposable-key APKs.
 

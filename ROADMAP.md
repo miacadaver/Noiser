@@ -17,7 +17,7 @@ The current foundation is the phone-confirmed rollback. Its removed background c
 
 ### Agreed implementation priorities
 
-1. **Persistent development signing:** implementation and certificate prepared; activation awaits the `NOISER_DEBUG_KEYSTORE_BASE64` repository secret and CI validation. See [setup and transition instructions](docs/development-signing.md).
+1. **Persistent development signing:** enabled on `main` with a configured repository secret and a pinned public certificate. CI checks the restored key and the published APK; a settings-preserving physical-device update remains to be checked. See [setup and transition instructions](docs/development-signing.md).
 2. **Android lifecycle regression coverage:** screen-off playback, activity recreation, interruptions, Bluetooth controls, rapid track changes, and Stop during stalls; record physical-device results.
 3. **Protected credential storage:** Keystore-backed encryption, migration of existing preferences, and explicit credential exclusions from backups/exports.
 4. **Buffering and failure presentation:** distinguish peer queue, connection, buffering, retry, and terminal failure; add a dependable user Retry action before broader automatic recovery.
@@ -31,7 +31,9 @@ Reduce static activity references and split large playback-related classes incre
 - [ ] Validate screen-off playback, Bluetooth/headset controls, interruptions, task dismissal, and cleanup on physical devices.
 - [ ] Check real external scrobblers, artwork, tag timing, and long-session battery use.
 - [ ] Capture current Noiser search, player, queue, and notification screenshots to replace the inherited/validation gallery.
-- [ ] Activate the prepared persistent development signing setup and verify two successive APKs use the same certificate and update without clearing settings.
+- [x] Configure persistent development signing with a pinned certificate and fail-closed APK verification.
+- [ ] Verify two successive APK builds use the same certificate.
+- [ ] Verify a same-certificate update on the physical phone retains settings.
 
 **Done when:** device model, Android version, APK/commit, and pass/fail results are recorded, with regressions resolved or clearly documented.
 

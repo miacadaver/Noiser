@@ -46,7 +46,7 @@ Search and Browse screenshots are inherited from upstream Seeker and show the sh
 3. Install the APK on Android 6.0 or newer, allow installation from your browser/file manager if prompted, then sign in to Soulseek.
 4. Open a peer folder or the track list from a search result and tap **Play** beside an MP3.
 
-The app appears as **Noiser**. Version **3.11.2-stream.9** keeps the working package ID `com.companyname.andriodapp1.rollback`, separate from upstream Seeker and the earlier original-package builds. Renaming the app does not migrate or clear settings. Updating an existing installation also requires a matching signing certificate; CI APKs use development signing.
+The app appears as **Noiser**. Version **3.11.2-stream.9** keeps the working package ID `com.companyname.andriodapp1.rollback`, separate from upstream Seeker and the earlier original-package builds. Renaming the app does not migrate or clear settings. Updating an existing installation also requires a matching signing certificate; Main-branch CI APKs reuse a pinned development signing certificate; validation APKs from pull requests use disposable keys. See [development signing](docs/development-signing.md) for the one-time transition from older builds and key-backup instructions.
 
 This is an **experimental development build**, not a Play Store release. The pre-branding rollback was confirmed to launch on a Samsung running Android 16; the refreshed build still needs device validation. The [known-working rollback APK](https://github.com/miacadaver/Noiser/actions/runs/40366644108/artifacts/12670202882) and its [baseline record](docs/validation/2026-10-26-full-background-rollback.md) remain available as historical references, subject to artifact expiry.
 
@@ -98,7 +98,7 @@ Pushes and pull requests to `main` run host tests and build an APK. The host tes
 | [Background playback](docs/background-playback.md) | Service lifecycle, media controls, and device checklist |
 | [Metadata](docs/streaming-metadata.md) | Tag extraction, artwork, and publication behavior |
 | [Branding](docs/branding.md) | Editable bird artwork and Android icon exports |
-| [Development signing](docs/development-signing.md) | Prepared persistent-key setup, activation, and update compatibility |
+| [Development signing](docs/development-signing.md) | Persistent-key setup, backup, and update compatibility |
 
 ## Credits and license
 

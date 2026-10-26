@@ -90,10 +90,18 @@ def verify_apk(apk):
                             capture_output=True, check=False, text=True)
     if result.returncode:
         raise ValueError("APK signature verification failed.")
-    digests = re.findall(r"^Signer #\d+ certificate SHA-256 digest: ([0-9a-fA-F]+)$", result.stdout, re.MULTILINE)
+    # New build-tools label certificates by signature scheme / SDK range rather
+    # than only "Signer #1". A certificate may be repeated for several schemes.
+    # Source-stamp certificates and public-key digests are not app identities.
+    digests = re.findall(
+        r"^(?:Signer\b|V\d+(?:\.\d+)? Signer\b)[^\r\n]*?"
+        r"certificate SHA-256 digest:\s*([0-9a-fA-F]{64})[ \t\r]*$",
+        result.stdout, re.MULTILINE,
+    )
     expected = FINGERPRINT.read_text().strip().lower()
-    if len(digests) != 1 or digests[0].lower() != expected:
-        raise ValueError("APK does not use the pinned development certificate. Refusing to publish.")
+    if not digests or {digest.lower() for digest in digests} != {expected}:
+        found = ", ".join(sorted(set(digests))) or "no recognized app certificate"
+        raise ValueError(f"APK does not use the pinned development certificate. Expected {expected}; found {found}. Refusing to publish.")
     print(f"Verified APK certificate SHA-256: {expected}")
 
 

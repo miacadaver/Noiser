@@ -1,17 +1,19 @@
 # Persistent development signing
 
-The proposed signing workflow reuses one private development key for `main` APKs. It pins the public certificate in [`.github/noiser-development-certificate.sha256`](../.github/noiser-development-certificate.sha256), checks the restored key, and verifies the final APK with Android's `apksigner` before uploading `Noiser-apk`.
+The signing workflow reuses one private development key for `main` APKs. It pins the public certificate in [`.github/noiser-development-certificate.sha256`](../.github/noiser-development-certificate.sha256), checks the restored key, and verifies the final APK with Android's `apksigner` before uploading `Noiser-apk`.
 
-**Activation is pending:** the current GitHub integration cannot create repository Actions secrets (`403: Resource not accessible by integration`). The workflow change must not replace the working `main` workflow until the secret below is configured.
+**Enabled on `main`:** the repository owner configured `NOISER_DEBUG_KEYSTORE_BASE64` on October 26, 2026. CI successfully restored the key and matched the pinned certificate. The integration still cannot manage repository secrets; an owner must perform future secret setup or restoration.
 
-## One-time setup
+## Initial setup and backup
 
 A private key and a base64 upload payload have been generated in this workspace under `.signing/`. This directory is ignored by Git and must never be committed. Keep an offline backup of `noiser-development.jks`; losing it prevents future compatible updates. The key uses Android's standard development alias `androiddebugkey` and password `android`. Its private bytes, rather than that conventional password, are the signing credential.
+
+The current repository is already configured. For disaster recovery or another repository:
 
 1. Open [Noiser → Settings → Secrets and variables → Actions](https://github.com/miacadaver/Noiser/settings/secrets/actions).
 2. Create a **repository secret** named `NOISER_DEBUG_KEYSTORE_BASE64`.
 3. Use the contents of `.signing/noiser-development.base64` as its value. Keep this value out of issues, commits, chat, and build logs.
-4. Activate the reviewed signing workflow on `main` and let the APK build complete.
+4. Run the signing workflow on `main` and confirm certificate verification succeeds before installing an update.
 
 Alternatively, from an owner-authenticated terminal in this workspace:
 
