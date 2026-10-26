@@ -61,8 +61,8 @@ namespace Seeker.Playback
 
         /// <summary>
         /// Completes when the first parsed track metadata has reached the session, or the caller's
-        /// timeout expires. Playback start waits for this briefly so external scrobblers never see
-        /// the filename fallback as the track that started playing.
+        /// timeout expires. The timeout bounds audible startup only; it never releases unfinished
+        /// identifying metadata to the session.
         /// </summary>
         public async Task WaitForInitialMetadataAsync(TimeSpan timeout)
         {
@@ -234,8 +234,9 @@ namespace Seeker.Playback
             }
             if (id3 == null)
             {
-                // No embedded tags will arrive for this track. The filename fallback is final.
-                if (audioGroupFound) initialMetadataReady.TrySetResult(true);
+                // Confirm absence of tags before allowing the final title/artist fallback out.
+                if (audioGroupFound && !Metadata.IsTagReadComplete)
+                    PublishResolvedMetadata(new TrackMetadataValues());
                 return;
             }
             if (lastId3 != null && JNIEnv.IsSameObject(lastId3.Handle, id3.Handle)) return;
@@ -257,14 +258,10 @@ namespace Seeker.Playback
                     {
                         if (stopped || resourcesClosed || !owner.IsCurrent(this) || revision != metadataRevision)
                         { bitmap?.Dispose(); return; }
-                        Metadata = Metadata.WithEmbedded(values);
                         var previousBitmap = Artwork;
                         if (bitmap != null) Artwork = bitmap;
                         if (thumbnail != null) SessionArtwork = thumbnail;
-                        SessionMetadata = StreamingMetadata.BuildSessionMetadata(Metadata, SessionArtwork);
-                        owner.UpdateQueueMetadata(this, Metadata);
-                        owner.Publish();
-                        initialMetadataReady.TrySetResult(true);
+                        PublishResolvedMetadata(values);
                         if (bitmap != null) previousBitmap?.Dispose();
                     });
                 }
@@ -274,6 +271,15 @@ namespace Seeker.Playback
                     Logger.Debug("Stream metadata ignored: " + exception.Message);
                 }
             });
+        }
+
+        private void PublishResolvedMetadata(TrackMetadataValues values)
+        {
+            Metadata = Metadata.WithResolvedTags(values);
+            SessionMetadata = StreamingMetadata.BuildSessionMetadata(Metadata, SessionArtwork);
+            owner.UpdateQueueMetadata(this, Metadata);
+            owner.Publish();
+            initialMetadataReady.TrySetResult(true);
         }
 
         public void UpdateDuration()

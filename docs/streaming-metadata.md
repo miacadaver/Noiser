@@ -29,10 +29,17 @@ MP3 audio follows its leading tags; a large leading tag must arrive or be skippe
 track number, release year, optional duration in milliseconds, and bounded encoded artwork.
 It is independent of Android UI/player classes and supplies the current MediaSession integration.
 Snapshots merge valid embedded fields over fallback fields. Missing/invalid values do not erase good data.
-The display `Album` may come from a folder or filename; `EmbeddedAlbum` records only a valid parsed
-album tag. Android's media session and notification use `EmbeddedAlbum` for current and queued tracks.
-Their album field stays unset while tags load and for files without an album tag. Folder/filename
-guesses remain available inside Noiser's UI. Duration-only updates and queue copies preserve this distinction.
+The internal `Album` may come from a folder or filename; `EmbeddedAlbum` records only a valid parsed
+album tag. Both the player dialog and Android media metadata use `EmbeddedAlbum` for the album;
+folder/filename album guesses are not displayed or exported.
+`IsTagReadComplete` starts false for each new track. Until the selected audio format's tags have been
+read, Android's media session and notification receive empty metadata, including no identifying
+title/artist. Once reading completes, title, artist and any embedded album are published together.
+A confirmed untagged track may publish its final title/artist fallback; a track genuinely missing an
+album tag may publish without an album. Duration-only updates cannot complete tag reading, and queue
+copies preserve the completion state for current and queued entries.
+The mini-player and full player also hold back the provisional title/artist until that point, showing
+the generic player title in the meantime. Queue browsing still shows filenames to identify selections.
 See [album publication regression checks](validation/2026-10-26-album-metadata.md) for delayed-tag and
 missing-album validation on Android.
 
@@ -46,9 +53,10 @@ size/bitrate. Completed ordinary-download playback uses the same metadata alloca
 After the foreground notification is ready, initial Play/resume waits up to **1.5 seconds** for parsed
 audio-track metadata to reach the session before starting audible playback. Tagged tracks can complete
 the wait early; a selected audio track without tags makes the filename fallback final and also completes
-the wait. The timeout bounds startup delay when a peer is queued or tags are slow. This helps external
-scrobblers see the embedded title/artist at playback start, but cannot guarantee their behavior or that
-metadata arrives before the timeout. Queue refresh optimizations do not alter this wait.
+the wait. The timeout bounds startup delay when a peer is queued or tags are slow. Expiring the wait
+does not release provisional metadata: identifying session metadata stays withheld until tag reading
+finishes, even if audio starts sooner. This controls what Noiser publishes; a real scrobbler still needs
+device validation. Queue refresh optimizations do not alter this wait.
 
 `TrackMetadataFallback` handles Windows/Unix peer paths and preserves Unicode. It removes the MP3
 extension and common numeric prefixes. An unambiguous `Artist - Title` supplies artist/title.

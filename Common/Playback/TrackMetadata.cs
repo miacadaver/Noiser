@@ -13,6 +13,8 @@ namespace Common.Playback
         public string? Album { get; }
         // Album may be a display fallback. Only a parsed tag is suitable for external scrobblers.
         public string? EmbeddedAlbum { get; }
+        // Duration and other partial updates must not make an unfinished tag read publishable.
+        public bool IsTagReadComplete { get; }
         public string? AlbumArtist { get; }
         public int? TrackNumber { get; }
         public int? ReleaseYear { get; }
@@ -22,7 +24,8 @@ namespace Common.Playback
 
         internal TrackMetadata(string path, string filename, string title, string? artist, string? album,
             string? albumArtist = null, int? trackNumber = null, int? year = null,
-            long? duration = null, byte[]? artwork = null, string? embeddedAlbum = null)
+            long? duration = null, byte[]? artwork = null, string? embeddedAlbum = null,
+            bool isTagReadComplete = false)
         {
             OriginalPath = path;
             OriginalFilename = filename;
@@ -30,6 +33,7 @@ namespace Common.Playback
             Artist = artist;
             Album = album;
             EmbeddedAlbum = embeddedAlbum;
+            IsTagReadComplete = isTagReadComplete;
             AlbumArtist = albumArtist;
             TrackNumber = trackNumber;
             ReleaseYear = year;
@@ -38,7 +42,12 @@ namespace Common.Playback
         }
 
         /// <summary>Valid embedded values replace fallback values; absent values preserve the snapshot.</summary>
-        public TrackMetadata WithEmbedded(TrackMetadataValues values) => new TrackMetadata(
+        public TrackMetadata WithEmbedded(TrackMetadataValues values) => Merge(values, IsTagReadComplete);
+
+        /// <summary>Publishes the complete tag-read result, including a genuine absence of tags.</summary>
+        public TrackMetadata WithResolvedTags(TrackMetadataValues values) => Merge(values, true);
+
+        private TrackMetadata Merge(TrackMetadataValues values, bool isTagReadComplete) => new TrackMetadata(
             OriginalPath, OriginalFilename, Clean(values.Title) ?? Title,
             Clean(values.Artist) ?? Artist, Clean(values.Album) ?? Album,
             Clean(values.AlbumArtist) ?? AlbumArtist,
@@ -47,7 +56,7 @@ namespace Common.Playback
             values.DurationMilliseconds > 0 ? values.DurationMilliseconds : DurationMilliseconds,
             values.ArtworkData?.Length > 0 && values.ArtworkData.Length <= MaximumArtworkBytes
                 ? values.ArtworkData : ArtworkData,
-            embeddedAlbum: Clean(values.Album) ?? EmbeddedAlbum);
+            embeddedAlbum: Clean(values.Album) ?? EmbeddedAlbum, isTagReadComplete: isTagReadComplete);
 
         internal static string? Clean(string? value)
         {

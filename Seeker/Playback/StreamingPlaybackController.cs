@@ -307,20 +307,23 @@ namespace Seeker.Playback
             }
             else
             {
-                miniTitle.Text = snapshot.Metadata.Title;
-                miniArtist.Text = snapshot.Metadata.Artist;
-                miniArtist.Visibility = string.IsNullOrEmpty(snapshot.Metadata.Artist) ? ViewStates.Gone : ViewStates.Visible;
+                string title = snapshot.Metadata.IsTagReadComplete
+                    ? snapshot.Metadata.Title : activity.GetString(Resource.String.stream_player);
+                string trackArtist = snapshot.Metadata.IsTagReadComplete ? snapshot.Metadata.Artist : null;
+                miniTitle.Text = title;
+                miniArtist.Text = trackArtist;
+                miniArtist.Visibility = string.IsNullOrEmpty(trackArtist) ? ViewStates.Gone : ViewStates.Visible;
                 SetArtwork(miniArtwork, snapshot);
                 miniPause.SetImageResource(snapshot.ShowPause ? Resource.Drawable.stream_pause : Resource.Drawable.stream_play);
                 miniPause.ContentDescription = activity.GetString(snapshot.ShowPause ? Resource.String.stream_pause : Resource.String.stream_resume);
                 miniPause.Enabled = snapshot.Phase != PlaybackPhase.Error && Controls != null;
                 if (full)
                 {
-                    dialog.SetTitle(snapshot.Metadata.Title);
-                    artist.Text = snapshot.Metadata.Artist;
-                    artist.Visibility = string.IsNullOrEmpty(snapshot.Metadata.Artist) ? ViewStates.Gone : ViewStates.Visible;
-                    album.Text = snapshot.Metadata.Album;
-                    album.Visibility = string.IsNullOrEmpty(snapshot.Metadata.Album) ? ViewStates.Gone : ViewStates.Visible;
+                    dialog.SetTitle(title);
+                    artist.Text = trackArtist;
+                    artist.Visibility = string.IsNullOrEmpty(trackArtist) ? ViewStates.Gone : ViewStates.Visible;
+                    album.Text = snapshot.Metadata.EmbeddedAlbum;
+                    album.Visibility = string.IsNullOrEmpty(snapshot.Metadata.EmbeddedAlbum) ? ViewStates.Gone : ViewStates.Visible;
                     SetArtwork(artwork, snapshot);
                     if (snapshot.Phase == PlaybackPhase.Error)
                         status.Text = activity.GetString(Resource.String.stream_failed, snapshot.Error);

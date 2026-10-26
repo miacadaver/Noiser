@@ -1,5 +1,9 @@
 # Embedded-only session albums — October 26, 2026
 
+This report describes the earlier album-only fix. The subsequent publication gate also withholds
+title/artist until tag reading finishes, and removes album guesses from the player display. The
+checks below are historical evidence for the album-only change, not a device test of the later gate.
+
 The loading track previously published its folder/filename-derived album through Android's media
 session before ID3 extraction completed. The 1.5-second audible-playback wait did not prevent this
 earlier metadata publication.
