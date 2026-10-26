@@ -2,6 +2,18 @@
 
 Seeker Android with an incremental prototype for playing MP3 files directly from Soulseek peers.
 
+The working baseline on `main` is the pre-background-changes code restored in
+`5c950d8`, confirmed to open on the user's Samsung running Android 16.
+The four background additions (buffering/retry presentation, automatic reconnect
+recovery, saved queues, and saved playback positions) remain removed, along with
+the later battery and startup experiments. Earlier metadata/scrobbling fixes remain.
+See the [baseline verification record](docs/validation/2026-10-26-full-background-rollback.md).
+
+Keep using the [confirmed working APK](https://github.com/miacadaver/Noiser/actions/runs/40366644108/artifacts/12670202882).
+Its launcher name is **Noiser rollback** and its package remains separate from the
+original app, preserving the original app's data. No reinstall is needed to adopt
+this as the project's working baseline.
+
 The Seeker source was imported from [jackBonadies/SeekerAndroid](https://github.com/jackBonadies/SeekerAndroid)
 at commit `ff1dcc6de55a412e8d6eadaddf36deca54517413` (October 11, 2026).
 The original project README is retained as [UPSTREAM_README.md](UPSTREAM_README.md), along with its license and notices.
@@ -25,7 +37,7 @@ Every push to `main` and pull request targeting `main` runs [unit tests](https:/
 and [builds an Android APK](https://github.com/miacadaver/Noiser/actions/workflows/android.yml).
 Open a successful APK build and download **noiser-debug-apk** from its **Artifacts** section.
 This is a standalone development APK with debug signing; the workflow needs no release signing secrets.
-The background playback build reports version **3.11.2-stream.5** in Android's app information.
+The current baseline reports version **3.11.2-stream.8-rollback** in Android's app information.
 The playback dialog shows embedded title, artist, album, and artwork when available, with conservative
 filename fallbacks. See [metadata behavior, limits, and verification](docs/streaming-metadata.md).
 Playback briefly waits for initial tags before starting, helping scrobblers receive embedded metadata

@@ -1,5 +1,12 @@
 # Full background-playback rollback — October 26, 2026
 
+The user confirmed that this separate rollback build opens on their Samsung
+running Android 16. At their request, it is now the working baseline on `main`;
+the four background changes and later experiments remain removed. This confirmation
+does not identify which previous change, installation, or stored state caused the
+original crash, nor does it establish that every playback feature was tested.
+Keep the tested APK and package identity unchanged for this baseline.
+
 `3.11.2-stream.8-rollback` (version code 151) restores the tracked repository to
 `3a1aea9` (Withhold playback metadata until tag reading completes), apart from this
 report and the packaging identity described below. No Git history is rewritten.
@@ -30,15 +37,16 @@ private data remain in their existing package; this copy cannot read them. It
 adds no data clearing, import or migration. It retains the baseline's normal
 transient-cache cleanup inside its own package.
 
-This is a controlled baseline test, not a confirmed diagnosis of the reported
-Samsung Galaxy A07 / Android 16 crash. Earlier emulator success did not reproduce
-the phone's failure.
+This restores working startup on the reported Samsung Galaxy A07 / Android 16
+device; it is not a confirmed diagnosis of the original crash. Earlier emulator
+success did not reproduce the phone's failure.
 
 To verify the source baseline:
 
 ```sh
 git diff 3a1aea9 -- . ':!Seeker/Properties/AndroidManifest.xml' \
   ':!Seeker/Main/MainActivity.cs' \
+  ':!README.md' \
   ':!docs/validation/2026-10-26-full-background-rollback.md'
 ```
 
