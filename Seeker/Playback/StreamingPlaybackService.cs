@@ -49,8 +49,27 @@ namespace Seeker.Playback
         internal static event Action Changed;
         internal StreamingPlayback Playback { get; private set; }
         internal PlaybackQueue Queue { get; private set; } = new PlaybackQueue();
+        private readonly PlaybackControls controls = new PlaybackControls();
+        internal PlaybackRepeatMode RepeatMode => controls.RepeatMode;
+        internal bool Autoplay => controls.Autoplay;
+        internal bool CanSkipNext => Queue.CurrentIndex >= 0
+            && (Queue.HasNext || (RepeatMode == PlaybackRepeatMode.All && Queue.Entries.Count > 1));
+        internal bool CanSkipPrevious => Queue.CurrentIndex >= 0
+            && (Queue.HasPrevious || (RepeatMode == PlaybackRepeatMode.All && Queue.Entries.Count > 1));
         internal SessionPlayer SessionPlayer { get; private set; }
         internal string LastHandledRequestId { get; private set; }
+
+        internal void CycleRepeatMode()
+        {
+            controls.CycleRepeatMode();
+            Publish();
+        }
+
+        internal void ToggleAutoplay()
+        {
+            controls.ToggleAutoplay();
+            Publish();
+        }
 
         // An exported media service accepts transport controls, not arbitrary peer-download intents.
         // Only an in-process, single-use request created by the user's Play action selects a file.
@@ -122,7 +141,8 @@ namespace Seeker.Playback
             actualPlayer.SetAudioAttributes(new AndroidX.Media3.Common.AudioAttributes.Builder()
                 .SetUsage(C.UsageMedia).SetContentType(C.AudioContentTypeMusic).Build(), true);
             SessionPlayer = new SessionPlayer(actualPlayer, () => Playback, () => Queue,
-                StopPlayback, SetPlayWhenReady, SkipToNext, SkipToPrevious, SelectQueueEntry);
+                StopPlayback, SetPlayWhenReady, SkipToNext, SkipToPrevious, SelectQueueEntry,
+                () => CanSkipNext, () => CanSkipPrevious);
             var launch = new Intent(this, typeof(MainActivity)).SetFlags(ActivityFlags.SingleTop | ActivityFlags.ClearTop)
                 .PutExtra(OpenPlayerExtra, true);
             var activity = PendingIntent.GetActivity(this, 1401, launch, PendingIntentFlags.UpdateCurrent | PendingIntentFlags.Immutable);
@@ -155,6 +175,20 @@ namespace Seeker.Playback
                 actualPlayer.Pause();
                 pending?.Set(null);
                 return SessionPlayer.CompletedFuture();
+            }
+            if (actualPlayer.PlaybackState == NativePlayer.StateEnded && Playback != null)
+            {
+                try
+                {
+                    // Play after a naturally ended/hold state restarts the current track.
+                    actualPlayer.SeekTo(0);
+                    Queue.Current?.MarkPlaying();
+                }
+                catch (Exception exception)
+                {
+                    Playback.Fail(exception.Message);
+                    return SessionPlayer.CompletedFuture();
+                }
             }
             if (actualPlayer.PlayWhenReady) return SessionPlayer.CompletedFuture();
             // SimpleBasePlayer publishes the pending play intent using its standard placeholder
@@ -358,36 +392,102 @@ namespace Seeker.Playback
 
         private void AdvanceOnCompletion()
         {
-            bool playWhenReady = SessionPlayer.PlayWhenReady;
+            if (Playback == null) return;
+            if (RepeatMode == PlaybackRepeatMode.One)
+            {
+                ReplayCurrent();
+                return;
+            }
+            // Autoplay is the master switch. Repeat All only wraps once autoplay continues.
+            if (!Autoplay)
+            {
+                HoldAtEnd();
+                return;
+            }
             var next = Queue.MoveNext(completed: true);
+            if (next == null && RepeatMode == PlaybackRepeatMode.All && Queue.Entries.Count == 1)
+            {
+                ReplayCurrent();
+                return;
+            }
+            if (next == null && RepeatMode == PlaybackRepeatMode.All && Queue.Entries.Count > 1)
+            {
+                next = Queue.Entries[0];
+                Queue.Select(next.Id);
+            }
             if (next == null)
             {
-                StopPlayback();
+                HoldAtEnd();
                 return;
             }
             next.MarkPlaying();
-            StartQueueEntry(next, playWhenReady);
+            StartQueueEntry(next, true);
+            Publish();
+        }
+
+        private void HoldAtEnd()
+        {
+            // Do not clear the queue/index. Queue, Next, Previous, and Play remain usable.
+            Queue.Current?.MarkPlayed();
+            if (actualPlayer?.PlayWhenReady == true) actualPlayer.Pause();
+            Publish();
+        }
+
+        private void ReplayCurrent()
+        {
+            if (Playback == null || Playback.Failure != null || Queue.Current == null)
+            {
+                HoldAtEnd();
+                return;
+            }
+            try
+            {
+                Queue.Current.MarkPlaying();
+                actualPlayer.SeekTo(0);
+                actualPlayer.Pause();
+                SessionPlayer.Play();
+                Publish();
+            }
+            catch (Exception exception)
+            {
+                Playback.Fail(exception.Message);
+            }
         }
 
         internal bool SkipToNext()
         {
             var next = Queue.MoveNext();
+            if (next == null && RepeatMode == PlaybackRepeatMode.All && Queue.Entries.Count > 1)
+            {
+                next = Queue.Entries[0];
+                Queue.Select(next.Id);
+            }
             if (next == null) return false;
-            bool playWhenReady = SessionPlayer.PlayWhenReady;
             next.MarkPlaying();
-            StartQueueEntry(next, playWhenReady);
+            StartQueueEntry(next, true);
             Publish();
             return true;
         }
 
         internal bool SkipToPrevious()
         {
-            if (Playback != null && actualPlayer.CurrentPosition > 3000 && Playback.TrySeekTo(0)) return true;
-            var previous = Queue.MovePrevious();
+            PlaybackQueueEntry? previous;
+            if (Queue.HasPrevious)
+            {
+                previous = Queue.MovePrevious();
+            }
+            else if (RepeatMode == PlaybackRepeatMode.All && Queue.Entries.Count > 1)
+            {
+                previous = Queue.Entries[Queue.Entries.Count - 1];
+                Queue.Select(previous.Id);
+            }
+            else
+            {
+                return false;
+            }
             if (previous == null) return false;
-            bool playWhenReady = SessionPlayer.PlayWhenReady;
             previous.MarkPlaying();
-            StartQueueEntry(previous, playWhenReady);
+            StartQueueEntry(previous, true);
             Publish();
             return true;
         }
@@ -399,12 +499,14 @@ namespace Seeker.Playback
             var selected = Queue.Select(entryId);
             if (selected == null) return false;
             bool retainCurrent = sameEntry && Playback != null && Playback.Failure == null
-                && Playback.Username == selected.Username && Playback.FileInfo.FullFileName == selected.RemotePath;
+                && actualPlayer.PlaybackState != NativePlayer.StateEnded
+                && Playback.Username == selected.Username
+                && Playback.FileInfo.FullFileName == selected.RemotePath;
             if (!retainCurrent)
             {
                 if (!sameEntry && oldCurrent?.State == PlaybackQueueEntryState.Playing) oldCurrent.MarkSkipped();
                 selected.MarkPlaying();
-                StartQueueEntry(selected, SessionPlayer.PlayWhenReady);
+                StartQueueEntry(selected, true);
             }
             Publish();
             return true;
@@ -443,7 +545,8 @@ namespace Seeker.Playback
                 track.HasBytes, track.IsQueued);
             return new PlaybackSnapshot(track.Metadata, track.Artwork, phase, actualPlayer.CurrentPosition,
                 track.Received, track.FileInfo.Size, track.Failure?.Message, track.Id, track.SeekRange,
-                SessionPlayer.PlayWhenReady && actualPlayer.PlaybackSuppressionReason == 0);
+                SessionPlayer.PlayWhenReady && actualPlayer.PlaybackSuppressionReason == 0,
+                RepeatMode, Autoplay);
         }
 
         internal void StopPlayback()
@@ -550,8 +653,11 @@ namespace Seeker.Playback
         public string TrackId { get; }
         public Common.Playback.SeekRangeSnapshot SeekRange { get; }
         public bool ShowPause { get; }
+        public PlaybackRepeatMode RepeatMode { get; }
+        public bool Autoplay { get; }
         public PlaybackSnapshot(TrackMetadata metadata, Bitmap artwork, PlaybackPhase phase, long position,
-            long received, long size, string error, string trackId, Common.Playback.SeekRangeSnapshot seekRange, bool showPause)
-        { Metadata = metadata; Artwork = artwork; Phase = phase; Position = position; Received = received; Size = size; Error = error; TrackId = trackId; SeekRange = seekRange; ShowPause = showPause; }
+            long received, long size, string error, string trackId, Common.Playback.SeekRangeSnapshot seekRange,
+            bool showPause, PlaybackRepeatMode repeatMode, bool autoplay)
+        { Metadata = metadata; Artwork = artwork; Phase = phase; Position = position; Received = received; Size = size; Error = error; TrackId = trackId; SeekRange = seekRange; ShowPause = showPause; RepeatMode = repeatMode; Autoplay = autoplay; }
     }
 }

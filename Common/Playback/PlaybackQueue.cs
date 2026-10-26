@@ -151,6 +151,18 @@ namespace Common.Playback
 
         public void Clear() { entries.Clear(); currentIndex = -1; }
 
+        /// <summary>
+        /// Rows for the queue dialog: the current song and everything after it in folder order.
+        /// Repeat All wraps the remaining rows to the front so the visible queue follows the loop.
+        /// </summary>
+        public IReadOnlyList<PlaybackQueueEntry> Upcoming(PlaybackRepeatMode repeatMode)
+        {
+            if (currentIndex < 0 || currentIndex >= entries.Count) return Entries;
+            var ordered = entries.Skip(currentIndex).Concat(
+                repeatMode == PlaybackRepeatMode.All ? entries.Take(currentIndex) : Enumerable.Empty<PlaybackQueueEntry>());
+            return ordered.ToArray();
+        }
+
         public static IReadOnlyList<PlaybackQueueEntry> Order(IEnumerable<PlaybackQueueEntry> tracks)
         {
             if (tracks == null) throw new ArgumentNullException(nameof(tracks));

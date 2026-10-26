@@ -895,9 +895,9 @@ namespace Seeker
                 || dataItem?.File?.Filename?.EndsWith(".mp3", StringComparison.OrdinalIgnoreCase) != true)
                 return;
 
-            var streamFile = BrowseUtils.ToFullFileInfo(dataItem);
-            string streamUsername = state.CurrentUsername;
-            SessionService.Instance.RunWithReconnect(() => Playback.StreamingPlaybackController.Show(SeekerState.ActiveActivityRef, streamUsername, streamFile));
+            // A Play action starts the folder queue at this song, so Next/Previous and Queue
+            // operate on the complete folder rather than a one-item playlist.
+            PlayFromHere(dataItem);
         }
 
         private static bool IsUnlockedAudio(DataItem item) => item?.File != null
@@ -914,8 +914,8 @@ namespace Seeker
             if (BrowseActionMode != null) return;
             List<PlaybackQueueEntry> tracks;
             lock (state.DataItems)
-                tracks = PlaybackQueue.Order(state.DataItems.Where(IsUnlockedAudio)
-                    .Select(item => ToQueueEntry(state.CurrentUsername, BrowseUtils.ToFullFileInfo(item)))).ToList();
+                tracks = state.DataItems.Where(IsUnlockedAudio)
+                    .Select(item => ToQueueEntry(state.CurrentUsername, BrowseUtils.ToFullFileInfo(item))).ToList();
             PlayQueue(tracks);
         }
 
@@ -923,8 +923,9 @@ namespace Seeker
         {
             if (BrowseActionMode != null || folder?.Directory == null || folder.Node?.IsLocked == true) return;
             string prefix = folder.Directory.Name;
-            var tracks = PlaybackQueue.Order(folder.Directory.Files
+            var tracks = folder.Directory.Files
                 .Where(file => PlaybackQueue.IsSupportedAudio(file.Filename))
+                .OrderBy(file => file.Filename, StringComparer.OrdinalIgnoreCase)
                 .Select(file => ToQueueEntry(state.CurrentUsername, new FullFileInfo
                 {
                     FullFileName = string.IsNullOrEmpty(prefix) ? file.Filename : prefix.TrimEnd('\\', '/') + "\\" + file.Filename,
@@ -932,28 +933,26 @@ namespace Seeker
                     Depth = 1,
                     wasFilenameLatin1Decoded = file.IsLatin1Decoded,
                     wasFolderLatin1Decoded = folder.Directory.DecodedViaLatin1
-                }))).ToList();
+                })).ToList();
             PlayQueue(tracks);
         }
 
         private void PlayFromHere(DataItem selected)
         {
             if (BrowseActionMode != null || !IsUnlockedAudio(selected)) return;
-            var selectedEntry = ToQueueEntry(state.CurrentUsername, BrowseUtils.ToFullFileInfo(selected));
-            var siblings = selected.Node.Data.Files
-                .Where(file => PlaybackQueue.IsSupportedAudio(file.Filename))
-                .Select(file => ToQueueEntry(state.CurrentUsername, new FullFileInfo
-                {
-                    FullFileName = selected.Node.Data.Name.TrimEnd('\\', '/') + "\\" + file.Filename,
-                    Size = file.Size,
-                    Depth = 1,
-                    wasFilenameLatin1Decoded = file.IsLatin1Decoded,
-                    wasFolderLatin1Decoded = selected.Node.Data.DecodedViaLatin1
-                })).ToList();
-            var ordered = PlaybackQueue.Order(siblings);
-            string id = ordered.FirstOrDefault(entry => entry.Username == selectedEntry.Username
-                && entry.RemotePath == selectedEntry.RemotePath)?.Id;
-            PlayQueue(ordered, id);
+            var selectedFile = BrowseUtils.ToFullFileInfo(selected);
+            List<PlaybackQueueEntry> siblings;
+            lock (state.DataItems)
+                siblings = state.DataItems.Where(IsUnlockedAudio)
+                    .Select(item => ToQueueEntry(state.CurrentUsername, BrowseUtils.ToFullFileInfo(item))).ToList();
+            string id = siblings.FirstOrDefault(entry => entry.RemotePath == selectedFile.FullFileName)?.Id;
+            if (id == null)
+            {
+                var selectedEntry = ToQueueEntry(state.CurrentUsername, selectedFile);
+                siblings.Insert(0, selectedEntry);
+                id = selectedEntry.Id;
+            }
+            PlayQueue(siblings, id);
         }
 
         private void PlayQueue(IEnumerable<PlaybackQueueEntry> entries, string selectedEntryId = null)

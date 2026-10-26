@@ -47,6 +47,8 @@ namespace Seeker.Playback
         private Button previous;
         private Button next;
         private Button openQueue;
+        private Button repeat;
+        private Button autoplay;
         private bool attached;
         private string pendingRequest;
         private bool trackingSeekBar;
@@ -230,6 +232,10 @@ namespace Seeker.Playback
             next.Click += (_, __) => Controls?.SeekToNextMediaItem();
             openQueue = view.FindViewById<Button>(Resource.Id.streamQueue);
             openQueue.Click += (_, __) => ShowQueueDialog();
+            repeat = view.FindViewById<Button>(Resource.Id.streamRepeat);
+            repeat.Click += (_, __) => StreamingPlaybackService.Current?.CycleRepeatMode();
+            autoplay = view.FindViewById<Button>(Resource.Id.streamAutoplay);
+            autoplay.Click += (_, __) => StreamingPlaybackService.Current?.ToggleAutoplay();
             var window = new Google.Android.Material.Dialog.MaterialAlertDialogBuilder(activity)
                 .SetTitle(Resource.String.stream_player)
                 .SetView(view)
@@ -289,6 +295,7 @@ namespace Seeker.Playback
                     status.SetText(pendingRequest != null ? Resource.String.stream_connecting : Resource.String.stream_stopped);
                     pause.Enabled = false;
                     previous.Enabled = next.Enabled = openQueue.Enabled = false;
+                    repeat.Enabled = autoplay.Enabled = false;
                     seekBar.Enabled = false;
                     seekBar.Progress = 0;
                     seekBar.SecondaryProgress = 0;
@@ -319,9 +326,18 @@ namespace Seeker.Playback
                         status.Text = activity.GetString(Resource.String.stream_failed, snapshot.Error);
                     else status.SetText(StatusResource(snapshot.Phase));
                     pause.Enabled = snapshot.Phase != PlaybackPhase.Error && Controls != null;
-                    previous.Enabled = Controls != null;
-                    next.Enabled = service?.Queue.HasNext == true && Controls != null;
-                    openQueue.Enabled = service?.Queue.Entries.Count > 0;
+                    previous.Enabled = service?.CanSkipPrevious == true && Controls != null;
+                    next.Enabled = service?.CanSkipNext == true && Controls != null;
+                    openQueue.Enabled = service?.Queue.CurrentIndex >= 0;
+                    repeat.Enabled = autoplay.Enabled = Controls != null;
+                    repeat.SetText(snapshot.RepeatMode switch
+                    {
+                        PlaybackRepeatMode.All => Resource.String.stream_repeat_all,
+                        PlaybackRepeatMode.One => Resource.String.stream_repeat_one,
+                        _ => Resource.String.stream_repeat_off
+                    });
+                    autoplay.SetText(snapshot.Autoplay
+                        ? Resource.String.stream_autoplay_on : Resource.String.stream_autoplay_off);
                     pause.SetText(snapshot.ShowPause ? Resource.String.stream_pause : Resource.String.stream_resume);
                     long seconds = Math.Max(0, snapshot.Position) / 1000;
                     long percent = snapshot.Size > 0 ? Math.Min(100, snapshot.Received * 100 / snapshot.Size) : 0;
@@ -349,8 +365,8 @@ namespace Seeker.Playback
         private void ShowQueueDialog()
         {
             var service = StreamingPlaybackService.Current;
-            if (!attached || service == null || service.Queue.Entries.Count == 0) return;
-            queueRows = service.Queue.Entries.ToArray();
+            if (!attached || service == null || service.Queue.CurrentIndex < 0) return;
+            queueRows = service.Queue.Upcoming(service.RepeatMode).ToArray();
             queueSignature = null;
             queueAdapter = new QueueAdapter(activity, queueRows, service.Queue.Current?.Id);
             queueList = new ListView(activity) { Adapter = queueAdapter };
@@ -391,7 +407,8 @@ namespace Seeker.Playback
         private void UpdateQueueDialog(StreamingPlaybackService service)
         {
             if (queueDialog?.IsShowing != true || queueList == null || activity.IsFinishing || activity.IsDestroyed) return;
-            var rows = service?.Queue.Entries.ToArray() ?? Array.Empty<PlaybackQueueEntry>();
+            var rows = service == null ? Array.Empty<PlaybackQueueEntry>()
+                : service.Queue.Upcoming(service.RepeatMode).ToArray();
             string currentId = service?.Queue.Current?.Id;
             string signature = string.Join("\u001f", rows.Select(entry => string.Join("\u001e",
                 new[] { entry.Id, entry.Metadata.Title, entry.Metadata.Artist, entry.State.ToString(), entry.Error ?? string.Empty })))

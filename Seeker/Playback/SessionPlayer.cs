@@ -19,11 +19,13 @@ namespace Seeker.Playback
         private readonly Func<bool> next;
         private readonly Func<bool> previous;
         private readonly Func<string, bool> select;
+        private readonly Func<bool> canNext;
+        private readonly Func<bool> canPrevious;
 
         public SessionPlayer(IPlayer player, Func<StreamingPlayback> current, Func<PlaybackQueue> queue,
             Action stop, Func<bool, IListenableFuture> setPlayWhenReady, Func<bool> next,
-            Func<bool> previous, Func<string, bool> select) : base(player)
-        { actualPlayer = player; this.current = current; this.queue = queue; this.stop = stop; this.setPlayWhenReady = setPlayWhenReady; this.next = next; this.previous = previous; this.select = select; }
+            Func<bool> previous, Func<string, bool> select, Func<bool> canNext, Func<bool> canPrevious) : base(player)
+        { actualPlayer = player; this.current = current; this.queue = queue; this.stop = stop; this.setPlayWhenReady = setPlayWhenReady; this.next = next; this.previous = previous; this.select = select; this.canNext = canNext; this.canPrevious = canPrevious; }
 
         public void Refresh() => InvalidateState();
 
@@ -50,8 +52,8 @@ namespace Seeker.Playback
             commands.AddIf(Commands.CommandPlayPause, track != null && track.Failure == null);
             commands.AddIf(Commands.CommandStop, track != null);
             var playbackQueue = queue?.Invoke();
-            commands.AddIf(Commands.CommandSeekToNextMediaItem, track != null && playbackQueue?.HasNext == true);
-            commands.AddIf(Commands.CommandSeekToPreviousMediaItem, track != null);
+            commands.AddIf(Commands.CommandSeekToNextMediaItem, track != null && canNext?.Invoke() == true);
+            commands.AddIf(Commands.CommandSeekToPreviousMediaItem, track != null && canPrevious?.Invoke() == true);
             commands.AddIf(Commands.CommandSeekToMediaItem, track != null && playbackQueue?.Entries.Count > 1);
             var seekRange = track?.SeekRange ?? default;
             commands.AddIf(Commands.CommandSeekInCurrentMediaItem,
@@ -101,8 +103,10 @@ namespace Seeker.Playback
             else if (seekCommand == Commands.CommandSeekToMediaItem && playbackQueue != null
                 && mediaItemIndex >= 0 && mediaItemIndex < playbackQueue.Entries.Count)
             {
-                // An external controller may select a queued item, but can only start at zero.
-                if (positionMs == 0) select?.Invoke(playbackQueue.Entries[mediaItemIndex].Id);
+                // An external controller may select a queued item at zero. Media3's
+                // seekToDefaultPosition() supplies TimeUnset rather than zero.
+                if (positionMs == 0 || positionMs == C.TimeUnset)
+                    select?.Invoke(playbackQueue.Entries[mediaItemIndex].Id);
             }
             return CompletedFuture();
         }

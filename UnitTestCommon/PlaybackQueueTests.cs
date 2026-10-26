@@ -135,6 +135,25 @@ namespace UnitTestCommon
         }
 
         [Test]
+        public void UpcomingStartsAtCurrentInFolderOrder()
+        {
+            var queue = new PlaybackQueue();
+            queue.Replace(new[]
+            {
+                Entry("Peer", "A\\3.mp3", id: "one"),
+                Entry("Peer", "A\\1.mp3", id: "two"),
+                Entry("Peer", "A\\2.mp3", id: "three")
+            }, "two");
+
+            Assert.That(queue.Upcoming(PlaybackRepeatMode.Off).Select(entry => entry.Id),
+                Is.EqualTo(new[] { "two", "three" }));
+            Assert.That(queue.Upcoming(PlaybackRepeatMode.All).Select(entry => entry.Id),
+                Is.EqualTo(new[] { "two", "three", "one" }));
+            Assert.That(queue.Upcoming(PlaybackRepeatMode.One).Select(entry => entry.Id),
+                Is.EqualTo(new[] { "two", "three" }));
+        }
+
+        [Test]
         public void ClearAndStaleSelectionCannotKeepOldCurrentEntry()
         {
             var queue = new PlaybackQueue();

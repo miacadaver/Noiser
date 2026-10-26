@@ -26,6 +26,7 @@ using Android.Views;
 using Android.Widget;
 using Common;
 using Common.Browse;
+using Common.Playback;
 using Common.Search;
 using Google.Android.Material.BottomSheet;
 using Seeker.Extensions.SearchResponseExtensions;
@@ -234,9 +235,25 @@ namespace Seeker
 
         private void PlayFile(File file)
         {
-            var streamFile = BrowseUtils.GetFullFileInfos(new[] { file })[0];
-            string streamUsername = SearchResponse.Username;
-            SessionService.Instance.RunWithReconnect(() => Playback.StreamingPlaybackController.Show(SeekerState.ActiveActivityRef, streamUsername, streamFile));
+            var files = SearchResponse.Files
+                .Where(candidate => PlaybackQueue.IsSupportedAudio(candidate.Filename))
+                .ToArray();
+            var tracks = BrowseUtils.GetFullFileInfos(files)
+                .Select(info => new PlaybackQueueEntry(SearchResponse.Username, info.FullFileName, info.Size,
+                    wasFilenameLatin1Decoded: info.wasFilenameLatin1Decoded,
+                    wasFolderLatin1Decoded: info.wasFolderLatin1Decoded)).ToList();
+            string selectedId = tracks.FirstOrDefault(entry => entry.RemotePath == file.Filename)?.Id;
+            if (selectedId == null)
+            {
+                var selected = BrowseUtils.GetFullFileInfos(new[] { file })[0];
+                var entry = new PlaybackQueueEntry(SearchResponse.Username, selected.FullFileName, selected.Size,
+                    wasFilenameLatin1Decoded: selected.wasFilenameLatin1Decoded,
+                    wasFolderLatin1Decoded: selected.wasFolderLatin1Decoded);
+                tracks.Insert(0, entry);
+                selectedId = entry.Id;
+            }
+            SessionService.Instance.RunWithReconnect(() => Playback.StreamingPlaybackController.ShowQueue(
+                SeekerState.ActiveActivityRef, tracks, selectedId));
         }
 
         private void QueueFile(File file, bool playNext)
