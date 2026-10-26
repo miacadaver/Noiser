@@ -22,6 +22,7 @@ jobs:
     env:
       DOTNET_NOLOGO: 'true'
       DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+      PERSISTENT_SIGNING: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
 
     steps:
       - name: Checkout
@@ -32,6 +33,18 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+
+      - name: Test development signing safeguards
+        run: python3 -m unittest discover -s .github/scripts -p 'test_development_signing.py'
+
+      - name: Prepare persistent development key
+        id: signing
+        if: env.PERSISTENT_SIGNING == 'true'
+        env:
+          NOISER_DEBUG_KEYSTORE_BASE64: ${{ secrets.NOISER_DEBUG_KEYSTORE_BASE64 }}
+        run: >-
+          python3 .github/scripts/development-signing.py prepare
+          --keystore "$RUNNER_TEMP/noiser-development.jks"
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
@@ -53,7 +66,21 @@ jobs:
           -p:AndroidInstallJavaDependencies=false
           -p:AcceptAndroidSdkLicenses=true
 
-      - name: Build APK
+      - name: Build APK with persistent development key
+        if: env.PERSISTENT_SIGNING == 'true'
+        run: >-
+          dotnet build Seeker/Seeker.csproj --configuration Debug --no-restore
+          -p:AndroidKeyStore=true
+          -p:AndroidSigningKeyStore="${{ steps.signing.outputs.keystore }}"
+          -p:AndroidSigningKeyAlias=androiddebugkey
+          -p:AndroidSigningKeyPass=android
+          -p:AndroidSigningStorePass=android
+          -p:EmbedAssembliesIntoApk=true
+          -p:AndroidSdkDirectory="$ANDROID_HOME"
+          -p:JavaSdkDirectory="$JAVA_HOME"
+
+      - name: Build validation APK with disposable key
+        if: env.PERSISTENT_SIGNING != 'true'
         run: >-
           dotnet build Seeker/Seeker.csproj --configuration Debug --no-restore
           -p:AndroidKeyStore=false
@@ -67,18 +94,40 @@ jobs:
       - name: Stage APK
         shell: bash
         run: |
+          set -euo pipefail
           apk_path=$(find Seeker/bin/Debug -type f -name '*-Signed.apk' -print -quit)
           if [ -z "$apk_path" ]; then
             echo '::error::The build did not produce a signed debug APK.'
             exit 1
           fi
-          install -D "$apk_path" "$RUNNER_TEMP/noiser-apk/Noiser.apk"
+          if [ "$PERSISTENT_SIGNING" = "true" ]; then
+            python3 .github/scripts/development-signing.py verify-apk --apk "$apk_path"
+            install -D "$apk_path" "$RUNNER_TEMP/noiser-apk/Noiser.apk"
+            cp .github/noiser-development-certificate.sha256 "$RUNNER_TEMP/noiser-apk/signing-certificate.sha256"
+          else
+            install -D "$apk_path" "$RUNNER_TEMP/noiser-apk/Noiser-validation.apk"
+          fi
 
-      - name: Upload APK
+      - name: Upload update-compatible APK
+        if: env.PERSISTENT_SIGNING == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: Noiser-apk
-          path: ${{ runner.temp }}/noiser-apk/Noiser.apk
+          path: ${{ runner.temp }}/noiser-apk/*
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
+
+      - name: Upload validation APK
+        if: env.PERSISTENT_SIGNING != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Noiser-validation-apk
+          path: ${{ runner.temp }}/noiser-apk/Noiser-validation.apk
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Remove runner signing key
+        if: always() && env.PERSISTENT_SIGNING == 'true'
+        run: rm -f "$RUNNER_TEMP/noiser-development.jks"

@@ -15,12 +15,23 @@ The current foundation is the phone-confirmed rollback. Its removed background c
 
 ## 1. Validate the working build
 
+### Agreed implementation priorities
+
+1. **Persistent development signing:** implementation and certificate prepared; activation awaits the `NOISER_DEBUG_KEYSTORE_BASE64` repository secret and CI validation. See [setup and transition instructions](docs/development-signing.md).
+2. **Android lifecycle regression coverage:** screen-off playback, activity recreation, interruptions, Bluetooth controls, rapid track changes, and Stop during stalls; record physical-device results.
+3. **Protected credential storage:** Keystore-backed encryption, migration of existing preferences, and explicit credential exclusions from backups/exports.
+4. **Buffering and failure presentation:** distinguish peer queue, connection, buffering, retry, and terminal failure; add a dependable user Retry action before broader automatic recovery.
+5. **Saved queues, then saved positions:** land separately, with explicit Resume after process death and positions constrained by audio available on the new transfer.
+6. **Shareable playback diagnostics:** app/Android versions, player/transfer state, and failure cause, with credentials and personal data removed.
+
+Reduce static activity references and split large playback-related classes incrementally alongside these changes.
+
 - [ ] Install and launch the newly branded build on the Samsung Android 16 test phone; confirm the launcher, round/adaptive/themed icons, and retained settings on a same-signature update.
 - [ ] Exercise real-peer MP3 playback, queue transitions, bounded seeking, and Stop during a stalled transfer.
 - [ ] Validate screen-off playback, Bluetooth/headset controls, interruptions, task dismissal, and cleanup on physical devices.
 - [ ] Check real external scrobblers, artwork, tag timing, and long-session battery use.
 - [ ] Capture current Noiser search, player, queue, and notification screenshots to replace the inherited/validation gallery.
-- [ ] Establish a consistent signing process for development updates.
+- [ ] Activate the prepared persistent development signing setup and verify two successive APKs use the same certificate and update without clearing settings.
 
 **Done when:** device model, Android version, APK/commit, and pass/fail results are recorded, with regressions resolved or clearly documented.
 
