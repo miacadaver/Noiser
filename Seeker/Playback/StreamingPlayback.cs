@@ -26,6 +26,9 @@ namespace Seeker.Playback
         private readonly StreamingPlaybackService owner;
         private readonly IExoPlayer player;
         private readonly Task predecessor;
+        private readonly PendingPlaybackResume resume;
+        private bool advancingResume;
+        private readonly TaskCompletionSource<bool> resumeReady = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly CancellationTokenSource cancellation = new CancellationTokenSource();
         private readonly object seekRangeSync = new object();
         private int seekPublishPending;
@@ -59,6 +62,11 @@ namespace Seeker.Playback
         public bool HasBytes => buffer != null ? buffer.AvailableLength > 0 : readableLocalFile;
         public bool IsQueued => transferState.HasFlag(TransferStates.Queued);
         public bool IsReceiving => receiving;
+        public bool IsRestoringPosition => resume.IsPending;
+        public long ResumePositionMilliseconds => resume.IsPending ? resume.TargetMilliseconds : 0;
+        public long PositionForPersistence(long nativePosition) => resume.IsPending ? resume.TargetMilliseconds
+            : Math.Min(PendingPlaybackResume.MaximumPositionMilliseconds, Math.Max(0, nativePosition));
+        public Task WaitForResumeAsync() => resumeReady.Task;
         public bool IsReconnecting => reconnecting;
         public bool IsStalled => buffer != null && PlaybackPresentation.IsStalled(
             receiving, buffer.AvailableLength, buffer.ExpectedLength, buffer.TimeSinceLastProgress);
@@ -73,7 +81,8 @@ namespace Seeker.Playback
             if (initialMetadataReady.Task.IsCompleted) return;
             await Task.WhenAny(initialMetadataReady.Task, Task.Delay(timeout)).ConfigureAwait(false);
         }
-        public SeekRangeSnapshot SeekRange
+        public SeekRangeSnapshot SeekRange => resume.IsPending ? RawSeekRange.WithoutSafeNativePoint() : RawSeekRange;
+        private SeekRangeSnapshot RawSeekRange
         {
             get
             {
@@ -92,9 +101,16 @@ namespace Seeker.Playback
 
         public bool TrySeekTo(long positionMs)
         {
+            bool accepted = TrySeekTo(positionMs, SeekRange);
+            if (accepted) owner.CheckpointPosition(this);
+            return accepted;
+        }
+
+        private bool TrySeekTo(long positionMs, SeekRangeSnapshot range)
+        {
             if (positionMs < 0 || Failure != null || stopped || !owner.IsCurrent(this)) return false;
             long positionUs = positionMs > long.MaxValue / 1000 ? long.MaxValue : positionMs * 1000;
-            if (!SeekRange.Contains(positionUs)) return false;
+            if (!range.Contains(positionUs)) return false;
             try
             {
                 player.SeekTo(positionMs);
@@ -109,16 +125,53 @@ namespace Seeker.Playback
 
         public StreamingPlayback(StreamingPlaybackService owner, IExoPlayer player, string id,
             string queueEntryId, string username, FullFileInfo file, Task predecessor)
+            : this(owner, player, id, queueEntryId, username, file, predecessor, 0) { }
+
+        public StreamingPlayback(StreamingPlaybackService owner, IExoPlayer player, string id,
+            string queueEntryId, string username, FullFileInfo file, Task predecessor, long resumePosition)
         {
             this.owner = owner;
             this.player = player;
             this.predecessor = predecessor;
+            resume = new PendingPlaybackResume(resumePosition);
+            if (!resume.IsPending) resumeReady.TrySetResult(true);
             Id = id;
             QueueEntryId = queueEntryId;
             Username = username;
             FileInfo = file;
             Metadata = TrackMetadataFallback.FromPath(file.FullFileName);
             SessionMetadata = StreamingMetadata.BuildSessionMetadata(Metadata, null);
+        }
+
+        internal void AdvanceResume()
+        {
+            if (!resume.IsPending || advancingResume || stopped || resourcesClosed || !owner.IsCurrent(this)) return;
+            advancingResume = true;
+            try
+            {
+                var range = RawSeekRange;
+                long? next = resume.NextSeek(range, player.Duration);
+                if (!next.HasValue)
+                {
+                    if (!range.CanSeek && Received == FileInfo.Size && player.PlaybackState == AndroidX.Media3.Common.BasePlayer.InterfaceConsts.StateReady)
+                        Fail(owner.GetString(Resource.String.stream_resume_failed));
+                    return;
+                }
+                if (next.Value == 0) player.SeekTo(0);
+                else if (!TrySeekTo(next.Value, range))
+                {
+                    Fail(owner.GetString(Resource.String.stream_resume_failed));
+                    return;
+                }
+                resume.SeekSucceeded(next.Value);
+                if (!resume.IsPending) resumeReady.TrySetResult(true);
+            }
+            catch (Exception exception)
+            {
+                Logger.Debug("Saved position restore failed: " + exception.Message);
+                Fail(owner.GetString(Resource.String.stream_resume_failed));
+            }
+            finally { advancingResume = false; }
         }
 
         public void Start(bool playWhenReady = true)
@@ -305,6 +358,7 @@ namespace Seeker.Playback
         public void Fail(string message, PlaybackException nativeError = null)
         {
             if (stopped || Failure != null) return;
+            owner.CheckpointPosition(this);
             Failure = nativeError ?? new PlaybackException(message, null, PlaybackException.ErrorCodeIoUnspecified);
             BeginCleanup();
             owner.Publish();
@@ -325,6 +379,7 @@ namespace Seeker.Playback
         {
             if (resourcesClosed) return;
             resourcesClosed = true;
+            resumeReady.TrySetResult(false);
             initialMetadataReady.TrySetResult(false);
             Interlocked.Increment(ref metadataRevision);
             cancellation.Cancel();

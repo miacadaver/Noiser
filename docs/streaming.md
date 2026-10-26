@@ -77,10 +77,16 @@ Play next and Add to queue. Queue rows can be selected or removed; clearing the 
 The dialog shows the current track and the tracks after it; Repeat All also shows the wrapped entries.
 Queue sources, order, selection and repeat/autoplay settings are saved in private preferences and
 restored paused after a process restart. The mini-player shows **Saved queue**; Play starts the
-selected song from the beginning. Saved queue navigation and removal do not start transfers. Stop
+selected song at its saved position. Saved queue navigation and removal do not start transfers. Stop
 and Clear Queue discard the saved queue; app shutdown and dismissal of a paused task preserve it.
-Playback positions, cached audio, error states and trusted tag metadata are not persisted. Tags are
+The selected song's position is checkpointed about every five seconds during playback, and on pause,
+accepted seeks and service shutdown. Sudden process death may lose up to about five seconds.
+Cached audio, error states and trusted tag metadata are not persisted. Tags are
 read again before the new playback session exposes identifying media metadata.
+On resume the same sequential transfer receives the prefix again. Playback stays silent while the
+paused player advances through validated seek points until it can reach the target; this may take
+time on a slow peer. Next/Previous, a different selection, natural completion and Retry from start
+reset the current bookmark. A target past a known track end restarts from zero.
 
 Autoplay is enabled by default. Repeat cycles Off, All, One; selecting All or One enables autoplay,
 and disabling autoplay returns repeat to Off. Repeat One replays the current buffer; Repeat All wraps

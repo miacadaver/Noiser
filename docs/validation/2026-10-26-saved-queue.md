@@ -1,5 +1,8 @@
 # Saved playback queues — October 26, 2026
 
+This report describes the earlier queue-only change. The subsequent
+[saved-position change](2026-10-26-playback-position.md) adds position checkpoints and resume.
+
 Queue source entries, stable IDs, order, current selection and repeat/autoplay settings now persist
 in dedicated private Android preferences. They restore as **Saved queue**, without a player source,
 audio transfer, playback timer or identifying media metadata. Play starts the selected song from

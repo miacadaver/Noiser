@@ -359,6 +359,11 @@ namespace Seeker.Playback
                     SetArtwork(artwork, snapshot);
                     if (snapshot.Phase == PlaybackPhase.Error)
                         status.Text = activity.GetString(Resource.String.stream_failed, snapshot.Error);
+                    else if (saved && snapshot.Position > 0)
+                        status.Text = activity.GetString(Resource.String.stream_saved_resume_status, FormatTime(snapshot.Position / 1000));
+                    else if (snapshot.ResumePositionMilliseconds > 0)
+                        status.Text = activity.GetString(Resource.String.stream_resume_wait,
+                            FormatTime(snapshot.ResumePositionMilliseconds / 1000), activity.GetString(StatusResource(snapshot.Phase)));
                     else status.SetText(StatusResource(snapshot.Phase));
                     pause.Enabled = snapshot.Phase != PlaybackPhase.Error && (saved || Controls != null);
                     bool canRetry = PlaybackPresentation.CanRetry(snapshot.Phase);
@@ -396,7 +401,8 @@ namespace Seeker.Playback
                     {
                         seekBar.Progress = snapshot.SeekRange.SliderProgress(Math.Max(0, snapshot.Position) * 1000, seekBar.Max);
                         UpdateSeekStatus(Math.Max(0, snapshot.Position) * 1000, snapshot.SeekRange);
-                        if (saved) seekStatus.Text = string.Empty;
+                        if (saved || snapshot.ResumePositionMilliseconds > 0) seekStatus.Text = snapshot.Position > 0
+                            ? activity.GetString(Resource.String.stream_saved_position, FormatTime(snapshot.Position / 1000)) : string.Empty;
                     }
                 }
             }

@@ -12,25 +12,28 @@ namespace Common.Playback
         public PlaybackQueue Queue { get; }
         public PlaybackRepeatMode RepeatMode { get; }
         public bool Autoplay { get; }
-        internal SavedPlaybackQueue(PlaybackQueue queue, PlaybackRepeatMode repeatMode, bool autoplay)
-        { Queue = queue; RepeatMode = repeatMode; Autoplay = autoplay; }
+        public long PositionMilliseconds { get; }
+        internal SavedPlaybackQueue(PlaybackQueue queue, PlaybackRepeatMode repeatMode, bool autoplay, long position)
+        { Queue = queue; RepeatMode = repeatMode; Autoplay = autoplay; PositionMilliseconds = position; }
     }
 
-    /// <summary>Versioned queue sources only: no player state, cached bytes or trusted tag metadata.</summary>
+    /// <summary>Versioned queue sources and selected position; no cached bytes or trusted tag metadata.</summary>
     public static class PlaybackQueuePersistence
     {
         public const int MaximumJsonLength = 2 * 1024 * 1024;
         public const int MaximumEntries = 10000;
 
-        public static string? Serialize(PlaybackQueue queue, PlaybackRepeatMode repeatMode, bool autoplay)
+        public static string? Serialize(PlaybackQueue queue, PlaybackRepeatMode repeatMode, bool autoplay, long positionMilliseconds = 0)
         {
             if (queue == null) throw new ArgumentNullException(nameof(queue));
+            if (!PendingPlaybackResume.IsValidPosition(positionMilliseconds)) throw new ArgumentOutOfRangeException(nameof(positionMilliseconds));
             if (queue.Current == null) return null;
             var entries = queue.Entries;
             if (entries.Count > MaximumEntries) throw new InvalidDataException("Queue is too large to save.");
             var document = new PlaybackQueueDocument
             {
-                Version = 1, SelectedId = queue.Current.Id, RepeatMode = repeatMode, Autoplay = autoplay,
+                Version = 2, SelectedId = queue.Current.Id, RepeatMode = repeatMode, Autoplay = autoplay,
+                PositionMilliseconds = positionMilliseconds,
                 Entries = entries.Select(entry => new SavedQueueEntryData
                 {
                     Id = entry.Id, Username = entry.Username, RemotePath = entry.RemotePath, Size = entry.Size,
@@ -50,11 +53,13 @@ namespace Common.Playback
             try
             {
                 var document = JsonSerializer.Deserialize(json, PlaybackQueueJsonContext.Default.PlaybackQueueDocument);
-                if (document == null || document.Version != 1 || document.Entries == null
+                if (document == null || (document.Version != 1 && document.Version != 2) || document.Entries == null
                     || document.Entries.Count == 0 || document.Entries.Count > MaximumEntries
                     || !ValidText(document.SelectedId, 128)
                     || !Enum.IsDefined(typeof(PlaybackRepeatMode), document.RepeatMode)
                     || (!document.Autoplay && document.RepeatMode != PlaybackRepeatMode.Off)) return false;
+                long position = document.Version == 1 ? 0 : document.PositionMilliseconds;
+                if (!PendingPlaybackResume.IsValidPosition(position)) return false;
                 var entries = new List<PlaybackQueueEntry>();
                 var ids = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var entry in document.Entries)
@@ -69,7 +74,7 @@ namespace Common.Playback
                 }
                 var queue = new PlaybackQueue();
                 if (!queue.Replace(entries, document.SelectedId)) return false;
-                saved = new SavedPlaybackQueue(queue, document.RepeatMode, document.Autoplay);
+                saved = new SavedPlaybackQueue(queue, document.RepeatMode, document.Autoplay, position);
                 return true;
             }
             catch (JsonException) { return false; }
@@ -87,6 +92,7 @@ namespace Common.Playback
         public string? SelectedId { get; set; }
         public PlaybackRepeatMode RepeatMode { get; set; }
         public bool Autoplay { get; set; }
+        public long PositionMilliseconds { get; set; }
         public List<SavedQueueEntryData>? Entries { get; set; }
     }
 

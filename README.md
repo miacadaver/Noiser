@@ -18,7 +18,8 @@ One track is received at a time, with buffering and up to three reconnect attemp
 audio already received and parsed; it cannot jump to an unreceived part of a remote file.
 At the end of the queue, the current track stays available for replay until Stop or another selection.
 The queue and selected song are saved across app restarts and return paused. Tap Play to start the
-selected song from the beginning; playback position is not yet restored. Stop clears the saved queue.
+selected song at its saved position. A stream may need to receive audio up to that point before it
+can resume. Stop clears the saved queue and position.
 See [streaming implementation and device checks](docs/streaming.md)
 and [background playback architecture and validation](docs/background-playback.md), plus the upstream
 [development instructions](DEVELOPMENT.md).
