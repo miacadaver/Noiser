@@ -98,6 +98,7 @@ Pushes and pull requests to `main` run host tests and build an APK. The host tes
 | [Background playback](docs/background-playback.md) | Service lifecycle, media controls, and device checklist |
 | [Metadata](docs/streaming-metadata.md) | Tag extraction, artwork, and publication behavior |
 | [Branding](docs/branding.md) | Editable bird artwork and Android icon exports |
+| [Development signing](docs/development-signing.md) | Prepared persistent-key setup, activation, and update compatibility |
 
 ## Credits and license
 

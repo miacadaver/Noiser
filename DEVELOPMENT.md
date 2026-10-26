@@ -34,6 +34,12 @@ Notes:
 
 
 
+## Development APK signing
+
+Persistent signing is prepared but awaits its repository secret before activation.
+See [development signing](docs/development-signing.md) for setup, key backup, and
+the one-time transition from older disposable-key APKs.
+
 ## Publishing
 
 ### One-shot release script

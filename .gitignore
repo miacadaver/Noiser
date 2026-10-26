@@ -364,3 +364,6 @@ healthchecksdb
 # dotnet-trace captures
 *.nettrace
 *.speedscope.json
+
+# Private development signing keys and their GitHub-secret payloads.
+/.signing/
