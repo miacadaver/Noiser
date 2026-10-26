@@ -50,7 +50,7 @@ Terminal transfer errors become session player errors and disable Play until a n
 selection or explicit retry; the mini-player and dialog show the failure.
 
 The full player distinguishes connecting, waiting in the peer's queue, ordinary audio buffering,
-and the existing automatic reconnect attempt. Queue status remains visible even after some bytes
+and the bounded automatic reconnect attempts. Queue status remains visible even after some bytes
 have already arrived. When playback is waiting for audio and an unfinished transfer has received no
 new bytes for 20 seconds, the player reports that it is still waiting for the peer. This is a lack of
 progress, not a claim that the device is offline. Buffered playback, user pauses, focus suppression,
@@ -61,8 +61,23 @@ from the beginning and keeps the queue, repeat mode and autoplay setting. The se
 displayed track ID and current state before accepting the action; stale or repeated taps cannot restart
 another track or interrupt playback that has already recovered. It uses the existing serialized source
 replacement and transfer cleanup, so the old request is retired before a new one starts. This does not
-add automatic retry attempts or restore the old playback position. Stall presentation uses the existing
+extend the automatic retry budget or restore the old playback position. Stall presentation uses the existing
 visible-Activity refresh; it adds no background polling timer.
+
+Automatic recovery allows three reconnects per live stream, separated by 2-, 4- and 8-second
+cancellation-aware delays. It retains the committed audio prefix and requests the next missing byte,
+using fresh transfer tokens and awaiting each request before starting the next. Connection closures,
+timeouts and temporary socket/network failures are eligible. Rejections, offline peers, changed sizes,
+disk errors and cancellation are not retried. An initial missing login fails immediately; a missing
+login encountered during recovery can use the remaining attempts while the app reconnects its server
+session. Playback recovery does not itself log in or change network settings.
+
+At the first transient failure in an outage, buffer readers get an allowance until 90 seconds later,
+so the usual 45-second read timeout does not prematurely cut off reconnection. A longer normal
+initial queue wait is preserved. Further failures without new bytes cannot renew this allowance.
+Committed non-empty writes clear it so a subsequent outage can start its own window; the total
+three-reconnect budget still applies to the entire live stream. Terminal errors wake readers
+immediately, and Stop/track replacement cancels both a pending delay and the active peer request.
 
 The session's queue timeline publishes the merged `TrackMetadata`: title, artist, album, album
 artist, track number, release year, and reliable duration when the native player supplies it. Extraction

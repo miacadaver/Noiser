@@ -84,13 +84,15 @@ namespace Seeker.Services
                         succeeded = true;
                         return;
                     }
-                    catch (Exception exception) when (attempt == 0 && !cancellationToken.IsCancellationRequested && CanRetryStream(exception))
+                    catch (Exception exception) when (!cancellationToken.IsCancellationRequested
+                        && StreamingRetryPolicy.TryGetDelay(exception, attempt, out var delay))
                     {
                         // Retain every committed byte; a reconnect may put us back in the peer's queue.
-                        logger.Debug("Resuming MP3 stream: " + exception.Message);
+                        buffer.BeginRecovery(StreamingRetryPolicy.RecoveryReadTimeout);
+                        logger.Debug($"Resuming MP3 stream ({attempt + 1}/{StreamingRetryPolicy.MaximumRetries}): " + exception.Message);
                         stateChanged(TransferStates.Queued);
                         reconnecting?.Invoke();
-                        await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
+                        await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
                     }
                 }
             }
@@ -104,13 +106,6 @@ namespace Seeker.Services
                 if (!succeeded || !retainUntilReleased) ReleaseStream(username, file.FullFileName, buffer);
                 SpeedLimitHelper.RemoveDownloadUser(username);
             }
-        }
-
-        private static bool CanRetryStream(Exception exception)
-        {
-            var kind = DownloadFailureClassifier.Classify(exception);
-            return kind == DownloadFailureKind.TimedOut || kind == DownloadFailureKind.CannotConnect
-                || kind == DownloadFailureKind.ReportedFailed || kind == DownloadFailureKind.ConnectionClosed;
         }
     }
 }

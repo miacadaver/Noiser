@@ -14,7 +14,7 @@ The same playback session continues in the background and exposes Android notifi
 and headset play/pause controls. **Stop** ends playback and removes the temporary file after transfer shutdown.
 
 Playback supports MP3 folder queues, Next/Previous, Play next/Add to queue, repeat modes, and autoplay.
-One track is received at a time, with buffering and one reconnect attempt. Seeking is limited to
+One track is received at a time, with buffering and up to three reconnect attempts. Seeking is limited to
 audio already received and parsed; it cannot jump to an unreceived part of a remote file.
 At the end of the queue, the current track stays available for replay until Stop or another selection.
 See [streaming implementation and device checks](docs/streaming.md)

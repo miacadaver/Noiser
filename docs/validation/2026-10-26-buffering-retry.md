@@ -1,5 +1,9 @@
 # Buffering states and manual retry — October 26, 2026
 
+This report describes the earlier presentation/manual-retry change. The subsequent
+[automatic recovery change](2026-10-26-automatic-recovery.md) expands the automatic retry budget;
+the original single-retry assertions below describe the earlier version.
+
 The full player distinguishes connecting, a peer queue, ordinary buffering, the existing automatic
 reconnect attempt, and waiting without new audio for 20 seconds. Queue status takes precedence over
 an idle transfer clock, including after a received prefix. Playing buffered audio, pauses, focus

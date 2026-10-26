@@ -27,6 +27,59 @@ namespace UnitTestCommon
         }
 
         [Test]
+        public async Task ReaderWaitsThroughRecoveryInsteadOfItsShorterOrdinaryTimeout()
+        {
+            using var buffer = Create();
+            buffer.BeginRecovery(TimeSpan.FromSeconds(2));
+            var read = Task.Run(() => buffer.ReadAt(0, new byte[4], 0, 4,
+                CancellationToken.None, TimeSpan.FromMilliseconds(20)));
+            Assert.That(await Task.WhenAny(read, Task.Delay(100)), Is.Not.SameAs(read));
+            buffer.Writer.Write(new byte[] { 1, 2 }, 0, 2);
+            Assert.That(await read.WaitAsync(TimeSpan.FromSeconds(2)), Is.EqualTo(2));
+        }
+
+        [Test]
+        public async Task RepeatedFailuresCannotRenewAnExpiredRecoveryWindowWithoutBytes()
+        {
+            using var buffer = Create();
+            buffer.BeginRecovery(TimeSpan.FromMilliseconds(1));
+            await Task.Delay(50);
+            buffer.BeginRecovery(TimeSpan.FromMinutes(1));
+            Assert.Throws<IOException>(() => buffer.ReadAt(0, new byte[4], 0, 4,
+                CancellationToken.None, TimeSpan.Zero));
+        }
+
+        [Test]
+        public async Task NewBytesAllowANewRecoveryWindowForALaterDrop()
+        {
+            using var buffer = Create();
+            buffer.BeginRecovery(TimeSpan.FromMilliseconds(1));
+            await Task.Delay(50);
+            buffer.Writer.Write(new byte[] { 1, 2 }, 0, 2);
+            buffer.BeginRecovery(TimeSpan.FromSeconds(2));
+            var read = Task.Run(() => buffer.ReadAt(2, new byte[2], 0, 2,
+                CancellationToken.None, TimeSpan.Zero));
+            Assert.That(await Task.WhenAny(read, Task.Delay(100)), Is.Not.SameAs(read));
+            buffer.Writer.Write(new byte[] { 3, 4 }, 0, 2);
+            Assert.That(await read.WaitAsync(TimeSpan.FromSeconds(2)), Is.EqualTo(2));
+        }
+
+        [Test]
+        public async Task StopAndTerminalFailureStillWakeReadersDuringRecovery()
+        {
+            using var buffer = Create();
+            buffer.BeginRecovery(TimeSpan.FromMinutes(1));
+            using var cancellation = new CancellationTokenSource();
+            var read = Task.Run(() => buffer.ReadAt(0, new byte[4], 0, 4,
+                cancellation.Token, TimeSpan.FromSeconds(1)));
+            cancellation.Cancel();
+            Assert.CatchAsync<OperationCanceledException>(async () => await read.WaitAsync(TimeSpan.FromSeconds(1)));
+            buffer.Fail(new IOException("Recovery failed"));
+            Assert.Throws<IOException>(() => buffer.ReadAt(0, new byte[4], 0, 4,
+                CancellationToken.None, TimeSpan.FromMinutes(1)));
+        }
+
+        [Test]
         public async Task ReaderWaitsAtFrontierAndPlaysBeforeTransferCompletes()
         {
             using var buffer = Create();

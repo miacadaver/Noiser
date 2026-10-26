@@ -17,6 +17,7 @@ namespace Common.Streaming
         private readonly Stream writer;
         private long available;
         private long lastProgressTimestamp = Stopwatch.GetTimestamp();
+        private long recoveryDeadlineTimestamp;
         private bool completed;
         private bool disposed;
         private Exception? failure;
@@ -41,6 +42,18 @@ namespace Common.Streaming
             ExpectedLength = expectedLength;
             file = new FileStream(filePath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.Read);
             writer = new BufferWriter(this);
+        }
+
+        /// <summary>Lets readers wait through one outage; repeated failures cannot extend it forever.</summary>
+        public void BeginRecovery(TimeSpan maximumWait)
+        {
+            if (maximumWait <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(maximumWait));
+            lock (sync)
+            {
+                if (disposed || completed || failure != null || recoveryDeadlineTimestamp != 0) return;
+                recoveryDeadlineTimestamp = Stopwatch.GetTimestamp() + (long)(maximumWait.TotalSeconds * Stopwatch.Frequency);
+                Monitor.PulseAll(sync);
+            }
         }
 
         public int ReadAt(long position, byte[] bytes, int offset, int count,
@@ -68,6 +81,12 @@ namespace Common.Streaming
                     if (failure != null) throw new IOException("The peer transfer could not continue.", failure);
                     if (completed) return -1;
                     var remaining = timeout - elapsed.Elapsed;
+                    if (recoveryDeadlineTimestamp != 0)
+                    {
+                        var recoveryRemaining = TimeSpan.FromSeconds(
+                            (recoveryDeadlineTimestamp - Stopwatch.GetTimestamp()) / (double)Stopwatch.Frequency);
+                        if (recoveryRemaining > remaining) remaining = recoveryRemaining;
+                    }
                     if (remaining <= TimeSpan.Zero) throw new IOException("Timed out waiting for audio from the peer.");
                     // Media3 interrupts a cancelled loader thread during a seek. Poll that thread
                     // signal promptly while retaining the same transfer buffer and cancellation
@@ -117,7 +136,11 @@ namespace Common.Streaming
                 file.Write(bytes, offset, count);
                 file.Flush();
                 available += count;
-                if (count > 0) lastProgressTimestamp = Stopwatch.GetTimestamp();
+                if (count > 0)
+                {
+                    lastProgressTimestamp = Stopwatch.GetTimestamp();
+                    recoveryDeadlineTimestamp = 0;
+                }
                 Monitor.PulseAll(sync);
             }
         }

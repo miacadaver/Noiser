@@ -45,9 +45,13 @@ cover a fully received track while it is playing. Late transfer events retain to
 - ExoPlayer starts with approximately two seconds of decoded audio buffered; it may read further ahead.
   Starting does not depend on the complete file arriving. Leading ID3 tags can increase startup time.
 - A waiting peer gets up to three minutes before an empty-buffer read times out. Once bytes have arrived,
-  an empty-buffer read waits up to 45 seconds. Stop remains available during these waits.
-- One retry is allowed for connection closure, connection setup failure, timeout, or a peer-reported failure.
-  Retry resumes at the committed byte offset and may return to the peer's upload queue.
+  an empty-buffer read normally waits up to 45 seconds. During automatic recovery it may wait until
+  90 seconds after the first failure in that outage, preserving any longer normal initial queue wait.
+  Repeated failures cannot keep renewing that allowance without new audio bytes. Stop remains available.
+- Up to three reconnects are allowed per stream for temporary connection/network failures, timeouts,
+  or a peer-reported failure, with cancellation-aware delays of 2, 4 and 8 seconds. Each attempt resumes
+  at the committed byte offset and may return to the peer's upload queue. The same buffer and player
+  remain active, so recovery does not restart the song or discard downloaded audio.
   The full player labels reconnects and peer queue waits separately. If playback is waiting and no
   bytes arrive for 20 seconds, it reports the stalled wait. **Retry from start** is available for that
   wait or a terminal error; it keeps the queue but replaces the current request and restarts the song.
