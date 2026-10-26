@@ -42,7 +42,7 @@ namespace Seeker.Services
         /// </summary>
         public async Task StreamAsync(string username, FullFileInfo file, ProgressiveBuffer buffer,
             Action<TransferStates> stateChanged, CancellationToken cancellationToken, bool retainUntilReleased = false,
-            Action? reconnecting = null, Action? progress = null)
+            Action? reconnecting = null)
         {
             var key = (username, file.FullFileName);
             // Inspect the transfer list outside requestGate; UI callers can hold list locks when retrying.
@@ -77,10 +77,6 @@ namespace Seeker.Services
                             options: new TransferOptions(
                                 governor: SpeedLimitHelper.OurDownloadGovernor,
                                 stateChanged: args => stateChanged(args.Transfer.State),
-                                progressUpdated: args =>
-                                {
-                                    if (args.Transfer.BytesTransferred > args.PreviousBytesTransferred) progress?.Invoke();
-                                },
                                 seekOutputStreamAutomatically: false,
                                 disposeOutputStreamOnCompletion: false),
                             cancellationToken: cancellationToken).ConfigureAwait(false);

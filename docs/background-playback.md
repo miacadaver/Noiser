@@ -119,17 +119,10 @@ and Stop; exact layout depends on the Android version. Dismissal is handled thro
 
 ExoPlayer handles media audio focus and audio-becoming-noisy events. It responds to focus loss,
 interruptions, and headphone unplug events using native behavior. Its local wake mode protects audio
-playback. Transfer CPU/Wi-Fi locks have a 20-second lease: connection setup/state advances and fresh
-committed bytes renew it. Peer queueing, retry backoff, completion, failure, and Stop release them;
-a transfer with no new bytes also releases them when the lease expires. A paused player still permits
-an active download to finish, with protection renewed by its bytes. Fresh bytes after a stall trigger
-lock reacquisition. A main-thread timer checks expiry every five seconds only while a lease is active,
-and the CPU lock also has an OS timeout. It does not poll inactive queues or retry waits. The existing
-player-owned audio wake protection is unchanged. Streaming
+playback. The service holds CPU/Wi-Fi locks only while the existing peer transfer is receiving, including
+when playback is paused. Those locks release after transfer completion, failure, or Stop. Streaming
 events still kick Seeker's keepalive but no longer create ordinary download notifications/counters;
 ordinary downloads and uploads retain their existing behavior.
-
-See [transfer power validation](validation/2026-10-26-transfer-power.md) for coverage and device limits.
 
 Media3 manages paused foreground-service demotion and notification updates. Ongoing playback remains
 when the task is swiped away; a paused task removal stops and cleans the track. Long-paused playback

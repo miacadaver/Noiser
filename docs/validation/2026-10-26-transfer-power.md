@@ -1,5 +1,10 @@
 # Streaming transfer power — October 26, 2026
 
+**Historical validation:** this optimization was reverted in `3.11.2-stream.6` as a recovery step
+after a Samsung Galaxy A07 / Android 16 startup-crash report. The downloaded `d3485cb` APK launched
+on Android 15 and Android 16 emulators, including with a saved queue, so its connection to the phone's
+crash remains unconfirmed. The results below describe the earlier optimization, not the recovery build.
+
 Previously, `IsReceiving` kept the transfer CPU and high-performance Wi-Fi locks held for the entire
 request, including peer queues, reconnect delays and stalled transfers. Streaming now uses a bounded
 `StreamingPowerLease`, separate from the player's existing audio wake protection.
