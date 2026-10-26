@@ -41,7 +41,8 @@ namespace Seeker.Services
         /// It owns no persisted transfer row and never enters the permanent-file completion continuation.
         /// </summary>
         public async Task StreamAsync(string username, FullFileInfo file, ProgressiveBuffer buffer,
-            Action<TransferStates> stateChanged, CancellationToken cancellationToken, bool retainUntilReleased = false)
+            Action<TransferStates> stateChanged, CancellationToken cancellationToken, bool retainUntilReleased = false,
+            Action? reconnecting = null)
         {
             var key = (username, file.FullFileName);
             // Inspect the transfer list outside requestGate; UI callers can hold list locks when retrying.
@@ -88,6 +89,7 @@ namespace Seeker.Services
                         // Retain every committed byte; a reconnect may put us back in the peer's queue.
                         logger.Debug("Resuming MP3 stream: " + exception.Message);
                         stateChanged(TransferStates.Queued);
+                        reconnecting?.Invoke();
                         await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
                     }
                 }

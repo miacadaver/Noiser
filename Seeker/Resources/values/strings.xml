@@ -28,7 +28,10 @@
     <string name="stream_stop">Stop</string>
     <string name="stream_connecting">Connecting to peer…</string>
     <string name="stream_queued">Waiting in the peer’s upload queue…</string>
-    <string name="stream_buffering">Buffering…</string>
+    <string name="stream_buffering">Buffering audio…</string>
+    <string name="stream_reconnecting">Trying to reconnect to the peer…</string>
+    <string name="stream_stalled">No audio received for a while. Still waiting for the peer…</string>
+    <string name="stream_retry">Retry from start</string>
     <string name="stream_playing">Playing</string>
     <string name="stream_paused">Paused</string>
     <string name="stream_finished">Finished</string>

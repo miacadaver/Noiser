@@ -48,6 +48,9 @@ cover a fully received track while it is playing. Late transfer events retain to
   an empty-buffer read waits up to 45 seconds. Stop remains available during these waits.
 - One retry is allowed for connection closure, connection setup failure, timeout, or a peer-reported failure.
   Retry resumes at the committed byte offset and may return to the peer's upload queue.
+  The full player labels reconnects and peer queue waits separately. If playback is waiting and no
+  bytes arrive for 20 seconds, it reports the stalled wait. **Retry from start** is available for that
+  wait or a terminal error; it keeps the queue but replaces the current request and restarts the song.
 - A rejected, unavailable, changed-size, malformed, or stalled file produces a visible error.
 - Existing active normal downloads are not downloaded again. Play reports that the ordinary download must
   finish. Attempting to download a currently streaming file asks the user to stop playback first.

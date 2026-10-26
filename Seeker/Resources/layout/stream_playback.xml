@@ -45,5 +45,8 @@
         <Button android:id="@+id/streamPause" android:layout_width="match_parent"
             android:layout_height="wrap_content" android:layout_marginTop="6dp"
             android:text="@string/stream_pause" android:enabled="false" />
+        <Button android:id="@+id/streamRetry" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="@string/stream_retry"
+            android:visibility="gone" android:enabled="false" />
     </LinearLayout>
 </ScrollView>

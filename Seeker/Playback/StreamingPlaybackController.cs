@@ -44,6 +44,8 @@ namespace Seeker.Playback
         private TextView seekStatus;
         private SeekBar seekBar;
         private Button pause;
+        private Button retry;
+        private string retryTrackId;
         private Button previous;
         private Button next;
         private Button openQueue;
@@ -226,6 +228,12 @@ namespace Seeker.Playback
             };
             pause = view.FindViewById<Button>(Resource.Id.streamPause);
             pause.Click += (_, __) => TogglePause();
+            retry = view.FindViewById<Button>(Resource.Id.streamRetry);
+            retry.Click += (_, __) =>
+            {
+                StreamingPlaybackService.Current?.RetryPlayback(retryTrackId);
+                Update();
+            };
             previous = view.FindViewById<Button>(Resource.Id.streamPrevious);
             previous.Click += (_, __) => Controls?.SeekToPreviousMediaItem();
             next = view.FindViewById<Button>(Resource.Id.streamNext);
@@ -294,6 +302,9 @@ namespace Seeker.Playback
                     artist.Visibility = album.Visibility = ViewStates.Gone;
                     status.SetText(pendingRequest != null ? Resource.String.stream_connecting : Resource.String.stream_stopped);
                     pause.Enabled = false;
+                    retry.Visibility = ViewStates.Gone;
+                    retry.Enabled = false;
+                    retryTrackId = null;
                     previous.Enabled = next.Enabled = openQueue.Enabled = false;
                     repeat.Enabled = autoplay.Enabled = false;
                     seekBar.Enabled = false;
@@ -329,6 +340,10 @@ namespace Seeker.Playback
                         status.Text = activity.GetString(Resource.String.stream_failed, snapshot.Error);
                     else status.SetText(StatusResource(snapshot.Phase));
                     pause.Enabled = snapshot.Phase != PlaybackPhase.Error && Controls != null;
+                    bool canRetry = PlaybackPresentation.CanRetry(snapshot.Phase);
+                    retry.Visibility = canRetry ? ViewStates.Visible : ViewStates.Gone;
+                    retry.Enabled = canRetry;
+                    retryTrackId = canRetry ? snapshot.TrackId : null;
                     previous.Enabled = service?.CanSkipPrevious == true && Controls != null;
                     next.Enabled = service?.CanSkipNext == true && Controls != null;
                     openQueue.Enabled = service?.Queue.CurrentIndex >= 0;
@@ -504,6 +519,8 @@ namespace Seeker.Playback
             PlaybackPhase.Queued => Resource.String.stream_queued,
             PlaybackPhase.Connecting => Resource.String.stream_connecting,
             PlaybackPhase.Buffering => Resource.String.stream_buffering,
+            PlaybackPhase.Reconnecting => Resource.String.stream_reconnecting,
+            PlaybackPhase.Stalled => Resource.String.stream_stalled,
             _ => Resource.String.stream_stopped
         };
     }

@@ -14,6 +14,19 @@ namespace UnitTestCommon
             Path.Combine(Path.GetTempPath(), "seeker-stream-test-" + Guid.NewGuid().ToString("N")), size);
 
         [Test]
+        public async Task OnlyCommittedBytesResetTheProgressClock()
+        {
+            using var buffer = Create();
+            await Task.Delay(100);
+            var idle = buffer.TimeSinceLastProgress;
+            buffer.Writer.Write(Array.Empty<byte>(), 0, 0);
+            Assert.That(buffer.TimeSinceLastProgress, Is.GreaterThanOrEqualTo(idle));
+            buffer.Writer.Write(new byte[] { 1, 2 }, 0, 2);
+            Assert.That(buffer.TimeSinceLastProgress, Is.LessThan(idle));
+            Assert.That(buffer.AvailableLength, Is.EqualTo(2));
+        }
+
+        [Test]
         public async Task ReaderWaitsAtFrontierAndPlaysBeforeTransferCompletes()
         {
             using var buffer = Create();

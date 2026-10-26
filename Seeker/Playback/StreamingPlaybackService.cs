@@ -512,6 +512,20 @@ namespace Seeker.Playback
             return true;
         }
 
+        internal bool RetryPlayback(string expectedTrackId)
+        {
+            var snapshot = Snapshot();
+            if (snapshot == null || snapshot.TrackId != expectedTrackId
+                || !PlaybackPresentation.CanRetry(snapshot.Phase)
+                || Queue.Current?.Id != Playback.QueueEntryId) return false;
+            // StartQueueEntry retires the old player source and waits for all transfer cleanup
+            // before requesting bytes again. A retry keeps the queue but starts this song over.
+            Queue.Current.MarkPlaying();
+            StartQueueEntry(Queue.Current, playWhenReady: true);
+            Publish();
+            return true;
+        }
+
         internal void Publish()
         {
             if (destroyed) return;
@@ -542,7 +556,7 @@ namespace Seeker.Playback
             var track = Playback;
             var phase = PlaybackPresentation.Resolve(true, track.Failure != null, actualPlayer.PlaybackState,
                 SessionPlayer.PlayWhenReady, actualPlayer.IsPlaying, actualPlayer.PlaybackSuppressionReason != 0,
-                track.HasBytes, track.IsQueued);
+                track.HasBytes, track.IsQueued, track.IsReconnecting, track.IsStalled);
             return new PlaybackSnapshot(track.Metadata, track.Artwork, phase, actualPlayer.CurrentPosition,
                 track.Received, track.FileInfo.Size, track.Failure?.Message, track.Id, track.SeekRange,
                 SessionPlayer.PlayWhenReady && actualPlayer.PlaybackSuppressionReason == 0,

@@ -47,7 +47,22 @@ command set exposes play/pause, stop, volume, metadata/timeline information, ava
 queue selection, and seeking within the current track's validated range. General external playlist
 mutation is not advertised. Stop also cancels the Soulseek transfer and clears the queue.
 Terminal transfer errors become session player errors and disable Play until a new
-selection; the mini-player and dialog show the failure.
+selection or explicit retry; the mini-player and dialog show the failure.
+
+The full player distinguishes connecting, waiting in the peer's queue, ordinary audio buffering,
+and the existing automatic reconnect attempt. Queue status remains visible even after some bytes
+have already arrived. When playback is waiting for audio and an unfinished transfer has received no
+new bytes for 20 seconds, the player reports that it is still waiting for the peer. This is a lack of
+progress, not a claim that the device is offline. Buffered playback, user pauses, focus suppression,
+known peer queues and completed downloads do not show a stalled warning.
+
+**Retry from start** appears for a terminal failure or a stalled wait. It restarts the current song
+from the beginning and keeps the queue, repeat mode and autoplay setting. The service validates the
+displayed track ID and current state before accepting the action; stale or repeated taps cannot restart
+another track or interrupt playback that has already recovered. It uses the existing serialized source
+replacement and transfer cleanup, so the old request is retired before a new one starts. This does not
+add automatic retry attempts or restore the old playback position. Stall presentation uses the existing
+visible-Activity refresh; it adds no background polling timer.
 
 The session's queue timeline publishes the merged `TrackMetadata`: title, artist, album, album
 artist, track number, release year, and reliable duration when the native player supplies it. Extraction

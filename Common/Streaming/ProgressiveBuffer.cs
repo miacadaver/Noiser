@@ -16,6 +16,7 @@ namespace Common.Streaming
         private readonly FileStream file;
         private readonly Stream writer;
         private long available;
+        private long lastProgressTimestamp = Stopwatch.GetTimestamp();
         private bool completed;
         private bool disposed;
         private Exception? failure;
@@ -24,6 +25,14 @@ namespace Common.Streaming
         public long ExpectedLength { get; }
         public long AvailableLength { get { lock (sync) return available; } }
         public Stream Writer => writer;
+        public TimeSpan TimeSinceLastProgress
+        {
+            get
+            {
+                lock (sync) return TimeSpan.FromSeconds(
+                    (Stopwatch.GetTimestamp() - lastProgressTimestamp) / (double)Stopwatch.Frequency);
+            }
+        }
 
         public ProgressiveBuffer(string filePath, long expectedLength)
         {
@@ -108,6 +117,7 @@ namespace Common.Streaming
                 file.Write(bytes, offset, count);
                 file.Flush();
                 available += count;
+                if (count > 0) lastProgressTimestamp = Stopwatch.GetTimestamp();
                 Monitor.PulseAll(sync);
             }
         }

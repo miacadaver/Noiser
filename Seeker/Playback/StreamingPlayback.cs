@@ -41,6 +41,7 @@ namespace Seeker.Playback
         private AndroidX.Media3.Common.Metadata lastId3;
         private volatile TransferStates transferState;
         private volatile bool receiving;
+        private volatile bool reconnecting;
         private SeekRangeSnapshot seekRange = new SeekRangeSnapshot(0, -1, false);
 
         public string Id { get; }
@@ -58,6 +59,9 @@ namespace Seeker.Playback
         public bool HasBytes => buffer != null ? buffer.AvailableLength > 0 : readableLocalFile;
         public bool IsQueued => transferState.HasFlag(TransferStates.Queued);
         public bool IsReceiving => receiving;
+        public bool IsReconnecting => reconnecting;
+        public bool IsStalled => buffer != null && PlaybackPresentation.IsStalled(
+            receiving, buffer.AvailableLength, buffer.ExpectedLength, buffer.TimeSinceLastProgress);
 
         /// <summary>
         /// Completes when the first parsed track metadata has reached the session, or the caller's
@@ -190,8 +194,14 @@ namespace Seeker.Playback
                     state =>
                     {
                         transferState = state;
+                        if ((state & (TransferStates.Queued | TransferStates.InProgress | TransferStates.Completed)) != 0)
+                            reconnecting = false;
                         owner.RunOnMain(() => { if (owner.IsCurrent(this)) owner.Publish(); });
-                    }, cancellation.Token, retainUntilReleased: true).ConfigureAwait(false);
+                    }, cancellation.Token, retainUntilReleased: true, reconnecting: () =>
+                    {
+                        reconnecting = true;
+                        owner.RunOnMain(() => { if (owner.IsCurrent(this)) owner.Publish(); });
+                    }).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
             catch (Exception exception)
@@ -202,6 +212,7 @@ namespace Seeker.Playback
             finally
             {
                 receiving = false;
+                reconnecting = false;
                 owner.RunOnMain(() => { if (owner.IsCurrent(this)) owner.Publish(); });
             }
         }
