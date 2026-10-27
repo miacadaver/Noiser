@@ -14,6 +14,8 @@ Noiser builds on [Seeker](https://github.com/jackBonadies/SeekerAndroid), keepin
 
 [Get the APK](#get-noiser) · [See it in action](#a-look-inside) · [Compare with Seeker](#noiser-and-seeker) · [Roadmap](ROADMAP.md)
 
+Updates are available under **Settings → Check for updates** starting with `.13`. Install an updater-enabled APK once, then download later published versions inside Noiser. See [update behavior and installation](docs/app-updates.md).
+
 ## Listen as you discover
 
 - **Play from search or Browse.** Start an MP3 without waiting for the entire file to download.
@@ -48,7 +50,7 @@ Search and Browse screenshots are inherited from upstream Seeker and show the sh
 3. Install the APK on Android 6.0 or newer, allow installation from your browser/file manager if prompted, then sign in to Soulseek.
 4. Open a peer folder or the track list from a search result and tap **Play** beside an MP3.
 
-The app appears as **Noiser**. Version **3.11.2-stream.12** keeps the working package ID `com.companyname.andriodapp1.rollback`, separate from upstream Seeker and the earlier original-package builds. Renaming the app does not migrate or clear settings. Updating an existing installation also requires a matching signing certificate; Main-branch CI APKs reuse a pinned development signing certificate; validation APKs from pull requests use disposable keys. See [development signing](docs/development-signing.md) for the one-time transition from older builds and key-backup instructions.
+The app appears as **Noiser**. Version **3.11.2-stream.13** keeps the working package ID `com.companyname.andriodapp1.rollback`, separate from upstream Seeker and the earlier original-package builds. Renaming the app does not migrate or clear settings. Updating an existing installation also requires a matching signing certificate; Main-branch CI APKs reuse a pinned development signing certificate; validation APKs from pull requests use disposable keys. See [development signing](docs/development-signing.md) for the one-time transition from older builds and key-backup instructions.
 
 This is an **experimental development build**, not a Play Store release. The pre-branding rollback was confirmed to launch on a Samsung running Android 16; the refreshed build still needs device validation. The [known-working rollback APK](https://github.com/miacadaver/Noiser/actions/runs/40366644108/artifacts/12670202882) and its [baseline record](docs/validation/2026-10-26-full-background-rollback.md) remain available as historical references, subject to artifact expiry.
 

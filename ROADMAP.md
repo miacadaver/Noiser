@@ -12,6 +12,8 @@ Noiser's goal is a dependable Android Soulseek client with integrated playback. 
 - [x] Noiser app name, refreshed Seeker-derived bird, and Android icon variants.
 - [x] Noiser Mint light, dark, and AMOLED interface palettes matching the bird icon.
 - [x] APK and host-test workflows for `main` and pull requests.
+- [x] Icon-based player controls with state labels and accessibility descriptions.
+- [x] Manual in-app update checks, verified APK downloads, and Android installer handoff via GitHub Releases.
 
 The current foundation is the phone-confirmed rollback. Its removed background changes remain removed; offline queue recovery is a new, separate implementation without automatic player/service startup. See [baseline history](docs/validation/2026-10-26-full-background-rollback.md).
 
