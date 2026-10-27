@@ -26,25 +26,35 @@
         <TextView android:id="@+id/streamSeekStatus" android:textColor="?attr/cellTextColorSubdued" android:layout_width="match_parent"
             android:layout_height="wrap_content" android:gravity="center_horizontal" />
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_marginTop="4dp" android:gravity="center" android:orientation="horizontal">
-            <Button android:id="@+id/streamPrevious" android:layout_width="0dp"
-                android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/stream_previous" />
-            <Button android:id="@+id/streamNext" android:layout_width="0dp"
-                android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/stream_next" />
-            <Button android:id="@+id/streamQueue" android:layout_width="0dp"
-                android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/stream_queue" />
+            android:layout_marginTop="8dp" android:gravity="center" android:orientation="horizontal">
+            <ImageButton android:id="@+id/streamPrevious" style="@style/StreamPlayerIcon"
+                android:layout_width="64dp" android:layout_height="64dp"
+                android:src="@drawable/stream_previous" android:contentDescription="@string/stream_previous" />
+            <ImageButton android:id="@+id/streamPause" style="@style/StreamPlayerIcon"
+                android:layout_width="72dp" android:layout_height="72dp" android:padding="18dp"
+                android:tint="?attr/colorPrimary" android:src="@drawable/stream_play"
+                android:contentDescription="@string/stream_play" android:enabled="false" />
+            <ImageButton android:id="@+id/streamNext" style="@style/StreamPlayerIcon"
+                android:layout_width="64dp" android:layout_height="64dp"
+                android:src="@drawable/stream_next" android:contentDescription="@string/stream_next" />
         </LinearLayout>
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_marginTop="2dp" android:gravity="center" android:orientation="horizontal">
-            <Button android:id="@+id/streamRepeat" android:layout_width="0dp"
-                android:layout_height="wrap_content" android:layout_weight="1"
-                android:text="@string/stream_repeat_off" />
-            <Button android:id="@+id/streamAutoplay" android:layout_width="0dp"
-                android:layout_height="wrap_content" android:layout_weight="1"
-                android:text="@string/stream_autoplay_on" />
+            android:layout_marginTop="8dp" android:gravity="center" android:orientation="horizontal">
+            <ImageButton android:id="@+id/streamQueue" style="@style/StreamPlayerIcon"
+                android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1"
+                android:src="@drawable/stream_queue" android:contentDescription="@string/stream_queue" />
+            <ImageButton android:id="@+id/streamRepeat" style="@style/StreamPlayerIcon"
+                android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1"
+                android:src="@drawable/stream_repeat_off" android:contentDescription="@string/stream_repeat_off" />
+            <ImageButton android:id="@+id/streamAutoplay" style="@style/StreamPlayerIcon"
+                android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1"
+                android:src="@drawable/stream_autoplay" android:contentDescription="@string/stream_autoplay_on" />
+            <ImageButton android:id="@+id/streamStop" style="@style/StreamPlayerIcon"
+                android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1"
+                android:src="@drawable/stream_stop" android:contentDescription="@string/stream_stop" />
+            <ImageButton android:id="@+id/streamClose" style="@style/StreamPlayerIcon"
+                android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1"
+                android:src="@drawable/stream_close" android:contentDescription="@string/close" />
         </LinearLayout>
-        <Button android:id="@+id/streamPause" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:layout_marginTop="6dp"
-            android:text="@string/stream_pause" android:enabled="false" />
     </LinearLayout>
 </ScrollView>
