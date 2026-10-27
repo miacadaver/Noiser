@@ -1,9 +1,9 @@
 # Background playback, MediaSession, and mini-player
 
-The manifest reports version **3.11.2-stream.10** (Android version code 153), with the Noiser label and refreshed bird artwork. Minimum Android API is 23;
+The manifest reports version **3.11.2-stream.11** (Android version code 154), with the Noiser label and refreshed bird artwork. Minimum Android API is 23;
 target API is 36. There is one ExoPlayer, one MediaSession, and at most one active peer stream.
 The current code includes MP3 folder queues, repeat/autoplay controls, and bounded seeking.
-Playback resumption after process death and direct scrobbling are not implemented.
+Automatic playback resumption after process death and direct scrobbling are not implemented. [Offline queue recovery](queue-recovery.md) remembers the queue/current song and restores them paused; explicit Play starts from zero.
 
 ## Ownership and data flow
 
@@ -33,7 +33,7 @@ reader and waits for its transfer cleanup before starting the new peer request.
 User selections are single-use in-process requests, not replayable filenames in exported service
 intents. Rapid selections supersede pending selections. The service is `NotSticky`: if Android kills
 the process, a dead peer connection is never assumed resumable. Relaunching cleans abandoned cache
-files; the user can select Play again. Explicit Stop and app Shutdown cancel reads, release the transfer
+files; the user can press Play on the remembered queue to start from zero. Explicit Stop and app Shutdown cancel reads, release the transfer
 reservation, and delete temporary data after transfer shutdown. Advancing the queue performs the same
 cleanup for the old track before starting the next remote request. Natural completion advances, repeats,
 or holds the current track according to the queue controls. A held track retains its buffer for replay

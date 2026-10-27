@@ -6,13 +6,14 @@ Noiser's goal is a dependable Android Soulseek client with integrated playback. 
 
 - [x] MP3 playback while receiving a peer transfer, with temporary-cache cleanup.
 - [x] Search/Browse playback entry points, a mini-player, and Android media controls.
-- [x] In-memory queues, repeat, autoplay, and seeking within parsed audio.
+- [x] Playback queues, repeat, autoplay, and seeking within parsed audio.
+- [x] Offline recovery of the queue/current song and remembered folder, paused; explicit Play starts from zero.
 - [x] Embedded tags/artwork and bounded metadata startup handling.
 - [x] Noiser app name, refreshed Seeker-derived bird, and Android icon variants.
 - [x] Noiser Mint light, dark, and AMOLED interface palettes matching the bird icon.
 - [x] APK and host-test workflows for `main` and pull requests.
 
-The current foundation is the phone-confirmed rollback. Its removed background changes remain removed; branding does not restore them. See [baseline history](docs/validation/2026-10-26-full-background-rollback.md).
+The current foundation is the phone-confirmed rollback. Its removed background changes remain removed; offline queue recovery is a new, separate implementation without automatic player/service startup. See [baseline history](docs/validation/2026-10-26-full-background-rollback.md).
 
 ## 1. Validate the working build
 
@@ -22,7 +23,7 @@ The current foundation is the phone-confirmed rollback. Its removed background c
 2. **Android lifecycle regression coverage:** screen-off playback, activity recreation, interruptions, Bluetooth controls, rapid track changes, and Stop during stalls; record physical-device results.
 3. **Protected credential storage:** Keystore-backed encryption, migration of existing preferences, and explicit credential exclusions from backups/exports.
 4. **Buffering and failure presentation:** distinguish peer queue, connection, buffering, retry, and terminal failure; add a dependable user Retry action before broader automatic recovery.
-5. **Saved queues, then saved positions:** land separately, with explicit Resume after process death and positions constrained by audio available on the new transfer.
+5. **Saved queue/current song:** implemented as offline, paused recovery with explicit Play from zero. Position recovery is optional future work and is outside the agreed implementation.
 6. **Shareable playback diagnostics:** app/Android versions, player/transfer state, and failure cause, with credentials and personal data removed.
 
 Reduce static activity references and split large playback-related classes incrementally alongside these changes.
@@ -42,8 +43,9 @@ Reduce static activity references and split large playback-related classes incre
 
 - [ ] Improve buffering/retry presentation without changing startup ownership.
 - [ ] Reintroduce bounded automatic playback recovery with explicit cancellation and no duplicate transfers.
-- [ ] Restore saved queues with versioned data and an explicit user resume action after process death.
-- [ ] Restore playback positions, respecting the received/seekable audio boundary on a new transfer.
+- [x] Restore a versioned saved queue/current selection offline and paused, without creating a player or contacting peers.
+- [ ] Validate offline queue recovery and explicit Play on the physical Samsung phone.
+- [ ] Optional future position recovery, respecting received/seekable audio on a new transfer; not included in queue recovery.
 
 **Done when:** each feature lands separately with meaningful host tests and physical-device acceptance checks. Replayed service intents, rapid selections, Stop, and fresh installs must remain predictable.
 

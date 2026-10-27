@@ -52,6 +52,23 @@ namespace Seeker
         private const int BOTTOM_SHEET_PEEK_HEIGHT = 320;
 
         private static BrowseState state = new BrowseState();
+        private static bool savedPlaybackFolder;
+
+        internal static bool TryRestorePlaybackFolder(Common.Playback.SavedPlaybackSession saved)
+        {
+            if (state.HasResponse()) return false;
+            var current = saved.Current;
+            string folder = Common.Playback.SavedPlaybackSession.FolderOf(current.RemotePath);
+            var files = saved.FolderTracks().Select(entry => new Soulseek.File(1, entry.DisplayFilename,
+                entry.Size, "mp3", isLatin1Decoded: entry.WasFilenameLatin1Decoded,
+                isDirectoryLatin1Decoded: entry.WasFolderLatin1Decoded)).ToArray();
+            var directory = new Soulseek.Directory(folder, files, current.FolderDecoded);
+            var response = new BrowseResponse(new[] { directory });
+            state.SetBrowseResponse(current.Username, new TreeNode<Soulseek.Directory>(directory, false), response, null);
+            savedPlaybackFolder = true;
+            BrowseResponseReceivedUI?.Invoke(null, EventArgs.Empty);
+            return true;
+        }
         private DataItem DataItemSelectedForLongClick = null;
         private BrowseAdapter BrowseAdapterInstance => recyclerViewDirectories?.GetAdapter() as BrowseAdapter;
 
@@ -259,6 +276,9 @@ namespace Seeker
             SeekerState.InDarkModeCache = DownloadDialog.InNightMode(this.Context);
             Logger.Debug("BrowseFragmentOnCreateView");
             this.rootView = inflater.Inflate(Resource.Layout.browse, container, false);
+            var savedNotice = rootView.FindViewById<TextView>(Resource.Id.savedPlaybackFolderNotice);
+            savedNotice.Visibility = savedPlaybackFolder ? ViewStates.Visible : ViewStates.Gone;
+            savedNotice.Click += (_, __) => Browse.BrowseService.RequestFilesApi(state.CurrentUsername, state.GetCurrentDirectoryName());
             recyclerViewDirectories = this.rootView.FindViewById<RecyclerView>(Resource.Id.listViewDirectories);
             browseLayoutManager = new LinearLayoutManager(this.Context);
             recyclerViewDirectories.SetLayoutManager(browseLayoutManager);
@@ -1316,6 +1336,7 @@ namespace Seeker
 
         public static void OnBrowseResponseReceived(object sender, BrowseResponseEvent e)
         {
+            savedPlaybackFolder = false;
             ClearFilterUIString();
             ScrollPositionRestore?.Clear();
             ScrollPositionRestoreRotate = null;
@@ -1330,6 +1351,7 @@ namespace Seeker
 
         public void RefreshOnRecieved()
         {
+            rootView.FindViewById(Resource.Id.savedPlaybackFolderNotice).Visibility = savedPlaybackFolder ? ViewStates.Visible : ViewStates.Gone;
             if (noBrowseView != null)
             {
                 noBrowseView.Visibility = ViewStates.Gone;

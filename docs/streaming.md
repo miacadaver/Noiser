@@ -68,7 +68,7 @@ Embedded tags arrive for the active track and update its queue metadata without 
 The player exposes Next, Previous, and Queue. Browse file actions and search-track long presses offer
 Play next and Add to queue. Queue rows can be selected or removed; clearing the queue stops playback.
 The dialog shows the current track and the tracks after it; Repeat All also shows the wrapped entries.
-Queues are in memory and are cleared by Stop or process death.
+Queue identities and the current song are checkpointed privately and restored offline, paused, after process death. Stop/Clear discards that checkpoint. No position or play intent is saved; see [queue recovery](queue-recovery.md).
 
 Autoplay is enabled by default. Repeat cycles Off, All, One; selecting All or One enables autoplay,
 and disabling autoplay returns repeat to Off. Repeat One replays the current buffer; Repeat All wraps

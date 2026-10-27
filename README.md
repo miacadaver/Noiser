@@ -19,6 +19,7 @@ Noiser builds on [Seeker](https://github.com/jackBonadies/SeekerAndroid), keepin
 - **Play from search or Browse.** Start an MP3 without waiting for the entire file to download.
 - **Keep listening.** A mini-player, Android media notification, lock-screen controls, and headset play/pause share one playback session.
 - **Build a listening queue.** Folder queues, Play next, Add to queue, Next/Previous, repeat, and autoplay.
+- **Return to your queue.** Reopen with the remembered song paused and an offline folder preview. Press Play to start from the beginning—no automatic playback. [Recovery details →](docs/queue-recovery.md)
 - **See the track behind the filename.** Embedded title, artist, album, and artwork when available; conservative title/artist fallbacks when tags are missing.
 - **A matching Noiser Mint interface.** Dark teal chrome with coordinated light, dark, and AMOLED themes. [Theme details and selection →](docs/ui-theme.md)
 - **Keep the Soulseek essentials.** Search filters and wishlists, peer folders, downloads and uploads, messages, chatrooms, and UPnP port forwarding.
@@ -47,7 +48,7 @@ Search and Browse screenshots are inherited from upstream Seeker and show the sh
 3. Install the APK on Android 6.0 or newer, allow installation from your browser/file manager if prompted, then sign in to Soulseek.
 4. Open a peer folder or the track list from a search result and tap **Play** beside an MP3.
 
-The app appears as **Noiser**. Version **3.11.2-stream.10** keeps the working package ID `com.companyname.andriodapp1.rollback`, separate from upstream Seeker and the earlier original-package builds. Renaming the app does not migrate or clear settings. Updating an existing installation also requires a matching signing certificate; Main-branch CI APKs reuse a pinned development signing certificate; validation APKs from pull requests use disposable keys. See [development signing](docs/development-signing.md) for the one-time transition from older builds and key-backup instructions.
+The app appears as **Noiser**. Version **3.11.2-stream.11** keeps the working package ID `com.companyname.andriodapp1.rollback`, separate from upstream Seeker and the earlier original-package builds. Renaming the app does not migrate or clear settings. Updating an existing installation also requires a matching signing certificate; Main-branch CI APKs reuse a pinned development signing certificate; validation APKs from pull requests use disposable keys. See [development signing](docs/development-signing.md) for the one-time transition from older builds and key-backup instructions.
 
 This is an **experimental development build**, not a Play Store release. The pre-branding rollback was confirmed to launch on a Samsung running Android 16; the refreshed build still needs device validation. The [known-working rollback APK](https://github.com/miacadaver/Noiser/actions/runs/40366644108/artifacts/12670202882) and its [baseline record](docs/validation/2026-10-26-full-background-rollback.md) remain available as historical references, subject to artifact expiry.
 
@@ -62,20 +63,21 @@ Comparison is against the **imported Seeker revision**, `ff1dcc6de55a412e8d6eada
 | Messages, chatrooms, user info, and UPnP | Included | Retained |
 | Integrated MP3 playback during a peer transfer | Not included | Added, experimental |
 | Mini-player and background media session | Not included | Added |
-| Playback queues, repeat, and autoplay | Not included | Added, in memory |
+| Playback queues, repeat, and autoplay | Not included | Added; queue/current song saved, player policies reset on restart |
 | Embedded playback metadata and artwork | No integrated streaming player | Added |
 | Seeking during streaming | No integrated streaming player | Limited to received, parsed audio |
-| Saved playback queues and positions | No integrated streaming player | Planned; removed from the working baseline |
+| Saved queue and current song | No integrated streaming player | Added; restored offline and paused |
+| Saved playback position | No integrated streaming player | Not saved; Play restarts from the beginning |
 
 ## Current limits
 
 Streaming supports **MP3 only**, one active track transfer at a time, with a **256 MiB** remote file limit. Peers must be online and willing to upload; queue time and transfer speed affect startup. There is no next-track prefetch, remote range seeking, or gapless playback.
 
-Seeking stays within audio already received and parsed. Playback queues and positions do not survive process death. One transfer-level reconnect attempt is supported; automatic playback recovery, saved queues, and saved positions remain outside the working baseline. Album metadata comes from tags, without folder-name guesses. Direct scrobbling is not implemented; external scrobbler detection still needs real-device testing.
+Seeking stays within audio already received and parsed. The queue and selected song survive process death and reopen paused; playback positions are not saved. One transfer-level reconnect attempt is supported; automatic playback recovery and saved positions remain outside this implementation. Album metadata comes from tags, without folder-name guesses. Direct scrobbling is not implemented; external scrobbler detection still needs real-device testing.
 
 ## What's next
 
-The priority is to validate the current build on real devices before restoring removed background features. [The roadmap](ROADMAP.md) tracks acceptance criteria for device reliability, recovery and persistence, and listening polish. Planned work is not included in today's APK.
+The priority is to validate the current build and offline queue recovery on real devices before adding more background behavior. [The roadmap](ROADMAP.md) tracks acceptance criteria for device reliability, recovery and persistence, and listening polish. Planned work is not included in today's APK.
 
 ## Development
 
