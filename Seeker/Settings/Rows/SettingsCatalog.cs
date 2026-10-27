@@ -738,6 +738,15 @@ namespace Seeker.Settings.Rows
                 OnClick = (h, r) => h.LaunchExportClientData(),
             });
 
+            rows.Add(new NavigationRow
+            {
+                Id = "app.updates",
+                TitleRes = Resource.String.update_check,
+                SubtitleRes = Resource.String.update_subtitle,
+                IconRes = Resource.Drawable.download_material,
+                OnClick = (h, r) => Seeker.Updates.UpdateBottomSheet.Show((AppCompatActivity)h.Activity),
+            });
+
             rows.Add(new ButtonRow
             {
                 Id = "account.force_filesystem",

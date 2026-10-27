@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="update_title">Noiser updates</string>
+    <string name="update_check">Check for updates</string>
+    <string name="update_subtitle">Download and install the latest Noiser release</string>
+    <string name="update_installed">Installed: %1$s</string>
+    <string name="update_checking">Checking for updates…</string>
+    <string name="update_current">No newer update is available.</string>
+    <string name="update_available">Noiser %1$s is available (%2$d MB).</string>
+    <string name="update_download">Download update</string>
+    <string name="update_downloading">Downloading update…</string>
+    <string name="update_download_progress">Downloading update: %1$d%%</string>
+    <string name="update_verifying">Verifying update…</string>
+    <string name="update_ready">Update verified. Tap Install update to continue.</string>
+    <string name="update_install">Install update</string>
+    <string name="update_permission">Allow installs from Noiser, then return here and tap Install update again.</string>
+    <string name="update_invalid">This update could not be verified for your installed app. It has not been installed.</string>
+    <string name="update_network_error">Could not reach GitHub or finish the download. Check your connection and try again.</string>
+    <string name="update_failed">Could not complete the update. Check your free storage and try again.</string>
+</resources>

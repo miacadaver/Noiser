@@ -37,6 +37,9 @@ jobs:
       - name: Test development signing safeguards
         run: python3 -m unittest discover -s .github/scripts -p 'test_development_signing.py'
 
+      - name: Test update release metadata
+        run: python3 -m unittest discover -s .github/scripts -p 'test_update_manifest.py'
+
       - name: Check Noiser theme resources and contrast
         run: python3 .github/scripts/check_noiser_theme.py
 
@@ -107,6 +110,7 @@ jobs:
             python3 .github/scripts/development-signing.py verify-apk --apk "$apk_path"
             install -D "$apk_path" "$RUNNER_TEMP/noiser-apk/Noiser.apk"
             cp .github/noiser-development-certificate.sha256 "$RUNNER_TEMP/noiser-apk/signing-certificate.sha256"
+            python3 .github/scripts/update-manifest.py --apk "$RUNNER_TEMP/noiser-apk/Noiser.apk" --manifest Seeker/Properties/AndroidManifest.xml --output "$RUNNER_TEMP/noiser-apk/Noiser-update.json"
           else
             install -D "$apk_path" "$RUNNER_TEMP/noiser-apk/Noiser-validation.apk"
           fi
@@ -134,3 +138,48 @@ jobs:
       - name: Remove runner signing key
         if: always() && env.PERSISTENT_SIGNING == 'true'
         run: rm -f "$RUNNER_TEMP/noiser-development.jks"
+
+  publish-update:
+    name: Publish verified Noiser update
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'miacadaver/Noiser'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Require passing host tests before publishing
+        run: dotnet test UnitTestCommon/UnitTestCommon.csproj --configuration Release --filter 'TestCategory!=RealData' -p:MSBuildEnableWorkloadResolver=false --verbosity minimal
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: Noiser-apk
+          path: ${{ runner.temp }}/noiser-release
+
+      - name: Publish a complete release for a new app version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_directory="$RUNNER_TEMP/noiser-release"
+          release_version=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["VersionName"])' "$release_directory/Noiser-update.json")
+          release_tag="noiser-$release_version"
+          if gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' > "$RUNNER_TEMP/noiser-release-draft.txt" 2>/dev/null; then
+            if [ "$(cat "$RUNNER_TEMP/noiser-release-draft.txt")" = "false" ]; then
+              echo "This app version already has a published release; keeping its assets unchanged."
+              exit 0
+            fi
+            gh release upload "$release_tag" "$release_directory/Noiser.apk" "$release_directory/Noiser-update.json" "$release_directory/signing-certificate.sha256" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$release_tag" "$release_directory/Noiser.apk" "$release_directory/Noiser-update.json" "$release_directory/signing-certificate.sha256" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Noiser $release_version" --notes-file docs/latest-release-notes.md --draft
+          fi
+          gh release edit "$release_tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest
