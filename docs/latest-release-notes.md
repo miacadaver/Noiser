@@ -1,5 +1,5 @@
-Album covers are larger in the player: up to 220dp tall in portrait, with a shorter layout in landscape. Covers fit the available width without cropping.
+Larger album covers in the player, with the full image visible. The layout adjusts in landscape.
 
-The GitHub README is shorter, with direct installation links and the main features and limits.
+The GitHub README is shorter and gives Seeker clear credit.
 
-Install through **Settings → Check for updates**, or download Noiser.apk from this release. The package and signing key are unchanged.
+Update from **Settings → Check for updates**, or download Noiser.apk from this release.
