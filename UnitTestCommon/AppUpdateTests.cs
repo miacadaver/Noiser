@@ -153,6 +153,47 @@ namespace UnitTestCommon
             Assert.CatchAsync<OperationCanceledException>(async () => await new GithubUpdateClient(http).DownloadAsync(Update(), path, null, cancelled.Token));
             Assert.That(Directory.GetFiles(directory), Is.Empty);
         }
+        private sealed class UnknownLengthContent : HttpContent
+        {
+            private readonly byte[] bytes;
+            public UnknownLengthContent(byte[] bytes) { this.bytes = bytes; }
+            protected override bool TryComputeLength(out long length) { length = 0; return false; }
+            protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) => stream.WriteAsync(bytes, 0, bytes.Length);
+            protected override Task<Stream> CreateContentReadStreamAsync() => Task.FromResult<Stream>(new MemoryStream(bytes, false));
+        }
+        [Test] public void MetadataWithoutContentLengthStillHasABound()
+        {
+            var update = Update();
+            using var http = new HttpClient(new Handler(request => request.RequestUri!.ToString() == GithubUpdateClient.LatestUrl
+                ? Json(Release(update)) : new HttpResponseMessage(HttpStatusCode.OK) { Content = new UnknownLengthContent(new byte[16385]) }));
+            Assert.ThrowsAsync<InvalidDataException>(async () => await new GithubUpdateClient(http).CheckAsync(156, CancellationToken.None));
+        }
+        [Test] public void ApkWithoutContentLengthCannotOverrunItsExpectedSize()
+        {
+            using var http = new HttpClient(new Handler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new UnknownLengthContent(new byte[Apk.Length + 1]) }));
+            string path = Path.Combine(directory, "Noiser.apk");
+            Assert.ThrowsAsync<InvalidDataException>(async () => await new GithubUpdateClient(http).DownloadAsync(Update(), path, null, CancellationToken.None));
+            Assert.That(Directory.GetFiles(directory), Is.Empty);
+        }
+        private sealed class CancellingStream : MemoryStream
+        {
+            private readonly CancellationTokenSource cancellation;
+            public CancellingStream(CancellationTokenSource cancellation) : base(Apk) { this.cancellation = cancellation; }
+            public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken token)
+            {
+                int read = await base.ReadAsync(buffer, offset, count, token);
+                cancellation.Cancel();
+                return read;
+            }
+        }
+        [Test] public void CancellationDuringDownloadCleansAnOpenedPartialFile()
+        {
+            using var cancellation = new CancellationTokenSource();
+            using var http = new HttpClient(new Handler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new CancellingStream(cancellation)) }));
+            string path = Path.Combine(directory, "Noiser.apk");
+            Assert.CatchAsync<OperationCanceledException>(async () => await new GithubUpdateClient(http).DownloadAsync(Update(), path, null, cancellation.Token));
+            Assert.That(Directory.GetFiles(directory), Is.Empty);
+        }
         [Test] public void RateLimitedChecksCanBeRetriedByUser()
         {
             using var http = new HttpClient(new Handler(_ => new HttpResponseMessage(HttpStatusCode.Forbidden)));

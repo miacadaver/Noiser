@@ -210,7 +210,7 @@ namespace Seeker.Updates
             if (!IsCurrent(owner)) return;
             Logger.Debug("App update failed: " + error.GetType().Name);
             status.SetText(error is InvalidDataException || error is System.Text.Json.JsonException
-                ? Resource.String.update_invalid : error is HttpRequestException || error is OperationCanceledException
+                ? Resource.String.update_invalid : error is HttpRequestException || error is System.OperationCanceledException
                 ? Resource.String.update_network_error : Resource.String.update_failed);
             action.SetText(downloaded != null ? Resource.String.update_install
                 : update != null ? Resource.String.update_download : Resource.String.update_check);
