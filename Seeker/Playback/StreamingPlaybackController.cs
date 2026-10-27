@@ -45,12 +45,12 @@ namespace Seeker.Playback
         private TextView progress;
         private TextView seekStatus;
         private SeekBar seekBar;
-        private Button pause;
-        private Button previous;
-        private Button next;
-        private Button openQueue;
-        private Button repeat;
-        private Button autoplay;
+        private ImageButton pause;
+        private ImageButton previous;
+        private ImageButton next;
+        private ImageButton openQueue;
+        private ImageButton repeat;
+        private ImageButton autoplay;
         private bool attached;
         private string pendingRequest;
         private bool trackingSeekBar;
@@ -239,23 +239,27 @@ namespace Seeker.Playback
                 trackingTrackId = null;
                 Update();
             };
-            pause = view.FindViewById<Button>(Resource.Id.streamPause);
+            pause = view.FindViewById<ImageButton>(Resource.Id.streamPause);
             pause.Click += (_, __) => TogglePause();
-            previous = view.FindViewById<Button>(Resource.Id.streamPrevious);
+            previous = view.FindViewById<ImageButton>(Resource.Id.streamPrevious);
             previous.Click += (_, __) => Controls?.SeekToPreviousMediaItem();
-            next = view.FindViewById<Button>(Resource.Id.streamNext);
+            next = view.FindViewById<ImageButton>(Resource.Id.streamNext);
             next.Click += (_, __) => Controls?.SeekToNextMediaItem();
-            openQueue = view.FindViewById<Button>(Resource.Id.streamQueue);
+            openQueue = view.FindViewById<ImageButton>(Resource.Id.streamQueue);
             openQueue.Click += (_, __) => ShowQueueDialog();
-            repeat = view.FindViewById<Button>(Resource.Id.streamRepeat);
+            repeat = view.FindViewById<ImageButton>(Resource.Id.streamRepeat);
             repeat.Click += (_, __) => StreamingPlaybackService.Current?.CycleRepeatMode();
-            autoplay = view.FindViewById<Button>(Resource.Id.streamAutoplay);
+            autoplay = view.FindViewById<ImageButton>(Resource.Id.streamAutoplay);
             autoplay.Click += (_, __) => StreamingPlaybackService.Current?.ToggleAutoplay();
             var window = new Google.Android.Material.Dialog.MaterialAlertDialogBuilder(activity)
                 .SetTitle(Resource.String.stream_player)
-                .SetView(view)
-                .SetPositiveButton(Resource.String.close, (_, __) => { })
-                .SetNegativeButton(Resource.String.stream_stop, (_, __) => Stop()).Create();
+                .SetView(view).Create();
+            var stop = view.FindViewById<ImageButton>(Resource.Id.streamStop);
+            var close = view.FindViewById<ImageButton>(Resource.Id.streamClose);
+            stop.Click += (_, __) => { Stop(); window.Dismiss(); };
+            close.Click += (_, __) => window.Dismiss();
+            foreach (var button in new[] { previous, pause, next, openQueue, repeat, autoplay, stop, close })
+                AndroidX.AppCompat.Widget.TooltipCompat.SetTooltipText(button, button.ContentDescription);
             dialog = window;
             var windowArtwork = artwork;
             window.DismissEvent += (_, __) =>
@@ -273,6 +277,18 @@ namespace Seeker.Playback
             dialog.Show();
             if (StreamingPlaybackService.Current?.Playback != null || pendingRequest != null) Connect();
             Update();
+        }
+
+        private void SetPlayerIcon(ImageButton button, int drawable, int label, bool selected = false)
+        {
+            string description = activity.GetString(label);
+            if (button.ContentDescription != description)
+            {
+                button.SetImageResource(drawable);
+                button.ContentDescription = description;
+                AndroidX.AppCompat.Widget.TooltipCompat.SetTooltipText(button, description);
+            }
+            button.Selected = selected;
         }
 
         private void Update()
@@ -364,15 +380,21 @@ namespace Seeker.Playback
                     next.Enabled = service?.CanSkipNext == true && Controls != null;
                     openQueue.Enabled = service?.Queue.CurrentIndex >= 0;
                     repeat.Enabled = autoplay.Enabled = Controls != null;
-                    repeat.SetText(snapshot.RepeatMode switch
+                    SetPlayerIcon(repeat, snapshot.RepeatMode switch
+                    {
+                        PlaybackRepeatMode.All => Resource.Drawable.stream_repeat,
+                        PlaybackRepeatMode.One => Resource.Drawable.stream_repeat_one,
+                        _ => Resource.Drawable.stream_repeat_off
+                    }, snapshot.RepeatMode switch
                     {
                         PlaybackRepeatMode.All => Resource.String.stream_repeat_all,
                         PlaybackRepeatMode.One => Resource.String.stream_repeat_one,
                         _ => Resource.String.stream_repeat_off
-                    });
-                    autoplay.SetText(snapshot.Autoplay
-                        ? Resource.String.stream_autoplay_on : Resource.String.stream_autoplay_off);
-                    pause.SetText(snapshot.ShowPause ? Resource.String.stream_pause : Resource.String.stream_resume);
+                    }, snapshot.RepeatMode != PlaybackRepeatMode.Off);
+                    SetPlayerIcon(autoplay, snapshot.Autoplay ? Resource.Drawable.stream_autoplay : Resource.Drawable.stream_autoplay_off,
+                        snapshot.Autoplay ? Resource.String.stream_autoplay_on : Resource.String.stream_autoplay_off, snapshot.Autoplay);
+                    SetPlayerIcon(pause, snapshot.ShowPause ? Resource.Drawable.stream_pause : Resource.Drawable.stream_play,
+                        snapshot.ShowPause ? Resource.String.stream_pause : Resource.String.stream_resume);
                     long seconds = Math.Max(0, snapshot.Position) / 1000;
                     long percent = snapshot.Size > 0 ? Math.Min(100, snapshot.Received * 100 / snapshot.Size) : 0;
                     progress.Text = activity.GetString(Resource.String.stream_progress, new Java.Lang.Object[]
@@ -392,6 +414,9 @@ namespace Seeker.Playback
                     }
                 }
             }
+            if (full)
+                foreach (var button in new[] { previous, pause, next, openQueue, repeat, autoplay })
+                    button.Alpha = button.Enabled ? 1f : 0.38f;
             // Position refresh exists only while this Activity is visible, never as a background poll.
             if (snapshot != null || pendingRequest != null) handler.PostDelayed(tick, 250);
         }
