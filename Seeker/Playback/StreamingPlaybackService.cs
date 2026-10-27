@@ -44,6 +44,7 @@ namespace Seeker.Playback
         private bool handlingEvents;
         private bool destroyed;
         private ResolvableFuture pendingPlay;
+        private string playbackAccount;
 
         internal static StreamingPlaybackService Current { get; private set; }
         internal static event Action Changed;
@@ -92,6 +93,7 @@ namespace Seeker.Playback
                 SeekerApplication.Toaster.ShowToast(SeekerApplication.GetString(Resource.String.stream_queue_empty), Android.Widget.ToastLength.Short);
                 return null;
             }
+            PlaybackRecovery.BeginUserSelection();
             string key = requests.Publish(new PlayRequest(validation.Entries, selectedEntryId));
             try
             {
@@ -290,7 +292,9 @@ namespace Seeker.Playback
             bool retainCurrent = Playback != null && Playback.Failure == null
                 && Playback.Username == selected.Username && Playback.FileInfo.FullFileName == selected.RemotePath;
             Queue = replacement;
+            playbackAccount = Common.PreferencesState.Username;
             selected.MarkPlaying();
+            PlaybackRecovery.Remember(this, Queue, playbackAccount);
             if (retainCurrent)
             {
                 SessionPlayer.Play();
@@ -303,6 +307,9 @@ namespace Seeker.Playback
 
         private void StartQueueEntry(PlaybackQueueEntry entry, bool playWhenReady)
         {
+            playbackAccount ??= Common.PreferencesState.Username;
+            // Checkpoint the selected identity before any player or network work can fail.
+            PlaybackRecovery.Remember(this, Queue, playbackAccount);
             var pending = pendingPlay;
             pendingPlay = null;
             var previous = Playback;
@@ -332,6 +339,7 @@ namespace Seeker.Playback
             {
                 if (!IsCurrent(playback) || Queue.Current?.Id != playback.QueueEntryId) return;
                 Queue.Current.UpdateMetadata(metadata);
+                PlaybackRecovery.Remember(this, Queue, playbackAccount);
                 Publish();
             });
         }
@@ -342,6 +350,7 @@ namespace Seeker.Playback
             bool empty = Queue.Current == null;
             bool added = request.PlayNext ? Queue.AddNext(request.Entry) : Queue.AddLast(request.Entry);
             if (!added) return;
+            if (!empty) PlaybackRecovery.Remember(this, Queue, playbackAccount);
             if (empty)
             {
                 Queue.Current.MarkPlaying();
@@ -354,6 +363,7 @@ namespace Seeker.Playback
         {
             bool wasCurrent;
             var selected = Queue.Remove(entryId, out wasCurrent);
+            if (selected != null) PlaybackRecovery.Remember(this, Queue, playbackAccount);
             if (!wasCurrent) { Publish(); return; }
             if (selected == null) { StopPlayback(); return; }
             selected.MarkPlaying();
@@ -558,6 +568,7 @@ namespace Seeker.Playback
             if (previous != null) previousCleanup = Task.WhenAll(previousCleanup, previous.Stop());
             else { actualPlayer?.Pause(); actualPlayer?.Stop(); actualPlayer?.ClearMediaItems(); }
             Queue.Clear();
+            PlaybackRecovery.Forget();
             pending?.Set(null);
             Publish();
             StopSelf();
@@ -565,7 +576,7 @@ namespace Seeker.Playback
 
         public override void OnTaskRemoved(Intent rootIntent)
         {
-            if (!IsPlaybackOngoing) StopPlayback();
+            if (!IsPlaybackOngoing) { Shutdown(); StopSelf(); }
             base.OnTaskRemoved(rootIntent);
         }
 

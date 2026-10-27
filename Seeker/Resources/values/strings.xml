@@ -1,4 +1,4 @@
-<resources>
+﻿<resources>
     <string name="stream_play">Play</string>
     <string name="stream_play_folder">Play Folder</string>
     <string name="stream_play_from_here">Play From Here</string>
@@ -1039,4 +1039,7 @@
     <string name="keywords_edit_user_info">profile bio</string>
     <string name="keywords_restore_defaults">reset factory</string>
 
+    <string name="stream_saved_paused">Paused · Play starts from beginning</string>
+    <string name="stream_saved_queue">Saved queue — paused</string>
+    <string name="stream_saved_folder">Saved queue tracks only. Tap to refresh the full folder.</string>
 </resources>

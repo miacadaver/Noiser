@@ -34,7 +34,7 @@
             android:layout_height="1dp"
         />
         <androidx.recyclerview.widget.RecyclerView
-            android:layout_below="@id/recyclerViewHorizontalPathSep"
+            android:layout_below="@id/savedPlaybackFolderNotice"
             android:minWidth="25px"
             android:minHeight="25px"
             android:paddingBottom="120dp"
@@ -43,6 +43,20 @@
             android:layout_height="match_parent"
             android:id="@+id/listViewDirectories"
         />
+        <TextView
+            android:id="@+id/savedPlaybackFolderNotice"
+            android:layout_below="@id/recyclerViewHorizontalPathSep"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp"
+            android:padding="12dp"
+            android:background="?attr/surface_variant1"
+            android:foreground="?android:attr/selectableItemBackground"
+            android:textColor="?attr/mainTextColor"
+            android:text="@string/stream_saved_folder"
+            android:clickable="true"
+            android:focusable="true"
+            android:visibility="gone" />
         <LinearLayout
             android:id="@+id/noBrowseView"
             android:layout_width="wrap_content"

@@ -11,6 +11,7 @@ using Common.Playback;
 using Google.Common.Util.Concurrent;
 using MediaController = AndroidX.Media3.Session.MediaController;
 using Seeker.Helpers;
+using Seeker.Services;
 using Soulseek;
 using System;
 using System.Collections.Generic;
@@ -33,6 +34,7 @@ namespace Seeker.Playback
         private MediaController controller;
         private AndroidX.AppCompat.App.AlertDialog dialog;
         private AndroidX.AppCompat.App.AlertDialog queueDialog;
+        private AndroidX.AppCompat.App.AlertDialog savedQueueDialog;
         private ListView queueList;
         private QueueAdapter queueAdapter;
         private string queueSignature;
@@ -110,7 +112,12 @@ namespace Seeker.Playback
 
         public static void AddToQueue(FragmentActivity activity, string username, FullFileInfo file, bool playNext)
         {
-            activity.RunOnUiThread(() => StreamingPlaybackService.RequestAppend(activity, ToQueueEntry(username, file), playNext));
+            activity.RunOnUiThread(() =>
+            {
+                var entry = ToQueueEntry(username, file);
+                if (StreamingPlaybackService.Current?.Playback == null && PlaybackRecovery.Append(activity, entry, playNext)) return;
+                StreamingPlaybackService.RequestAppend(activity, entry, playNext);
+            });
         }
 
         private static PlaybackQueueEntry ToQueueEntry(string username, FullFileInfo file) =>
@@ -125,6 +132,7 @@ namespace Seeker.Playback
             if (attached) return;
             attached = true;
             StreamingPlaybackService.Changed += Update;
+            PlaybackRecovery.Changed += RecoveryChanged;
             Update();
         }
 
@@ -133,11 +141,14 @@ namespace Seeker.Playback
             if (!attached) return;
             attached = false;
             StreamingPlaybackService.Changed -= Update;
+            PlaybackRecovery.Changed -= RecoveryChanged;
             handler.RemoveCallbacks(tick);
             dialog?.Dismiss();
             dialog = null;
             queueDialog?.Dismiss();
             queueDialog = null;
+            savedQueueDialog?.Dismiss();
+            savedQueueDialog = null;
             queueList = null;
             queueAdapter = null;
             miniArtwork.SetImageResource(Resource.Drawable.stream_artwork_placeholder);
@@ -174,6 +185,7 @@ namespace Seeker.Playback
         private void TogglePause()
         {
             var snapshot = StreamingPlaybackService.Current?.Snapshot();
+            if (snapshot == null && PlaybackRecovery.Saved != null) { ResumeSavedQueue(); return; }
             if (snapshot == null || snapshot.Phase == PlaybackPhase.Error) return;
             if (snapshot.ShowPause) Controls?.Pause();
             else Controls?.Play();
@@ -184,12 +196,15 @@ namespace Seeker.Playback
             StreamingPlaybackService.CancelPending(pendingRequest);
             pendingRequest = null;
             Controls?.Stop();
+            if (StreamingPlaybackService.Current?.Playback == null) PlaybackRecovery.Forget();
             Update();
         }
 
         internal void ShowCurrent()
         {
             if (!attached || activity.IsFinishing || activity.IsDestroyed) return;
+            if (StreamingPlaybackService.Current?.Playback == null && pendingRequest == null && PlaybackRecovery.Saved != null)
+            { ShowSavedQueue(); return; }
             if (dialog?.IsShowing == true) return;
             View view = activity.LayoutInflater.Inflate(Resource.Layout.stream_playback, null);
             artwork = view.FindViewById<ImageView>(Resource.Id.streamArtwork);
@@ -267,6 +282,8 @@ namespace Seeker.Playback
             var service = StreamingPlaybackService.Current;
             if (service?.LastHandledRequestId == pendingRequest) pendingRequest = null;
             var snapshot = pendingRequest == null ? service?.Snapshot() : null;
+            if (snapshot != null || PlaybackRecovery.Saved == null)
+            { savedQueueDialog?.Dismiss(); savedQueueDialog = null; }
             if (controller != null && !controller.IsConnected)
             {
                 MediaController.ReleaseFuture(controllerFuture);
@@ -283,6 +300,20 @@ namespace Seeker.Playback
                 controller = null;
             }
             mini.Visibility = snapshot != null && !full ? ViewStates.Visible : ViewStates.Gone;
+            if (snapshot == null && pendingRequest == null && PlaybackRecovery.Saved is SavedPlaybackSession saved)
+            {
+                // An offline preview is not a player/session. No Connect(), timer, service,
+                // peer request, wake lock, or metadata publication is needed to show it.
+                var current = saved.Current.ToQueueEntry();
+                mini.Visibility = ViewStates.Visible;
+                miniArtwork.SetImageResource(Resource.Drawable.stream_artwork_placeholder);
+                miniTitle.Text = current.Metadata.Title;
+                miniArtist.SetText(Resource.String.stream_saved_paused);
+                miniArtist.Visibility = ViewStates.Visible;
+                miniPause.SetImageResource(Resource.Drawable.stream_play);
+                miniPause.ContentDescription = activity.GetString(Resource.String.stream_play);
+                miniPause.Enabled = true;
+            }
             if (snapshot == null)
             {
                 miniArtwork.SetImageResource(Resource.Drawable.stream_artwork_placeholder);
@@ -403,6 +434,52 @@ namespace Seeker.Playback
                 .SetNegativeButton(Resource.String.close, (_, __) => { }).Show();
             queueDialog.DismissEvent += (_, __) => { queueDialog = null; queueList = null; queueAdapter = null; queueRows = Array.Empty<PlaybackQueueEntry>(); queueSignature = null; };
             UpdateQueueDialog(service);
+        }
+
+        internal void RefreshRecoveredQueue() => Update();
+
+        private void RecoveryChanged() => activity.RunOnUiThread(Update);
+
+        private void ResumeSavedQueue()
+        {
+            var saved = PlaybackRecovery.Saved;
+            if (saved == null || !attached) return;
+            if (!Common.PreferencesState.CurrentlyLoggedIn)
+            {
+                SeekerApplication.Toaster.ShowToast(activity.GetString(Resource.String.must_be_logged_to_browse), ToastLength.Short);
+                return;
+            }
+            string selectedId = saved.CurrentId;
+            SessionService.Instance.RunWithReconnect(() =>
+            {
+                var latest = PlaybackRecovery.Saved;
+                if (!attached || activity.IsFinishing || activity.IsDestroyed || latest == null || latest.CurrentId != selectedId) return;
+                savedQueueDialog?.Dismiss();
+                savedQueueDialog = null;
+                ShowQueue(activity, latest.ToQueue().Entries, latest.CurrentId);
+            });
+        }
+
+        private void ShowSavedQueue()
+        {
+            if (savedQueueDialog?.IsShowing == true) return;
+            var saved = PlaybackRecovery.Saved;
+            if (saved == null) return;
+            var rows = saved.ToQueue().Entries.ToArray();
+            string[] labels = rows.Select(entry => entry.Metadata.Title
+                + (string.IsNullOrEmpty(entry.Metadata.Artist) ? "" : " · " + entry.Metadata.Artist)).ToArray();
+            savedQueueDialog = new Google.Android.Material.Dialog.MaterialAlertDialogBuilder(activity)
+                .SetTitle(Resource.String.stream_saved_queue)
+                .SetSingleChoiceItems(labels, Array.FindIndex(rows, entry => entry.Id == saved.CurrentId), (_, args) =>
+                {
+                    if (args.Which >= 0 && args.Which < rows.Length) PlaybackRecovery.Select(activity, rows[args.Which].Id);
+                })
+                .SetPositiveButton(Resource.String.stream_play, (_, __) => ResumeSavedQueue())
+                .SetNeutralButton(Resource.String.stream_queue_clear, (_, __) => PlaybackRecovery.Forget())
+                .SetNegativeButton(Resource.String.close, (_, __) => { }).Create();
+            var window = savedQueueDialog;
+            window.DismissEvent += (_, __) => { if (ReferenceEquals(savedQueueDialog, window)) savedQueueDialog = null; };
+            window.Show();
         }
 
         private PlaybackQueueEntry[] queueRows = Array.Empty<PlaybackQueueEntry>();
