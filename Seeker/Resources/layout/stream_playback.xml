@@ -4,9 +4,9 @@
     android:fillViewport="true" android:scrollbars="vertical">
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
         android:orientation="vertical" android:padding="16dp">
-        <ImageView android:id="@+id/streamArtwork" android:layout_width="72dp"
-            android:layout_height="72dp" android:layout_gravity="center_horizontal"
-            android:layout_marginBottom="8dp" android:scaleType="centerCrop"
+        <ImageView android:id="@+id/streamArtwork" android:layout_width="match_parent"
+            android:layout_height="@dimen/stream_player_artwork_height" android:layout_gravity="center_horizontal"
+            android:layout_marginBottom="16dp" android:scaleType="fitCenter"
             android:importantForAccessibility="no" android:src="@drawable/stream_artwork_placeholder" />
         <TextView android:id="@+id/streamArtist" android:textColor="?attr/normalTextColor" android:layout_width="match_parent"
             android:layout_height="wrap_content" android:textSize="16sp"
