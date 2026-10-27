@@ -1,10 +1,5 @@
-Bookmark folders you want to return to:
+Album covers are larger in the player: up to 220dp tall in portrait, with a shorter layout in landscape. Covers fit the available width without cropping.
 
-- Tap the star in Browse to save or unbookmark the current folder.
-- Open **Folder bookmarks** from the Browse toolbar, even before browsing a peer.
-- Tap a bookmark to open its folder. Use **Manage bookmarks** or hold a bookmark to rename or remove it.
-- You can also bookmark a folder from its long-press menu in Browse or the menu at the top of a search-result folder.
+The GitHub README is shorter, with direct installation links and the main features and limits.
 
-Bookmarks remember the peer and exact folder path, and stay saved when the app closes. You can view and manage them offline; loading current folder contents still requires login and the peer to be online.
-
-This update retains the player icons, paused queue recovery, and in-app updater. Install it over your current Noiser version; the package and signing key are unchanged.
+Install through **Settings → Check for updates**, or download Noiser.apk from this release. The package and signing key are unchanged.
