@@ -1,7 +1,10 @@
-Player controls now use icons for previous, play/pause, next, queue, repeat, autoplay, stop, and close. Long-press labels explain each icon, and repeat/autoplay show their current mode.
+Bookmark folders you want to return to:
 
-You can now open **Settings → Check for updates** to see release notes, download a newer Noiser APK, and open Android's installer. Downloads are verified before installation. Android may ask you to allow installs from Noiser the first time; return to Noiser and tap **Install update** after granting access.
+- Tap the star in Browse to save or unbookmark the current folder.
+- Open **Folder bookmarks** from the Browse toolbar, even before browsing a peer.
+- Tap a bookmark to open its folder. Use **Manage bookmarks** or hold a bookmark to rename or remove it.
+- You can also bookmark a folder from its long-press menu in Browse or the menu at the top of a search-result folder.
 
-Install this version manually once to get the updater. Future published versions can be downloaded inside Noiser. Checking, downloading, and installing updates remain your choice.
+Bookmarks remember the peer and exact folder path, and stay saved when the app closes. You can view and manage them offline; loading current folder contents still requires login and the peer to be online.
 
-The saved queue still returns paused; Play starts the selected song from the beginning.
+This update retains the player icons, paused queue recovery, and in-app updater. Install it over your current Noiser version; the package and signing key are unchanged.

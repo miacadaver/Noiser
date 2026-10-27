@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="bookmark_add">Bookmark this folder</string>
+    <string name="bookmark_unstar">Remove folder bookmark</string>
+    <string name="bookmark_list">Folder bookmarks</string>
+    <string name="bookmark_empty">No folders bookmarked yet. Open a folder in Browse and tap the star, or use Bookmark this folder in a folder’s menu.</string>
+    <string name="bookmark_manage">Manage bookmarks</string>
+    <string name="bookmark_open">Open folder</string>
+    <string name="bookmark_rename">Rename bookmark</string>
+    <string name="bookmark_remove">Remove bookmark</string>
+    <string name="bookmark_name">Bookmark name</string>
+    <string name="bookmark_root">Shared folders</string>
+    <string name="bookmark_added">Folder bookmarked</string>
+    <string name="bookmark_exists">This folder is already bookmarked</string>
+    <string name="bookmark_removed">Bookmark removed</string>
+    <string name="bookmark_bad_name">Use a name between 1 and 200 characters.</string>
+    <string name="bookmark_save_failed">Could not save this bookmark. Check available storage or remove unused bookmarks and try again.</string>
+</resources>

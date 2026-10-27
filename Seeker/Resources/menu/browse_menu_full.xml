@@ -108,4 +108,10 @@
 
         </menu>
     </item>
+    <item android:id="@+id/action_folder_bookmarks" android:title="@string/bookmark_list"
+        android:icon="@drawable/folder_bookmarks_list" app:iconTint="?attr/colorOnSurface"
+        app:showAsAction="ifRoom" />
+    <item android:id="@+id/action_bookmark_folder" android:title="@string/bookmark_add"
+        android:icon="@drawable/folder_bookmark_outline" app:iconTint="?attr/colorOnSurface"
+        app:showAsAction="always" />
 </menu>

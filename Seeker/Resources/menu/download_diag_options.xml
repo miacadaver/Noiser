@@ -19,4 +19,5 @@
         android:id="@+id/download_selected_as_queued"
         android:title="@string/QueueSelectedAsPaused"
     />
+    <item android:id="@+id/bookmark_search_folder" android:title="@string/bookmark_add" />
 </menu>

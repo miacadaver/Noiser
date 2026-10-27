@@ -12,6 +12,7 @@ Noiser's goal is a dependable Android Soulseek client with integrated playback. 
 - [x] Noiser app name, refreshed Seeker-derived bird, and Android icon variants.
 - [x] Noiser Mint light, dark, and AMOLED interface palettes matching the bird icon.
 - [x] APK and host-test workflows for `main` and pull requests.
+- [x] Folder bookmarks with saved peer/path, rename/remove, Browse and search-folder entry points.
 - [x] Icon-based player controls with state labels and accessibility descriptions.
 - [x] Manual in-app update checks, verified APK downloads, and Android installer handoff via GitHub Releases.
 

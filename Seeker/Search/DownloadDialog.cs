@@ -609,6 +609,12 @@ namespace Seeker
         {
             switch (item.ItemId)
             {
+                case Resource.Id.bookmark_search_folder:
+                    var bookmarkFile = SearchResponse?.GetFiles(PreferencesState.HideLockedResultsInSearch).FirstOrDefault();
+                    if (bookmarkFile != null)
+                        Seeker.Browse.FolderBookmarks.Add(Context, SearchResponse.Username,
+                            SimpleHelpers.GetDirectoryRequestFolderName(bookmarkFile.Filename));
+                    return true;
                 case Resource.Id.getFolderContents:
                     GetFolderContents();
                     return true;
