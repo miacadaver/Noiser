@@ -45,10 +45,12 @@ Search and Browse screenshots are inherited from upstream Seeker and show the sh
 
 ## Get Noiser
 
-1. Open [Android APK builds](https://github.com/miacadaver/Noiser/actions/workflows/android.yml) and choose the latest successful run on `main`.
-2. Download **Noiser-apk** from **Artifacts** and extract **Noiser.apk**. Downloading Actions artifacts requires a GitHub account; artifacts expire after 14 days.
-3. Install the APK on Android 6.0 or newer, allow installation from your browser/file manager if prompted, then sign in to Soulseek.
+1. Open the [latest Noiser release](https://github.com/miacadaver/Noiser/releases/latest) and download **Noiser.apk** from its assets. No GitHub account or ZIP extraction is needed.
+2. Install the APK on Android 6.0 or newer, allow installation from your browser/file manager if prompted, then sign in to Soulseek.
+3. For later releases, open **Settings → Check for updates** to download and install updates inside Noiser.
 4. Open a peer folder or the track list from a search result and tap **Play** beside an MP3.
+
+[Android APK builds](https://github.com/miacadaver/Noiser/actions/workflows/android.yml) also provide temporary artifacts for development and troubleshooting; those ZIPs require a GitHub account and expire after 14 days.
 
 The app appears as **Noiser**. Version **3.11.2-stream.13** keeps the working package ID `com.companyname.andriodapp1.rollback`, separate from upstream Seeker and the earlier original-package builds. Renaming the app does not migrate or clear settings. Updating an existing installation also requires a matching signing certificate; Main-branch CI APKs reuse a pinned development signing certificate; validation APKs from pull requests use disposable keys. See [development signing](docs/development-signing.md) for the one-time transition from older builds and key-backup instructions.
 
