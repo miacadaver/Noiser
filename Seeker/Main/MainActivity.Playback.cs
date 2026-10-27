@@ -1,4 +1,5 @@
 using Seeker.Playback;
+using Seeker.Helpers;
 using System;
 using Android.Content;
 using AndroidX.Lifecycle;
