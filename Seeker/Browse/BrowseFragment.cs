@@ -210,11 +210,29 @@ namespace Seeker
             {
                 upItem.SetVisible(!state.IsAtRoot());
             }
+            var bookmark = menu.FindItem(Resource.Id.action_bookmark_folder);
+            if (bookmark != null)
+            {
+                string path = state.GetCurrentDirectoryName();
+                bool available = state.HasResponse() && path != null;
+                bool saved = available && FolderBookmarks.Contains(Context, state.CurrentUsername, path);
+                bookmark.SetEnabled(available);
+                bookmark.SetTitle(saved ? Resource.String.bookmark_unstar : Resource.String.bookmark_add);
+                bookmark.SetIcon(saved ? Resource.Drawable.folder_bookmark_filled : Resource.Drawable.folder_bookmark_outline);
+            }
             base.OnPrepareOptionsMenu(menu);
         }
 
         public override bool OnOptionsItemSelected(IMenuItem item)
         {
+            if (item.ItemId == Resource.Id.action_folder_bookmarks)
+            { FolderBookmarks.Show(Context); return true; }
+            if (item.ItemId == Resource.Id.action_bookmark_folder)
+            {
+                string path = state.GetCurrentDirectoryName();
+                if (state.HasResponse() && path != null) FolderBookmarks.Toggle(Context, state.CurrentUsername, path);
+                return true;
+            }
             if (item.ItemId != Resource.Id.action_browse_user) //special handling (this browse user means browse user dialog).
             {
                 if (UiHelpers.HandleCommonContextMenuActions(item.TitleFormatted.ToString(), state.CurrentUsername, SeekerState.ActiveActivityRef, null))
@@ -1195,6 +1213,8 @@ namespace Seeker
 
         private void ShowFolderContextMenu(DataItem dataItem)
         {
+            string bookmarkUsername = state.CurrentUsername;
+            string bookmarkPath = dataItem.Directory.Name;
             var builder = new Google.Android.Material.Dialog.MaterialAlertDialogBuilder(this.Context);
             string[] items = new string[]
             {
@@ -1202,7 +1222,8 @@ namespace Seeker
                 SeekerApplication.GetString(Resource.String.QueueFolderAsPaused),
                 SeekerApplication.GetString(Resource.String.ShowFolderInfo),
                 SeekerApplication.GetString(Resource.String.CopyURL),
-                SeekerApplication.GetString(Resource.String.stream_play_folder)
+                SeekerApplication.GetString(Resource.String.stream_play_folder),
+                SeekerApplication.GetString(Resource.String.bookmark_add)
             };
             int[] icons = new int[]
             {
@@ -1210,7 +1231,8 @@ namespace Seeker
                 Resource.Drawable.paused,
                 Resource.Drawable.information_outline,
                 Resource.Drawable.link_variant,
-                Resource.Drawable.stream_play
+                Resource.Drawable.stream_play,
+                Resource.Drawable.folder_bookmark_outline
             };
 
             var tintColor = UiHelpers.GetColorFromAttribute(Context, Resource.Attribute.colorOnSurface, Context.Theme);
@@ -1238,6 +1260,9 @@ namespace Seeker
                         break;
                     case 4:
                         PlayFolder(dataItem);
+                        break;
+                    case 5:
+                        FolderBookmarks.Add(Context, bookmarkUsername, bookmarkPath);
                         break;
                 }
             };

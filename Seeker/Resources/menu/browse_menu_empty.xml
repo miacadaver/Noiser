@@ -9,4 +9,7 @@
         app:showAsAction="always"
         android:iconifiedByDefault="true"
     />
+    <item android:id="@+id/action_folder_bookmarks" android:title="@string/bookmark_list"
+        android:icon="@drawable/folder_bookmarks_list" app:iconTint="?attr/colorOnSurface"
+        app:showAsAction="ifRoom" />
 </menu>

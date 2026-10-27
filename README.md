@@ -20,6 +20,7 @@ Updates are available under **Settings → Check for updates** starting with `.1
 
 - **Play from search or Browse.** Start an MP3 without waiting for the entire file to download.
 - **Keep listening.** A mini-player, Android media notification, lock-screen controls, and headset play/pause share one playback session.
+- **Bookmark folders.** Star a peer folder and reopen it from Folder bookmarks; rename and manage saved addresses offline. [Bookmark details →](docs/folder-bookmarks.md)
 - **Build a listening queue.** Folder queues, Play next, Add to queue, Next/Previous, repeat, and autoplay.
 - **Return to your queue.** Reopen with the remembered song paused and an offline folder preview. Press Play to start from the beginning—no automatic playback. [Recovery details →](docs/queue-recovery.md)
 - **See the track behind the filename.** Embedded title, artist, album, and artwork when available; conservative title/artist fallbacks when tags are missing.
@@ -52,7 +53,7 @@ Search and Browse screenshots are inherited from upstream Seeker and show the sh
 
 [Android APK builds](https://github.com/miacadaver/Noiser/actions/workflows/android.yml) also provide temporary artifacts for development and troubleshooting; those ZIPs require a GitHub account and expire after 14 days.
 
-The app appears as **Noiser**. Version **3.11.2-stream.13** keeps the working package ID `com.companyname.andriodapp1.rollback`, separate from upstream Seeker and the earlier original-package builds. Renaming the app does not migrate or clear settings. Updating an existing installation also requires a matching signing certificate; Main-branch CI APKs reuse a pinned development signing certificate; validation APKs from pull requests use disposable keys. See [development signing](docs/development-signing.md) for the one-time transition from older builds and key-backup instructions.
+The app appears as **Noiser**. Version **3.11.2-stream.14** keeps the working package ID `com.companyname.andriodapp1.rollback`, separate from upstream Seeker and the earlier original-package builds. Renaming the app does not migrate or clear settings. Updating an existing installation also requires a matching signing certificate; Main-branch CI APKs reuse a pinned development signing certificate; validation APKs from pull requests use disposable keys. See [development signing](docs/development-signing.md) for the one-time transition from older builds and key-backup instructions.
 
 This is an **experimental development build**, not a Play Store release. The pre-branding rollback was confirmed to launch on a Samsung running Android 16; the refreshed build still needs device validation. The [known-working rollback APK](https://github.com/miacadaver/Noiser/actions/runs/40366644108/artifacts/12670202882) and its [baseline record](docs/validation/2026-10-26-full-background-rollback.md) remain available as historical references, subject to artifact expiry.
 
