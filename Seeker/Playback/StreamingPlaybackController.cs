@@ -308,9 +308,6 @@ namespace Seeker.Playback
             }
             if (snapshot != null) Connect();
             bool full = dialog?.IsShowing == true;
-            if (full)
-                foreach (var button in new[] { previous, pause, next, openQueue, repeat, autoplay })
-                    button.Alpha = button.Enabled ? 1f : 0.38f;
             UpdateQueueDialog(service);
             if (snapshot == null && pendingRequest == null && controllerFuture != null)
             {
@@ -417,6 +414,9 @@ namespace Seeker.Playback
                     }
                 }
             }
+            if (full)
+                foreach (var button in new[] { previous, pause, next, openQueue, repeat, autoplay })
+                    button.Alpha = button.Enabled ? 1f : 0.38f;
             // Position refresh exists only while this Activity is visible, never as a background poll.
             if (snapshot != null || pendingRequest != null) handler.PostDelayed(tick, 250);
         }
@@ -458,9 +458,6 @@ namespace Seeker.Playback
                 })
                 .SetNegativeButton(Resource.String.close, (_, __) => { }).Show();
             queueDialog.DismissEvent += (_, __) => { queueDialog = null; queueList = null; queueAdapter = null; queueRows = Array.Empty<PlaybackQueueEntry>(); queueSignature = null; };
-            if (full)
-                foreach (var button in new[] { previous, pause, next, openQueue, repeat, autoplay })
-                    button.Alpha = button.Enabled ? 1f : 0.38f;
             UpdateQueueDialog(service);
         }
 
