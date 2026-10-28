@@ -245,6 +245,21 @@ namespace Seeker.Settings.Rows
 
             // ============================== GENERAL ==============================
             rows.Add(new HeaderRow { Id = "h.general", TitleRes = Resource.String.section_general });
+            rows.Add(new ToggleRow
+            {
+                Id = "playback.preload_next",
+                TitleRes = Resource.String.stream_preload_next,
+                SubtitleRes = Resource.String.stream_preload_next_description,
+                IconRes = Resource.Drawable.stream_next,
+                Getter = () => PreferencesState.PreloadNextTrack,
+                Setter = value =>
+                {
+                    PreferencesState.PreloadNextTrack = value;
+                    PreferencesManager.SavePreloadNextTrack();
+                    Seeker.Playback.StreamingPlaybackService.Current?.RefreshPrefetchPreference();
+                },
+            });
+
 
             rows.Add(new ToggleRow
             {

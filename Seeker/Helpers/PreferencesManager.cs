@@ -160,6 +160,7 @@ namespace Seeker
 
         public static void RestoreMiscSettings(ISharedPreferences prefs)
         {
+            PreferencesState.PreloadNextTrack = prefs.GetBoolean(KeyConsts.M_PreloadNextTrack, false);
             PreferencesState.SharingOn = prefs.GetBoolean(KeyConsts.M_SharingOn, false);
             PreferencesState.UploadSpeed = prefs.GetInt(KeyConsts.M_UploadSpeed, -1);
             PreferencesState.AllowUploadsOnMetered = prefs.GetBoolean(KeyConsts.M_AllowUploadsOnMetered, true);
@@ -229,6 +230,16 @@ namespace Seeker
                 editor.PutInt(KeyConsts.M_SmartFilter_KeywordsOrder, PreferencesState.SmartFilterOptions.KeywordsOrder);
                 editor.PutInt(KeyConsts.M_SmartFilter_TypesOrder, PreferencesState.SmartFilterOptions.FileTypesOrder);
                 editor.PutInt(KeyConsts.M_SmartFilter_CountsOrder, PreferencesState.SmartFilterOptions.NumFilesOrder);
+                editor.Apply();
+            }
+        }
+
+        public static void SavePreloadNextTrack()
+        {
+            lock (SharedPrefLock)
+            {
+                var editor = SeekerState.SharedPreferences.Edit();
+                editor.PutBoolean(KeyConsts.M_PreloadNextTrack, PreferencesState.PreloadNextTrack);
                 editor.Apply();
             }
         }

@@ -7,6 +7,7 @@ Noiser's goal is a dependable Android Soulseek client with integrated playback. 
 - [x] MP3 playback while receiving a peer transfer, with temporary-cache cleanup.
 - [x] Search/Browse playback entry points, a mini-player, and Android media controls.
 - [x] Playback queues, repeat, autoplay, and seeking within parsed audio.
+- [x] Optional, bounded next-song preloading after the current download completes.
 - [x] Offline recovery of the queue/current song and remembered folder, paused; explicit Play starts from zero.
 - [x] Embedded tags/artwork and bounded metadata startup handling.
 - [x] Noiser app name, refreshed Seeker-derived bird, and Android icon variants.
@@ -56,7 +57,8 @@ Reduce static activity references and split large playback-related classes incre
 
 - [ ] Refine queue editing, error messages, and accessibility.
 - [ ] Review credential storage and backup behavior before broader distribution.
-- [ ] Investigate prefetching and additional audio formats against peer/network, cache, and battery costs.
+- [ ] Validate next-song preloading on a physical device, including screen-off transitions and cancellation.
+- [ ] Investigate additional audio formats against peer/network, cache, and battery costs.
 - [ ] Publish a short real-device demo and a clearly versioned installation guide.
 
 **Done when:** proposed capabilities have measured behavior, clear limits, and a device-tested implementation before being advertised as supported.
