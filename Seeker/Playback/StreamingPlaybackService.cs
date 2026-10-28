@@ -34,6 +34,9 @@ namespace Seeker.Playback
         private static readonly TimeSpan InitialMetadataWait = TimeSpan.FromMilliseconds(1500);
         private static readonly PlaybackRequestMailbox<PlayRequest> requests = new PlaybackRequestMailbox<PlayRequest>();
         private static readonly PlaybackAppendMailbox<AppendRequest> appendRequests = new PlaybackAppendMailbox<AppendRequest>();
+        // Service callbacks run on the main looper. A recreated service must also wait
+        // for the old instance's speculative transfer to release its file reservation.
+        private static Task abandonedPrefetchCleanup = Task.CompletedTask;
         private readonly Handler handler = new Handler(Looper.MainLooper);
         private IExoPlayer actualPlayer;
         private MediaSession session;
@@ -137,6 +140,7 @@ namespace Seeker.Playback
         public override void OnCreate()
         {
             base.OnCreate();
+            previousCleanup = Task.WhenAll(previousCleanup, abandonedPrefetchCleanup);
             actualPlayer = new ExoPlayerBuilder(ApplicationContext)
                 .SetLoadControl(new DefaultLoadControl.Builder().SetBufferDurationsMs(15000, 60000, 2000, 4000).Build())
                 .SetWakeMode(C.WakeModeLocal)
@@ -654,6 +658,7 @@ namespace Seeker.Playback
             destroyed = true;
             Common.PreferencesState.UsernameChanged -= PrefetchAccountChanged;
             prefetch?.Dispose();
+            abandonedPrefetchCleanup = Task.WhenAll(abandonedPrefetchCleanup, prefetch?.Cleanup ?? Task.CompletedTask);
             if (ReferenceEquals(Current, this)) Current = null;
             var previous = Playback;
             Playback = null;
