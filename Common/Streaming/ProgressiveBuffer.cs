@@ -97,6 +97,21 @@ namespace Common.Streaming
             }
         }
 
+        /// <summary>Transfer ownership of a finished file to a cache owner. No readers may be attached.</summary>
+        public string DetachCompletedFile()
+        {
+            lock (sync)
+            {
+                if (disposed) throw new ObjectDisposedException(nameof(ProgressiveBuffer));
+                if (!completed || failure != null || available != ExpectedLength)
+                    throw new InvalidOperationException("Only a successfully completed file can be retained.");
+                file.Dispose();
+                disposed = true;
+                Monitor.PulseAll(sync);
+                return FilePath;
+            }
+        }
+
         private void Write(byte[] bytes, int offset, int count)
         {
             lock (sync)

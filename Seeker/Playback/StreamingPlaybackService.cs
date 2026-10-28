@@ -34,6 +34,9 @@ namespace Seeker.Playback
         private static readonly TimeSpan InitialMetadataWait = TimeSpan.FromMilliseconds(1500);
         private static readonly PlaybackRequestMailbox<PlayRequest> requests = new PlaybackRequestMailbox<PlayRequest>();
         private static readonly PlaybackAppendMailbox<AppendRequest> appendRequests = new PlaybackAppendMailbox<AppendRequest>();
+        // Service callbacks run on the main looper. A recreated service must also wait
+        // for the old instance's speculative transfer to release its file reservation.
+        private static Task abandonedPrefetchCleanup = Task.CompletedTask;
         private readonly Handler handler = new Handler(Looper.MainLooper);
         private IExoPlayer actualPlayer;
         private MediaSession session;
@@ -45,6 +48,7 @@ namespace Seeker.Playback
         private bool destroyed;
         private ResolvableFuture pendingPlay;
         private string playbackAccount;
+        private NextTrackPrefetcher prefetch;
 
         internal static StreamingPlaybackService Current { get; private set; }
         internal static event Action Changed;
@@ -136,6 +140,7 @@ namespace Seeker.Playback
         public override void OnCreate()
         {
             base.OnCreate();
+            previousCleanup = Task.WhenAll(previousCleanup, abandonedPrefetchCleanup);
             actualPlayer = new ExoPlayerBuilder(ApplicationContext)
                 .SetLoadControl(new DefaultLoadControl.Builder().SetBufferDurationsMs(15000, 60000, 2000, 4000).Build())
                 .SetWakeMode(C.WakeModeLocal)
@@ -163,7 +168,56 @@ namespace Seeker.Playback
             AddSession(session);
             listener = new PlaybackListener(tracks => Playback?.ReadTracks(tracks), OnPlayerEvents);
             actualPlayer.AddListener(listener);
+            prefetch = new NextTrackPrefetcher(System.IO.Path.Combine(CacheDir.AbsolutePath, NextTrackPrefetcher.CacheFolder),
+                ReceivePrefetchAsync, () => RunOnMain(() => { if (!destroyed) Publish(); }));
+            Common.PreferencesState.UsernameChanged += PrefetchAccountChanged;
             Current = this;
+        }
+
+        private Task ReceivePrefetchAsync(PlaybackQueueEntry entry, Common.Streaming.ProgressiveBuffer buffer,
+            System.Threading.CancellationToken cancellation)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            if (!Common.PreferencesState.CurrentlyLoggedIn || playbackAccount != Common.PreferencesState.Username)
+                throw new InvalidOperationException("The playback account changed.");
+            var file = new FullFileInfo { FullFileName = entry.RemotePath, Size = entry.Size, Depth = 1,
+                wasFilenameLatin1Decoded = entry.WasFilenameLatin1Decoded, wasFolderLatin1Decoded = entry.WasFolderLatin1Decoded };
+            return Seeker.Services.DownloadService.Instance.StreamAsync(entry.Username, file, buffer, _ => { }, cancellation);
+        }
+
+        private void PrefetchAccountChanged(string _) => prefetch?.Cancel();
+
+        internal void RefreshPrefetchPreference() => RunOnMain(() =>
+        {
+            if (destroyed) return;
+            prefetch?.Cancel();
+            Publish();
+        });
+
+        private void UpdatePrefetch()
+        {
+            try
+            {
+                PlaybackQueueEntry candidate = null;
+                if (Common.PreferencesState.PreloadNextTrack && Common.PreferencesState.CurrentlyLoggedIn
+                    && playbackAccount == Common.PreferencesState.Username && Playback?.Failure == null
+                    && Playback?.HasBytes == true && !Playback.IsReceiving && Playback.Received >= Playback.FileInfo.Size
+                    && SessionPlayer.PlayWhenReady && actualPlayer.PlaybackState != NativePlayer.StateEnded)
+                {
+                    candidate = NextTrackPrefetcher.Next(Queue, RepeatMode, Autoplay);
+                    if (candidate != null)
+                    {
+                        var existing = TransferItems.TransferItemManagerDL?.GetTransferItemWithIndexFromAll(candidate.RemotePath, candidate.Username, out _);
+                        if (existing?.State.HasFlag(TransferStates.Succeeded) == true && !string.IsNullOrEmpty(existing.FinalUri)) candidate = null;
+                    }
+                }
+                prefetch?.Update(candidate, previousCleanup);
+            }
+            catch (Exception error)
+            {
+                prefetch?.Cancel();
+                Logger.Debug("Next-song preload skipped: " + error.GetType().Name);
+            }
         }
 
         public override MediaSession OnGetSession(MediaSession.ControllerInfo controllerInfo) => destroyed ? null : session;
@@ -292,6 +346,7 @@ namespace Seeker.Playback
             bool retainCurrent = Playback != null && Playback.Failure == null
                 && Playback.Username == selected.Username && Playback.FileInfo.FullFileName == selected.RemotePath;
             Queue = replacement;
+            if (playbackAccount != Common.PreferencesState.Username) prefetch?.Cancel();
             playbackAccount = Common.PreferencesState.Username;
             selected.MarkPlaying();
             PlaybackRecovery.Remember(this, Queue, playbackAccount);
@@ -314,10 +369,12 @@ namespace Seeker.Playback
             pendingPlay = null;
             var previous = Playback;
             Playback = null;
+            var cachedFile = prefetch?.Take(entry);
+            Task prefetchCleanup = prefetch?.Cancel() ?? Task.CompletedTask;
             Task cleanup = previous?.Stop() ?? Task.CompletedTask;
             // Include all prior cleanup. A local-file interlude has no transfer task of its own,
             // but must not let an earlier remote stream overlap the next remote request.
-            previousCleanup = Task.WhenAll(previousCleanup, cleanup);
+            previousCleanup = Task.WhenAll(previousCleanup, cleanup, prefetchCleanup);
             pending?.Set(null);
             var file = new FullFileInfo
             {
@@ -329,7 +386,7 @@ namespace Seeker.Playback
             };
             // Playback IDs are transition-specific even when the queue entry itself stays stable.
             Playback = new StreamingPlayback(this, actualPlayer, Guid.NewGuid().ToString("N"),
-                entry.Id, entry.Username, file, previousCleanup);
+                entry.Id, entry.Username, file, previousCleanup, cachedFile);
             Playback.Start(playWhenReady);
         }
 
@@ -531,6 +588,7 @@ namespace Seeker.Playback
                 pendingPlay = null;
                 pending.Set(null);
             }
+            UpdatePrefetch();
             UpdateTransferLocks();
             SessionPlayer?.Refresh();
             NotifyViews();
@@ -569,6 +627,7 @@ namespace Seeker.Playback
             else { actualPlayer?.Pause(); actualPlayer?.Stop(); actualPlayer?.ClearMediaItems(); }
             Queue.Clear();
             PlaybackRecovery.Forget();
+            prefetch?.Cancel();
             pending?.Set(null);
             Publish();
             StopSelf();
@@ -597,6 +656,9 @@ namespace Seeker.Playback
         {
             if (destroyed) return;
             destroyed = true;
+            Common.PreferencesState.UsernameChanged -= PrefetchAccountChanged;
+            prefetch?.Dispose();
+            abandonedPrefetchCleanup = Task.WhenAll(abandonedPrefetchCleanup, prefetch?.Cleanup ?? Task.CompletedTask);
             if (ReferenceEquals(Current, this)) Current = null;
             var previous = Playback;
             Playback = null;
@@ -617,7 +679,7 @@ namespace Seeker.Playback
 
         private void UpdateTransferLocks()
         {
-            if (Playback?.IsReceiving != true || Playback.Failure != null) { ReleaseTransferLocks(); return; }
+            if (Playback?.IsReceiving != true && prefetch?.IsReceiving != true) { ReleaseTransferLocks(); return; }
             if (transferCpuLock == null)
             {
                 transferCpuLock = ((PowerManager)GetSystemService(PowerService)).NewWakeLock(WakeLockFlags.Partial, "noiser:stream-transfer");

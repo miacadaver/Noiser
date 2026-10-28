@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="stream_preload_next">Preload next song</string>
+    <string name="stream_preload_next_description">With autoplay on, download one next song after the current download finishes. Uses extra data; skips songs over 32 MiB.</string>
+</resources>

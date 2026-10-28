@@ -41,7 +41,7 @@ cover a fully received track while it is playing. Late transfer events retain to
 
 - One active MP3/peer transfer at a time; remote files have a 256 MiB maximum advertised size.
   Folder queues select tracks sequentially. Seeking is limited to extracted audio in the received
-  prefix; remote ranges and prefetching are not supported.
+  prefix; remote ranges are not supported. Optional [next-song preloading](next-song-preloading.md) starts only after the current download completes.
 - ExoPlayer starts with approximately two seconds of decoded audio buffered; it may read further ahead.
   Starting does not depend on the complete file arriving. Leading ID3 tags can increase startup time.
 - A waiting peer gets up to three minutes before an empty-buffer read times out. Once bytes have arrived,
@@ -72,7 +72,7 @@ Queue identities and the current song are checkpointed privately and restored of
 
 Autoplay is enabled by default. Repeat cycles Off, All, One; selecting All or One enables autoplay,
 and disabling autoplay returns repeat to Off. Repeat One replays the current buffer; Repeat All wraps
-the queue. There is no prefetch, so advancing to another remote song may require queue/connection time.
+the queue. Optional next-song preloading reuses a completed temporary file; otherwise advancing to another remote song still requires normal queue/connection time.
 An error remains visible until the user selects another track or stops; failures are not auto-skipped.
 
 The same queue is exposed through MediaSession for supported external Next/Previous and track-selection

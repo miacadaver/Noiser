@@ -1,5 +1,5 @@
-Larger album covers in the player, with the full image visible. The layout adjusts in landscape.
+Optional next-song preloading is available under **Settings → General → Preload next song**. It is off by default.
 
-The GitHub README is shorter and gives Seeker clear credit.
+With Autoplay on, Noiser waits until the current song has finished downloading, then downloads the next queued song. A completed file plays from cache; otherwise playback falls back to normal streaming after cancelling preloading.
 
-Update from **Settings → Check for updates**, or download Noiser.apk from this release.
+Files over 32 MiB are skipped. This uses extra data and cannot guarantee seamless transitions when peers are busy or offline.

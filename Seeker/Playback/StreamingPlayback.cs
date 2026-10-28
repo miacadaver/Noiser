@@ -32,6 +32,7 @@ namespace Seeker.Playback
         private ProgressiveBuffer buffer;
         private ProgressiveDataSource.Factory dataSourceFactory;
         private Task transferTask = Task.CompletedTask;
+        private PrefetchedTrackFile prefetchedFile;
         private bool resourcesClosed;
         private bool stopped;
         private volatile bool readableLocalFile;
@@ -104,11 +105,12 @@ namespace Seeker.Playback
         }
 
         public StreamingPlayback(StreamingPlaybackService owner, IExoPlayer player, string id,
-            string queueEntryId, string username, FullFileInfo file, Task predecessor)
+            string queueEntryId, string username, FullFileInfo file, Task predecessor, PrefetchedTrackFile prefetchedFile = null)
         {
             this.owner = owner;
             this.player = player;
             this.predecessor = predecessor;
+            this.prefetchedFile = prefetchedFile;
             Id = id;
             QueueEntryId = queueEntryId;
             Username = username;
@@ -124,6 +126,12 @@ namespace Seeker.Playback
                 var existing = TransferItems.TransferItemManagerDL?.GetTransferItemWithIndexFromAll(FileInfo.FullFileName, Username, out _);
                 string localUri = existing?.State.HasFlag(TransferStates.Succeeded) == true ? existing.FinalUri : null;
                 if (!string.IsNullOrEmpty(localUri) && CanRead(localUri))
+                {
+                    prefetchedFile?.Dispose();
+                    prefetchedFile = null;
+                }
+                else localUri = PrefetchedUri();
+                if (!string.IsNullOrEmpty(localUri))
                 {
                     var source = new ProgressiveMediaSource.Factory(
                         new AndroidX.Media3.DataSource.DefaultDataSource.Factory(owner.ApplicationContext),
@@ -156,6 +164,22 @@ namespace Seeker.Playback
                 else owner.SessionPlayer.Pause();
             }
             catch (Exception exception) { Fail(exception.Message); }
+        }
+
+        private string PrefetchedUri()
+        {
+            if (prefetchedFile == null) return null;
+            try
+            {
+                if (File.Exists(prefetchedFile.FilePath) && new System.IO.FileInfo(prefetchedFile.FilePath).Length == FileInfo.Size)
+                {
+                    string uri = Android.Net.Uri.FromFile(new Java.IO.File(prefetchedFile.FilePath)).ToString();
+                    if (CanRead(uri)) return uri;
+                }
+            }
+            catch (Exception error) when (error is IOException || error is UnauthorizedAccessException) { }
+            prefetchedFile.Dispose(); prefetchedFile = null;
+            return null;
         }
 
         private bool CanRead(string uri)
@@ -333,6 +357,8 @@ namespace Seeker.Playback
                 try { ownedBuffer?.Dispose(); }
                 catch (Exception exception) when (exception is IOException || exception is UnauthorizedAccessException)
                 { Logger.Debug("Stream cache cleanup: " + exception.Message); }
+                prefetchedFile?.Dispose();
+                prefetchedFile = null;
                 cancellation.Dispose();
             }, TaskScheduler.Default);
         }
@@ -340,6 +366,7 @@ namespace Seeker.Playback
         public static void CleanAbandonedCache(string cacheDirectory)
         {
             string directory = Path.Combine(cacheDirectory, "mp3-streams");
+            NextTrackPrefetcher.CleanAbandonedCache(cacheDirectory);
             if (!Directory.Exists(directory)) return;
             foreach (string path in Directory.EnumerateFiles(directory, "*.part"))
             {

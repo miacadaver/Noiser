@@ -1,8 +1,8 @@
 # Background playback, MediaSession, and mini-player
 
-The manifest reports version **3.11.2-stream.11** (Android version code 154), with the Noiser label and refreshed bird artwork. Minimum Android API is 23;
+The manifest reports version **3.11.2-stream.16** (Android version code 159), with the Noiser label and refreshed bird artwork. Minimum Android API is 23;
 target API is 36. There is one ExoPlayer, one MediaSession, and at most one active peer stream.
-The current code includes MP3 folder queues, repeat/autoplay controls, and bounded seeking.
+The current code includes MP3 folder queues, repeat/autoplay controls, and bounded seeking. Optional [next-song preloading](next-song-preloading.md) waits until the current download finishes before using the transfer path for the next song.
 Automatic playback resumption after process death and direct scrobbling are not implemented. [Offline queue recovery](queue-recovery.md) remembers the queue/current song and restores them paused; explicit Play starts from zero.
 
 ## Ownership and data flow

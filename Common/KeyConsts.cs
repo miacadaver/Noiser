@@ -76,6 +76,7 @@ namespace Common
         public const string M_AutoJoinRooms_Legacy = "Cache_JoinedRooms";
         public const string M_AutoJoinRooms = "Cache_JoinedRooms_v2";
         public const string M_AllowPrivateRooomInvitations = "Momento_AllowPrivateRoomInvitations";
+        public const string M_PreloadNextTrack = "Noiser_PreloadNextTrack";
         public const string M_ServiceOnStartup = "Momento_ServiceOnStartup";
         public const string M_NoSubfolderForSingle = "Momento_NoSubfolderForSingle";
         public const string M_ShowSmartFilters = "Momento_ShowSmartFilters";
