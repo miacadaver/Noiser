@@ -1,5 +1,5 @@
-Optional next-song preloading is available under **Settings → General → Preload next song**. It is off by default.
+The full **Now playing** screen now has an **Open folder** button. It opens the current song’s source folder in Browse while music continues playing. The button follows the current song when the queue advances.
 
-With Autoplay on, Noiser waits until the current song has finished downloading, then downloads the next queued song. A completed file plays from cache; otherwise playback falls back to normal streaming after cancelling preloading.
+Browsing uses the source peer’s shared files, so you must be logged in and the peer must be reachable. It does not open a local downloads folder or change your playback queue.
 
-Files over 32 MiB are skipped. This uses extra data and cannot guarantee seamless transitions when peers are busy or offline.
+Optional next-song preloading remains available under **Settings → General → Preload next song** and is off by default.

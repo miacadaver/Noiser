@@ -20,6 +20,7 @@
     <string name="stream_queue_error">\nCould not play: %1$s</string>
     <string name="stream_queue_empty">This folder has no playable MP3 files.</string>
     <string name="stream_player">Now playing</string>
+    <string name="stream_open_folder">Open folder</string>
     <string name="stream_open_player">Open player</string>
     <string name="stream_notification_channel">Music playback</string>
     <string name="stream_stopped">Playback stopped</string>

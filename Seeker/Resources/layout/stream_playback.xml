@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent" android:layout_height="wrap_content"
     android:fillViewport="true" android:scrollbars="vertical">
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
@@ -19,6 +20,12 @@
             android:accessibilityLiveRegion="polite" />
         <TextView android:id="@+id/streamProgress" android:textColor="?attr/cellTextColorSubdued" android:layout_width="match_parent"
             android:layout_height="wrap_content" android:layout_marginTop="8dp" />
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/streamOpenFolder" style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:minHeight="48dp" android:text="@string/stream_open_folder"
+            android:textAllCaps="false" android:enabled="false"
+            app:icon="@drawable/folder_outline" app:iconGravity="textStart" />
         <SeekBar android:id="@+id/streamSeekBar" android:layout_width="match_parent"
             android:layout_height="wrap_content" android:max="1000" android:enabled="false"
             android:progressTint="?attr/colorPrimary" android:thumbTint="?attr/colorPrimary"

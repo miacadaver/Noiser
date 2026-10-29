@@ -11,6 +11,7 @@ using Common.Playback;
 using Google.Common.Util.Concurrent;
 using MediaController = AndroidX.Media3.Session.MediaController;
 using Seeker.Helpers;
+using Seeker.Browse;
 using Seeker.Services;
 using Soulseek;
 using System;
@@ -49,6 +50,7 @@ namespace Seeker.Playback
         private ImageButton previous;
         private ImageButton next;
         private ImageButton openQueue;
+        private Button openFolder;
         private ImageButton repeat;
         private ImageButton autoplay;
         private bool attached;
@@ -247,6 +249,8 @@ namespace Seeker.Playback
             next.Click += (_, __) => Controls?.SeekToNextMediaItem();
             openQueue = view.FindViewById<ImageButton>(Resource.Id.streamQueue);
             openQueue.Click += (_, __) => ShowQueueDialog();
+            openFolder = view.FindViewById<Button>(Resource.Id.streamOpenFolder);
+            openFolder.Click += (_, __) => OpenCurrentFolder();
             repeat = view.FindViewById<ImageButton>(Resource.Id.streamRepeat);
             repeat.Click += (_, __) => StreamingPlaybackService.Current?.CycleRepeatMode();
             autoplay = view.FindViewById<ImageButton>(Resource.Id.streamAutoplay);
@@ -342,6 +346,7 @@ namespace Seeker.Playback
                     status.SetText(pendingRequest != null ? Resource.String.stream_connecting : Resource.String.stream_stopped);
                     pause.Enabled = false;
                     previous.Enabled = next.Enabled = openQueue.Enabled = false;
+                    openFolder.Enabled = false;
                     repeat.Enabled = autoplay.Enabled = false;
                     seekBar.Enabled = false;
                     seekBar.Progress = 0;
@@ -379,6 +384,7 @@ namespace Seeker.Playback
                     previous.Enabled = service?.CanSkipPrevious == true && Controls != null;
                     next.Enabled = service?.CanSkipNext == true && Controls != null;
                     openQueue.Enabled = service?.Queue.CurrentIndex >= 0;
+                    openFolder.Enabled = service?.Queue.Current != null;
                     repeat.Enabled = autoplay.Enabled = Controls != null;
                     SetPlayerIcon(repeat, snapshot.RepeatMode switch
                     {
@@ -419,6 +425,24 @@ namespace Seeker.Playback
                     button.Alpha = button.Enabled ? 1f : 0.38f;
             // Position refresh exists only while this Activity is visible, never as a background poll.
             if (snapshot != null || pendingRequest != null) handler.PostDelayed(tick, 250);
+        }
+
+        private void OpenCurrentFolder()
+        {
+            if (!attached || activity.IsFinishing || activity.IsDestroyed) return;
+            // Read the current source at click time: the queue may have advanced while the player was open.
+            var entry = StreamingPlaybackService.Current?.Queue.Current;
+            if (entry == null) return;
+            if (!Common.PreferencesState.CurrentlyLoggedIn)
+            {
+                SeekerApplication.Toaster.ShowToast(activity.GetString(Resource.String.must_be_logged_to_browse), ToastLength.Short);
+                return;
+            }
+            string folder = SavedPlaybackSession.FolderOf(entry.RemotePath);
+            // Dismissing the player only minimizes its UI; browsing must never stop or replace the queue.
+            dialog?.Dismiss();
+            activity.FindViewById<AndroidX.ViewPager2.Widget.ViewPager2>(Resource.Id.pager)?.SetCurrentItem(3, true);
+            BrowseService.RequestFilesApi(entry.Username, folder.Length == 0 ? null : folder);
         }
 
         private void ShowQueueDialog()
